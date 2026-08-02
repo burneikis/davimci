@@ -608,6 +608,31 @@ Testing:
 - Snapshot tests on a textual dump of the view state, shared as the golden
   input for every frontend's rendering tests.
 
+Status: complete. The crate holds every decision a frontend would otherwise
+make for itself: zoom, scroll-follow, ruler ticks, the mode line, what an
+`Outcome` says in the status line, and the meaning of a key. A frontend polls
+events, reports its size, and draws a `ViewState` - `davimci-app` never sees a
+window and does no I/O, so all of it is unit-testable with no display.
+
+Amendments made during implementation:
+
+- A "column" is deliberately unitless: a GUI pixel or a TUI cell, whichever
+  the frontend measures in. That is what lets one `Viewport` serve both, and
+  it is why `Surface` carries `columns`/`rows` rather than pixels.
+- `davimci-keys` reports `:` as an ordinary mode change to `COMMAND`, not as
+  `Outcome::EnterCommandMode`, so the app watches `ModeChanged` and hands the
+  keyboard over on that. Owning the `:` line stays a frontend job; deciding
+  what the line *means* stays the host's.
+- Spec §15 is new: the status-line format for every mode, the scroll-follow
+  and zoom-anchoring rules, and the fact that zoom has no default keybinding
+  (spec §11 defines none, so it is pointer/menu driven and `App::zoom_*` is
+  the entry point).
+- `Host` is the seam for the three things the editor core deliberately does
+  not own - `:` commands (`davimci-cli`), transport (the backend clock), and
+  Lua callbacks (`davimci-lua`) - so `davimci-app` depends on none of them.
+- `davimci-headless` was filled in here rather than in 9d: it is a `Frontend`
+  that records view dumps, which is what the parity test compares.
+
 ---
 
 ## Phase 9b - Video Presenter (`davimci-present`)
@@ -636,6 +661,36 @@ Testing:
   produces identical video pixels - proves the paths have not diverged.
 - Detached-window focus behavior is a manual checklist item (i3, floating).
 
+Status: pacing, fitting, composition and overlays complete; the windowed host
+is not written yet.
+
+What exists is the whole decision layer: `Pacer` (drop-late / repeat-on-starve
+with counters, tested against `MockBackend` for in-step, fast, starved and
+jittery sources), `letterbox` (integral, centred, float-free, matrix-tested),
+`Presenter` (nearest-neighbour composition into an RGBA surface plus an
+overlay model), and `HeadlessPresenter`. The host-parity test is real and
+passes: `Embedded` and `Detached` produce byte-identical video pixels, and the
+only permitted difference is that `Detached` describes no overlay.
+
+Amendments made during implementation:
+
+- Composition is software and integral rather than `wgpu`-first. That is what
+  makes the parity and pacing tests byte-exact assertions instead of
+  tolerance-based image diffs, and it fixes the pixels a future GPU upload
+  path must *reproduce* rather than redefine. `winit`/`wgpu` surface creation
+  is therefore deferred to the windowed shell (9c), not to a second video
+  path.
+- The presenter describes overlays, it does not rasterise text: a timecode is
+  a string and safe areas are rectangles, drawn by the host's own text stack.
+  Rasterising here would give the GUI and the TUI two different-looking
+  timecodes for the same frame. Spec §15.5 says so now, along with the
+  drop/repeat policy and the drop-frame-free timecode format.
+- Scale selection is one-directional (`auto_scale` never decodes below what is
+  drawn), so a small window is cheap without being soft.
+
+Not yet wired: no window is created, and `PresentError::Pull` has no
+production caller until a frontend drives playback.
+
 ---
 
 ## Phase 9c - GUI Frontend (`davimci-gui`) - primary
@@ -658,6 +713,42 @@ Testing:
   tokens, including modifiers and `<Left>`/`<Right>`.
 - Golden view-state reuse: renders are driven by the Phase 9a fixtures, so a
   view-state regression fails in both `davimci-app` and here.
+
+Status: the frontend's decision layer is complete and tested; the `winit` +
+`wgpu` + `egui` window that rasterises it is not written yet.
+
+Implemented: `Layout` (video pane, ruler, track lanes and headers, status and
+command lines, derived from window size with a documented priority order),
+`paint` (a `ViewState` plus a layout to a `DrawList` of typed rectangles and
+text runs - no colours, so a theme cannot move anything), key translation,
+the `:` line with history and longest-common-prefix completion, the media
+picker for `i`/`a`/`r`, and INSERT-mode subtitle editing. `Gui` implements
+`davimci_app::Frontend` and routes modal input, so a modal owns the keyboard
+and the key grammar never sees those keystrokes.
+
+Amendments made during implementation:
+
+- The raw key model is davimci's own (`RawKey` + `Modifiers`), not `winit`'s,
+  so translation is testable with no window and the same table can serve a
+  terminal adapter. Shells fill in a `RawKey`; they may not decide what a key
+  means.
+- Painting is split from windowing because that is where a rendering
+  regression actually lives. The draw-list summary is the snapshot, and the
+  golden view states from 9a drive it, so a view-state change fails in
+  `davimci-app` and here - the reuse plan.md asked for, without a GPU in the
+  test suite.
+- Modal behaviour needed defining rather than inventing: spec §15.3/§15.4 now
+  say that Esc or backspacing over the `:` cancels the line, that Tab
+  completes to the longest common prefix, how the picker filters and wraps,
+  and that an INSERT-mode edit ending equal to the original text commits
+  nothing (so it never enters the undo log).
+- A two-way parity test already runs (GUI vs headless: same script, identical
+  view dumps); it becomes the three-way test of 9d when the TUI lands.
+
+Not yet wired: no window, so nothing calls `Gui::set_chrome` with a real
+presenter surface, clicks are translated to columns but not yet to a seek,
+and the picker/subtitle modals have no production opener - `i`/`a`/`r` still
+report `NotImplemented` from `davimci-keys`.
 
 ---
 

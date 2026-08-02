@@ -12,15 +12,24 @@ remappable keys, and hookable events.
 
 <!-- Keep this current. It must never claim more than the code does. -->
 
-**Phase 8 complete - the project lifecycle.** Phase 8b (export presets and
-`:render`) is next. Workspace builds; `just test` and `just lint` are green,
-and `just fixtures && just test-slow` passes against generated media, now
-including real decode, preview, and export through MLT.
+**Phases 9a-9c landed: the view state, the video presenter, and the GUI's
+decision layer.** What is *not* there yet is a window: no `winit`/`wgpu`
+surface and no `egui` shell, so the editor still cannot be used
+interactively. Phase 8b (export presets and `:render`) and the windowed shell
+are next. Workspace builds; `just test` and `just lint` are green, and
+`just fixtures && just test-slow` passes against generated media, including
+real decode, preview, and export through MLT.
 
-The binary now does something: `davimci <project>` opens a project, offers
-crash recovery if an autosave survived, and runs `:` commands passed with
-`-c`. There is still no frontend (see plan.md milestone M1), so editing is
-not yet interactive. The backend can project a timeline, seek frame-exactly,
+Everything a frontend would otherwise decide now lives above the frontends:
+`davimci-app` owns zoom, scroll-follow, ruler ticks, the mode line and the
+event loop; `davimci-present` owns pacing, letterboxing and composition for
+both hosts; `davimci-gui` owns layout, painting, key translation and the
+modals. A scripted session already runs through two frontends (GUI and
+headless) and produces identical view state.
+
+The binary still does not open a window: `davimci <project>` opens a project,
+offers crash recovery if an autosave survived, and runs `:` commands passed
+with `-c`. The backend can project a timeline, seek frame-exactly,
 pull frames, play audio, and encode a file, and a config file can bind keys,
 define motions and export presets, and hook events - but only a test drives
 any of it.
@@ -79,14 +88,28 @@ it is linked dynamically, since davimci is GPL-3.0 over LGPL-2.1 MLT.
 | Multiple open timelines with global registers and marks | implemented, tested |
 | Autosave of the command log to `.davimci/autosave/`, crash recovery on reopen | implemented, tested |
 | `:relink` for offline media, as one undoable command | implemented, tested |
-| Export presets, `:render` (Phase 8b), frontends | not started |
+| View state: viewport, zoom anchoring, scroll-follow, ruler ticks, mode line | implemented, tested |
+| App loop: `Frontend` trait, key dispatch, messages, job progress, `Host` seam | implemented, tested |
+| Golden view-state fixtures, reused by every frontend's rendering tests | implemented, tested |
+| Headless frontend: scripted events in, view dumps out | implemented, tested |
+| Frame pacing: drop-late, repeat-on-starve, counters, jitter-tested | implemented, tested |
+| Letterbox fit and RGBA composition, integral and float-free | implemented, tested |
+| Host parity: `Embedded` and `Detached` produce identical video pixels | implemented, tested |
+| Overlay model: timecode string, safe-area rects, embedded host only | implemented, tested |
+| GUI layout and painting: panes, lanes, clips, ticks, playhead, selection | implemented, tested |
+| GUI input translation: window keys to `davimci-keys` tokens | implemented, tested |
+| `:` line: history, longest-common-prefix completion, cancel rules | implemented, tested |
+| Media picker and INSERT-mode subtitle editing (state, not widgets) | implemented, tested |
+| Windowed shell: `winit` + `wgpu` surface, `egui` chrome | not started |
+| Export presets, `:render` (Phase 8b), TUI frontend (9d) | not started |
 | Everything else | placeholder crates |
 
 Caveats worth knowing: undo history is not persisted - reopening a project
 starts a fresh tree from the saved state - and `ac` resolves to the same range
 as `ic` until transitions land in Phase 9f. In `davimci-keys`: `i`/`a`/`r` need
 the media picker that comes with the GUI in Phase 9c and report
-`NotImplemented`; `gx`/`dax` wait on Phase 9f transitions the same way; `<`/`>`
+`NotImplemented` - the picker exists as state but has no production opener
+until the window does; `gx`/`dax` wait on Phase 9f transitions the same way; `<`/`>`
 jump-point edge trims are parsed but not yet wired to a command; visual-mode
 track-object narrowing (typing `it`/`at` while a selection is live) is not
 implemented - operators in a `VISUAL*` mode act on the whole selection.
@@ -103,6 +126,13 @@ In `davimci-cli`: the lifecycle is complete but the binary is a driver, not an
 editor - it has no keymap and no display, so `-c` is the only input. `:analyze`
 is in spec §12 but belongs to Phase 9e and is not accepted yet, and a recovered
 autosave replays into a fresh undo tree, since history is still not persisted.
+
+In `davimci-present` and `davimci-gui`: composition is software and integral
+on purpose, so the parity and pacing tests are byte-exact rather than
+tolerance-based, and a future GPU path must reproduce these pixels rather
+than redefine them. No window is created, so nothing drives playback, clicks
+translate to timeline columns but not yet to seeks, and the media
+picker/subtitle modals have no opener.
 
 In `davimci-mlt`: transitions are not projected until Phase 9f, and export
 presets arrive in Phase 8b (`RenderSettings` is currently filled in by hand).

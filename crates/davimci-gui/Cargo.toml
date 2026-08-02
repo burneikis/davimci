@@ -13,6 +13,14 @@ workspace = true
 [dependencies]
 davimci-app.workspace = true
 davimci-present.workspace = true
+davimci-core.workspace = true
+davimci-keys.workspace = true
+
+[dev-dependencies]
+davimci-app = { workspace = true, features = ["testing"] }
+davimci-cmd.workspace = true
+davimci-core = { workspace = true, features = ["testing"] }
+davimci-headless.workspace = true
 
 [features]
 slow-tests = []

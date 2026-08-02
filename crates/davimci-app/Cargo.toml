@@ -10,8 +10,16 @@ repository.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Golden view-state fixtures, shared with the frontends' rendering tests.
+testing = []
+
 [dependencies]
-davimci-core.workspace = true
+davimci-core = { workspace = true, features = ["testing"] }
 davimci-cmd.workspace = true
 davimci-keys.workspace = true
+davimci-motion.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

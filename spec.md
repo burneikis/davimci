@@ -705,3 +705,61 @@ Deliberately coarse; the only hard requirement:
 - Predicate motions are indexed lookups and must not scan (§10.2).
 
 Anything beyond this is measured before it is optimized.
+
+---
+
+## 15. Frontend Behaviour
+
+The editor's view state is defined once and every frontend renders it; no
+frontend decides any of the following for itself.
+
+### 15.1 Status line
+
+`-- MODE (scope) --`, where scope is the focused track's name in `NORMAL`,
+`INSERT` and `COMMAND`, and the comma-joined list of selected tracks in a
+`VISUAL*` mode - e.g. `-- VISUAL (V1,A2) --` (§2). A running background job,
+an active macro recording, and the most recent message follow it, in that
+order.
+
+### 15.2 Viewport
+
+- One zoom level per timeline; it drives the jump-point set (§3.2) *and* the
+  horizontal scale, so `h`/`l` and the ruler can never disagree.
+- **Scroll-follow:** after any motion, the playhead and the focused track are
+  visible. Following the playhead outranks staying inside the timeline, since
+  the playhead may legally sit at the timeline's end.
+- **Zoom anchors on the playhead:** the playhead keeps its screen column
+  across a zoom step.
+- Zoom has no default keybinding; it is driven by the pointer or a menu.
+
+### 15.3 Command line
+
+- `:` opens it and the frontend owns the keyboard until it is submitted or
+  cancelled. Esc cancels; backspacing over the leading `:` also cancels.
+- History is per session, deduplicated only against the immediately previous
+  entry, browsed with Up/Down.
+- Tab completes the word under the cursor to the *longest common prefix* of
+  the matches, and never guesses between two commands.
+
+### 15.4 Media picker and text editing
+
+- `i` / `a` / `r` open a media picker. It filters case-insensitively on the
+  entry name, wraps at both ends, and descends into directories. The picker
+  reads nothing itself: entries come from the host.
+- INSERT mode on a subtitle clip edits text in a buffer. Esc commits it as an
+  ordinary undoable command; an edit that ends equal to the original text
+  commits nothing at all.
+
+### 15.5 Video preview
+
+- Audio is the master clock. Video is fitted to it: a decoded frame older than
+  the clock is **dropped**, and a tick with nothing ready **repeats** the last
+  frame rather than going black.
+- The image is letterboxed - never stretched, never cropped - and centred on
+  integral pixel boundaries.
+- Overlays (timecode, safe areas) exist only in the embedded host. The
+  detached preview window used with a terminal frontend is bare, undecorated
+  and non-focusable, so the terminal keeps keyboard focus.
+- Timecode is `HH:MM:SS:FF` at the timeline's nominal rate; there is no
+  drop-frame representation, because the model is whole frames at one rate
+  (§7.1).

@@ -91,6 +91,8 @@ dependencies = [
  "davimci-cmd",
  "davimci-core",
  "davimci-keys",
+ "davimci-motion",
+ "proptest",
  "thiserror",
 ]
 
@@ -145,6 +147,10 @@ name = "davimci-gui"
 version = "0.0.0"
 dependencies = [
  "davimci-app",
+ "davimci-cmd",
+ "davimci-core",
+ "davimci-headless",
+ "davimci-keys",
  "davimci-present",
 ]
 
@@ -153,6 +159,9 @@ name = "davimci-headless"
 version = "0.0.0"
 dependencies = [
  "davimci-app",
+ "davimci-cmd",
+ "davimci-core",
+ "davimci-keys",
 ]
 
 [[package]]
