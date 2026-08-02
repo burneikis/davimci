@@ -28,9 +28,6 @@ pub struct Window {
     /// Size of the video pane last frame, so the presenter is resized only
     /// when it actually changed.
     video_size: Resolution,
-    /// Where the video landed inside the pane, decided in `logic` and drawn
-    /// in `ui`.
-    quad: Option<VideoQuad>,
 }
 
 impl std::fmt::Debug for Window {
@@ -56,7 +53,6 @@ impl Window {
                 width: 0,
                 height: 0,
             },
-            quad: None,
         }
     }
 
@@ -164,8 +160,6 @@ impl eframe::App for Window {
             picker: None,
         });
 
-        self.quad = quad;
-
         let view = self.app.view();
         if let Err(e) = self.gui.render(&view) {
             self.app.notify(davimci_app::Message::error(e.to_string()));
@@ -188,14 +182,14 @@ impl eframe::App for Window {
             egui_shell::draw(list, ui, screen.min);
         }
         let layout = self.gui.layout();
-        if let (Some(tex), Some(q)) = (&self.texture, self.quad) {
+        // The texture is the whole composited surface - letterbox bars
+        // included - so it is drawn over the whole video pane. Drawing it
+        // into the quad would letterbox a second time and squash the
+        // picture into the middle of its own bars.
+        if let (Some(tex), Some(p)) = (&self.texture, self.editor.presentation()) {
             let rect = egui::Rect::from_min_size(
-                screen.min
-                    + egui::Vec2::new(
-                        layout.video.x as f32 + q.x as f32,
-                        layout.video.y as f32 + q.y as f32,
-                    ),
-                egui::Vec2::new(q.width as f32, q.height as f32),
+                screen.min + egui::Vec2::new(layout.video.x as f32, layout.video.y as f32),
+                egui::Vec2::new(p.surface.width as f32, p.surface.height as f32),
             );
             egui_shell::draw_video(ui, rect, tex);
         }
