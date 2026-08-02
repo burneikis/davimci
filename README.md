@@ -14,7 +14,7 @@ remappable keys, and hookable events.
 
 **Phase 9a-9c complete: davimci opens a window and edits video.** Keys drive
 the command layer, edits reproject the MLT graph, motions seek and present,
-`<Space><Space>`/`J`/`K`/`L` play and shuttle, and the timeline is painted
+`<Space><Space>`/`H`/`L` play and shuttle, and the timeline is painted
 from the shared view state. This is the first build that can be used by
 pointing it at a file, though it is a prototype, not a product: see M3 in
 plan.md for what still separates the two. Phase 8b (export presets and `:render`) and the windowed shell
@@ -147,7 +147,7 @@ is in spec §12 but belongs to Phase 9e and is not accepted yet, and a recovered
 autosave replays into a fresh undo tree, since history is still not persisted.
 
 In `davimci-cli`: shuttle is a stepped scrub rather than varispeed, because
-`RenderBackend` has no rate control - `J`/`L` stop audio and step the
+`RenderBackend` has no rate control - `H`/`L` stop audio and step the
 playhead. `<Space>l` (loop selection) is refused with a message, since the
 selection is not on the `Host` seam yet. Running a `:` command clones the
 session to hand it between the app and the workspace.

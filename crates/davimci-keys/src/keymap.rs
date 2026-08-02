@@ -215,9 +215,11 @@ pub fn default_bindings() -> Vec<(Vec<Key>, LeafAction)> {
         (k("dax"), standalone(Action::DeleteTransition)),
         // -- transport (§3.2.1) --
         (k("<Space><Space>"), standalone(Action::PlayPause)),
-        (k("J"), standalone(Action::Shuttle { forward: false })),
+        (k("H"), standalone(Action::Shuttle { forward: false })),
         (k("L"), standalone(Action::Shuttle { forward: true })),
-        (k("K"), standalone(Action::ShuttleStop)),
+        // No default stop binding: shuttling the opposite way decelerates
+        // through zero, and `<Space><Space>` stops outright. `ShuttleStop`
+        // stays available for users who want a dedicated key (spec §3.2.1).
         (k("<Space>p"), standalone(Action::PreviewAndReturn)),
         (k("<Space>l"), standalone(Action::LoopSelection)),
         // -- zoom (§11, §15.2) --

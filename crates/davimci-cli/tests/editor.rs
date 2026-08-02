@@ -151,7 +151,7 @@ fn space_space_starts_playback_and_the_playhead_follows_the_clock() {
 }
 
 #[test]
-fn shuttle_keys_step_the_playhead_and_k_stops() {
+fn shuttle_keys_step_the_playhead_and_space_stops() {
     let (mut app, mut editor) = editor();
     feed(&mut app, &mut editor, "L");
     assert_eq!(editor.transport_state(), TransportState::Shuttling(1));
@@ -162,7 +162,7 @@ fn shuttle_keys_step_the_playhead_and_k_stops() {
         app.session().timeline().playhead().frame,
         davimci_core::Frame(3)
     );
-    feed(&mut app, &mut editor, "K");
+    feed(&mut app, &mut editor, "  ");
     assert_eq!(editor.transport_state(), TransportState::Stopped);
     let held = app.session().timeline().playhead().frame;
     app.event(Event::Tick, &mut editor);

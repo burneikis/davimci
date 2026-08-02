@@ -68,7 +68,10 @@ impl Transport {
         scale: PreviewScale,
     ) -> Result<String, String> {
         match self.state {
-            TransportState::Playing => {
+            // A shuttle is motion too, so play/pause stops it. With no
+            // default stop key (spec §3.2.1) this is the way out of a
+            // shuttle other than decelerating through zero.
+            TransportState::Playing | TransportState::Shuttling(_) => {
                 self.stop(backend, session)?;
                 Ok("paused".into())
             }
@@ -96,10 +99,10 @@ impl Transport {
         Ok("previewing".into())
     }
 
-    /// `J` / `L`: step the shuttle rate one notch, doubling each press.
+    /// `H` / `L`: step the shuttle rate one notch, doubling each press.
     ///
     /// Reversing direction goes through 1x rather than jumping to the mirror
-    /// rate, so `J` out of a fast forward shuttle slows down first, as in
+    /// rate, so `H` out of a fast forward shuttle slows down first, as in
     /// every NLE.
     pub fn shuttle(
         &mut self,
@@ -127,7 +130,8 @@ impl Transport {
         Ok(format!("shuttle {rate:+}x"))
     }
 
-    /// `K`: stop everything, leaving the playhead where it is.
+    /// Stop everything, leaving the playhead where it is. Unbound by
+    /// default; available for users who map a dedicated stop key.
     pub fn shuttle_stop(
         &mut self,
         backend: &mut dyn RenderBackend,
@@ -416,6 +420,19 @@ mod tests {
         let r2 = t2.tick(&mut b, &mut p, &s, PreviewScale::Full);
         assert_eq!(r2.playhead, Some(Frame::ZERO));
         assert!(r2.stopped);
+    }
+
+    #[test]
+    fn play_pause_stops_a_shuttle() {
+        // With no default stop binding, `<Space><Space>` must be a way out
+        // of a shuttle rather than starting playback from it.
+        let (mut b, _) = parts();
+        let s = session();
+        let mut t = Transport::new();
+        t.shuttle(true, &mut b, &s).unwrap();
+        t.shuttle(true, &mut b, &s).unwrap();
+        t.play_pause(&mut b, &s, PreviewScale::Full).unwrap();
+        assert_eq!(t.state(), TransportState::Stopped);
     }
 
     #[test]

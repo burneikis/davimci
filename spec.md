@@ -76,13 +76,19 @@ is also the easiest to reach without spending a dedicated key.
 | Key | Action |
 |---|---|
 | `<Space><Space>` | Play / pause toggle |
-| `L` / `J` | Shuttle forward / backward; press repeatedly to increase speed (1x, 2x, 4x, 8x) |
-| `K` | Stop shuttle (return to 1x paused) |
+| `L` / `H` | Shuttle forward / backward; press repeatedly to increase speed (1x, 2x, 4x, 8x); pressing the opposite key decelerates through 1x before reversing |
 | `<Space>p` | Play from playhead, return playhead to origin on stop (preview-and-return) |
 | `<Space>l` | Loop the current selection (or current clip in NORMAL) |
 
-Uppercase `J`/`K`/`L` are deliberately the JKL shuttle familiar from other
-NLEs; lowercase `j`/`k`/`l` keep their vim meanings (track focus, jump points).
+Shuttle is `H`/`L` rather than the JKL of other NLEs: the fingers are already
+on `h`/`l` for frame motion, so the shifted pair is the same gesture at speed.
+Lowercase `h`/`j`/`k`/`l` keep their vim meanings (frame/jump motion, track
+focus).
+
+There is **no default stop binding**. A shuttle is left either by decelerating
+through zero with the opposite key or by `<Space><Space>`, which stops motion
+of any kind. The `shuttle_stop` action exists and is remappable (e.g. to `K`)
+for users who want a dedicated key, but no key is spent on it by default.
 
 On stop, the playhead **commits** to its current position by default
 (`<Space>p` is the explicit return-to-origin variant). Configurable:
@@ -93,6 +99,9 @@ require("davimci.transport").configure({
   play_pause = "<Space><Space>",   -- or e.g. "<C-Space>"
   on_stop = "commit",              -- or "return"
   shuttle_speeds = { 1, 2, 4, 8 },
+  shuttle_back = "H",
+  shuttle_forward = "L",
+  shuttle_stop = nil,              -- unbound by default; e.g. "K"
 })
 ```
 
@@ -631,7 +640,7 @@ The project, config directory, Lua module namespace, and project-local file all 
 | `ma`/`` `a `` | set / jump to mark |
 | `q`/`@` | record / replay macro |
 | `<Space><Space>` | play / pause |
-| `J`/`K`/`L` | shuttle back / stop / shuttle forward |
+| `H`/`L` | shuttle back / shuttle forward (stop is unbound; `<Space><Space>`) |
 | `t`/`<`/`>`/`T` | ripple trim / trim edge / slip |
 | `f` + motion | audio fade |
 | `+`/`-` | gain adjust |

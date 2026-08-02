@@ -242,7 +242,7 @@ Deliverables:
 - Input grammar: `[count] [register] operator [count] motion|textobject`,
   plus standalone commands, `g`-prefixed sequences, and `<Space>` leader
   sequences (spec §3.2.1).
-- Transport bindings: `<Space><Space>` play/pause, `J`/`K`/`L` shuttle,
+- Transport bindings: `<Space><Space>` play/pause, `H`/`L` shuttle (no default stop key),
   `<Space>p` preview-and-return, `<Space>l` loop selection. Transport dispatches
   to the backend clock, **not** through the undo log - playback is not an edit.
 - Modes: NORMAL, VISUAL, VISUAL-LINE, VISUAL-BLOCK, INSERT, COMMAND, with a
