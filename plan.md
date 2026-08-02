@@ -11,13 +11,26 @@ the ordering; phases are ordered by dependency only.
 | Concern | Choice | Rationale |
 |---|---|---|
 | Core language | Rust | Memory safety around the MLT C API, strong enum/pattern modelling for modes/commands, good test tooling. |
-| Lua runtime | `mlua` (LuaJIT or Lua 5.4) | Sandboxable, mature, maps cleanly to the `require("vimci.*")` namespace. |
+| Lua runtime | `mlua` with **vendored Lua 5.4** (not system Lua) | System Lua on Arch is 5.5, which `mlua` does not support. Vendoring pins the version and makes builds reproducible. LuaJIT is a build-time alternative. |
 | Render backend | `libmlt` via a hand-written `-sys` crate + safe wrapper | Per spec §10.1. |
 | Media probing | `ffprobe`/`libavformat` through MLT producers where possible | Avoid a second demux stack. |
 | Video presentation | `winit` + `wgpu` textured quad, frames pulled from MLT, audio clock as master | A terminal cannot present real-time video; MLT's own `sdl2` consumer owns its window and can't be composited with our overlays. |
 | Primary UI | Single-window GUI: `egui`-on-`wgpu` chrome + custom-painted timeline, sharing the surface with the video quad | Keyboard-first is an input grammar, not a pixel backend. One window, one focus, overlays on the video. |
 | Secondary UI | Optional TUI (`ratatui`) in the terminal + a detached, non-focusable video window | Reuses the same presenter crate; useful over SSH-with-display, tiling setups, and as an early checkpoint. |
 | Serialization | `serde` + a versioned on-disk format (JSON for the project, binary for analysis cache) | Human-diffable projects, compact caches. |
+| Errors | `thiserror` in libraries, `anyhow` only at the binary edge | Typed errors are required by the recovery policy in Phase 0. |
+| License | GPL-3.0, dynamically linking LGPL-2.1 `libmlt` | Per spec §13. Never static-link MLT; never vendor `melt`. |
+
+### Build prerequisites (Arch)
+
+```sh
+sudo pacman -S --needed mlt ffmpeg clang rust vulkan-swrast
+```
+
+`mlt` ships its headers in the main package, so no separate `-dev` package is
+needed. `vulkan-swrast` (lavapipe) is only required to run presenter/GUI
+snapshot tests without a GPU. Verified present on a stock Arch install:
+`ffmpeg`, `ffprobe`, `cargo`, `rustc`, `clippy`, `rustfmt`, `clang`.
 
 Workspace layout:
 
@@ -79,18 +92,58 @@ divergent core changes, it gets cut rather than accommodated.
 
 ---
 
+## Phase 0 - Error Handling & Recovery Strategy
+
+Decided before any code, because it dictates function signatures everywhere and
+is miserable to retrofit.
+
+**Four error classes, each with a fixed policy:**
+
+| Class | Example | Policy |
+|---|---|---|
+| **User error** | Trim past a clip's handles, transition without enough frames, bad `:command` | Reject the command *before* it mutates. Status-line message. Never enters the undo log. |
+| **Missing/offline media** | Source file moved between sessions | Project still opens. Clips flagged `Offline`, render as a placeholder, editing allowed. `:relink` fixes. Export refuses while any clip is offline. |
+| **Recoverable runtime** | Decode failure on one frame, analysis job crash, Lua callback throws | Degrade locally: black frame, mark analysis `Failed`, disable the offending Lua handler for the session. Log, notify, keep editing. |
+| **Corruption / bug** | Failed invariant, deserialization failure, backend panic | Do not continue on a corrupt timeline. Flush the autosave log, report, exit cleanly. The Phase 2 snapshot bounds the loss. |
+
+**Rules this imposes:**
+
+1. `Command::apply` is **validate-then-mutate**: all checks run first, so a
+   rejected command leaves the timeline byte-identical. This is what makes the
+   undo log trustworthy.
+2. No `unwrap`/`panic` in library crates outside invariant assertions - enforced
+   by a clippy lint at deny level.
+3. FFI boundaries catch panics (`catch_unwind`) so a C-side fault cannot unwind
+   through Rust.
+4. Every error carries user-facing text; no raw `Debug` output reaches the
+   status line.
+
+Testing:
+- Each error class gets a fault-injection test proving the policy holds.
+- Property test: a rejected command never modifies the timeline.
+- Offline-media test: move a fixture file, reopen, assert the project loads,
+  edits work, and export fails with the specific offline error.
+
+---
+
 ## Phase 1 - Timeline Model Core (`vimci-core`)
 
 Deliverables:
 - `Timeline`, `Track` (video/audio/text/overlay), `Clip`, `Segment`, `Marker`,
   `Mark`, `Register`, `Playhead` (frame position + focused track).
-- Frame-based time type (`Frame(u64)` + project framerate) - no floats in the
-  model, all rational conversion at the edges.
+- Frame-based time type (`Frame(u64)` + single project framerate per spec §7.1)
+  - no floats in the model, all rational conversion at the edges.
+- Timeline properties (fps, resolution, sample rate) as project-level state,
+  with the conform rules that every clip is validated against.
+- Clip properties: gain, fades, transform, and link group - stored on the clip,
+  applied as render-time filters, never destructive.
 - Per-clip linkage groups (spec §5), with link/unlink operations.
 - Primitive operations, pure and backend-free: `split_at`, `ripple_delete`,
-  `lift`, `insert`, `overwrite`, `yank`, `paste`, `move_clip`, `trim_edge`.
+  `lift`, `insert`, `overwrite`, `yank`, `paste`, `move_clip`, plus the full
+  trim family (`ripple_trim`, `roll`, `slip`, `slide`) from spec §4.0.1.
 - Invariants: no overlapping clips within a track; ripple preserves total
-  ordering; group ops keep linked clips frame-aligned.
+  ordering; group ops keep linked clips frame-aligned; every clip duration is a
+  whole number of timeline frames.
 
 Testing:
 - Unit tests per primitive with hand-built fixture timelines.
@@ -162,7 +215,11 @@ Testing:
 
 Deliverables:
 - Input grammar: `[count] [register] operator [count] motion|textobject`,
-  plus standalone commands and `g`-prefixed sequences.
+  plus standalone commands, `g`-prefixed sequences, and `<Space>` leader
+  sequences (spec §3.2.1).
+- Transport bindings: `<Space><Space>` play/pause, `J`/`K`/`L` shuttle,
+  `<Space>p` preview-and-return, `<Space>l` loop selection. Transport dispatches
+  to the backend clock, **not** through the undo log - playback is not an edit.
 - Modes: NORMAL, VISUAL, VISUAL-LINE, VISUAL-BLOCK, INSERT, COMMAND, with a
   strict transition table and `ModeChanged` events.
 - Pending-input state with timeout for ambiguous prefixes (`g`, `d`, counts).
@@ -183,11 +240,15 @@ Testing:
 
 ---
 
-## Phase 5 - Media Import & Analysis (`vimci-analysis`)
+## Phase 5 - Media Import, Conform & Analysis (`vimci-analysis`)
 
 Deliverables:
 - Import pipeline: probe container, expose every audio and subtitle stream in
   an MKV as its own track (spec §7).
+- **Conform stage (spec §7.1):** framerate retime, resolution scale with
+  letterbox/crop policy, audio resample - so everything downstream sees a
+  single-rate, single-resolution timeline. Project fps/resolution defaults from
+  the first import.
 - Background job runner with progress reporting to the status line, and
   cancellation on project close.
 - Analysis pass: peak + RMS at a 10 ms hop, silence spans, optional
@@ -205,6 +266,11 @@ Testing:
   one hop of ground truth; peak detection must find the exact tone frames.
 - Multi-track import: assert track count, per-track stream mapping, and
   subtitle text extraction.
+- Conform matrix test: import 23.976 / 25 / 30 / 60 fps and 720p / 1080p / 4K /
+  anamorphic fixtures into a 1080p60 timeline; assert exact whole-frame
+  durations, correct scaling, and no cumulative drift over a long clip.
+- Re-conform test: change `timeline.fps` with clips present, assert it is a
+  single undoable command that restores exactly on undo.
 - Cache tests: hit, miss, version-bump invalidation, and corrupted-cache
   recovery (must recompute, never panic).
 - Proxy tests: threshold rule selects correctly per resolution/codec matrix;
@@ -279,7 +345,26 @@ Testing:
 
 ---
 
-## Phase 8 - Export (`vimci-export` within `vimci-cli`)
+## Phase 8 - Project Lifecycle (`vimci-cli`)
+
+Deliverables (spec §12):
+- `:w`, `:q`, `:q!`, `:wq`, `:e`, `:new`, `:ls`, `:bn`/`:bp`/`:b <n>`.
+- Multiple open timelines with global registers and marks shared across them.
+- Continuous autosave of the command log to `.vimci/autosave/`, never touching
+  the project file; crash recovery prompt on next open.
+- `:relink` for offline media (Phase 0 policy).
+
+Testing:
+- Save/load round-trip: byte-identical timeline state after reload.
+- Dirty-state tests: `:q` refuses with unsaved changes, `:q!` discards.
+- Cross-timeline yank/paste test.
+- Crash-recovery test: kill the process mid-session, reopen, assert the log
+  replays to the exact pre-kill state.
+- Format-migration test: load a project written by an older schema version.
+
+---
+
+## Phase 8b - Export (`vimci-export` within `vimci-cli`)
 
 Deliverables:
 - Preset registry (built-in + Lua-defined), validation with clear errors.
@@ -398,13 +483,56 @@ Testing:
 
 ---
 
+## Phase 9e - Audio Operations (`vimci-core` + `vimci-mlt`)
+
+Deferred to here deliberately (spec §6.1): these are clip properties applied as
+render-time filters, so they need the backend and a UI to be worth having.
+
+Deliverables:
+- Track mute (`<Space>m`) and solo (`<Space>s`).
+- Clip/selection gain (`+`/`-`, `:gain`), `:normalize`, `:duck`.
+- Fades (`f` + motion, `:fade`) with shape options.
+- Waveform display on audio tracks, reusing the Phase 5 analysis data.
+- Analysis-cache invalidation when gain or fades change.
+
+Testing:
+- Property tests that gain/fade are non-destructive and exactly invertible.
+- Render-and-measure: apply a known gain, render, assert measured RMS matches
+  the target within tolerance.
+- Fade shape verification by sampling the rendered envelope.
+- Solo/mute matrix test across multi-track fixtures.
+- Cache-invalidation test: change gain, assert predicate motions report stale
+  until `:analyze` re-runs.
+
+---
+
+## Phase 9f - Transitions (`vimci-core` + `vimci-mlt`)
+
+Deliverables (spec §6.2):
+- Transition objects occupying a clip overlap; `gx`, `:transition`, `dax`.
+- Handle-frame validation with a clear failure when handles are insufficient
+  (Phase 0 user-error class - reject before mutating).
+- Mapping onto MLT transitions; Lua-extensible registry.
+- Makes the `ac` text object (spec §4.1) fully meaningful.
+
+Testing:
+- Handle-availability tests: sufficient, insufficient, and exactly-enough.
+- `ac` object test: assert it now spans clip + transition.
+- Ripple-with-transition tests: deleting a neighbour resolves the transition
+  sanely rather than orphaning it.
+- Golden MLT XML projection for each transition type.
+
+---
+
 ## Phase 10 - Integration & Hardening
 
 Deliverables:
 - Headless scripted-session runner: a file of keystrokes plus assertions,
   usable as both a test format and a debugging tool.
 - Crash recovery: autosave of the command log; recover on next open.
-- Performance baselines on a large project (hundreds of clips, several tracks).
+- Performance validation against spec §14: **1080p60 playback and editing must
+  be smooth**; split/ripple/undo instant on a few hundred clips; predicate
+  motions never scan. Coarse targets, measured before any optimization.
 
 Testing:
 - Full-workflow integration tests mirroring spec §1: import multi-track MKV ->
@@ -463,15 +591,16 @@ Standing rules:
 |---|---|
 | M1 | Headless: load a fixture timeline, move playhead, split, ripple delete, undo - all via keys, verified by snapshot tests. No window code exists yet. |
 | M2 | Import a multi-track MKV; frames pull from MLT into `vimci-present` and play in sync with audio in a bare window. No editing UI - proves the video path. |
-| M3 | GUI: timeline + video in one window, scrub with jump points, full cut workflow, export a multi-audio MKV with a working preset. **This is the first genuinely usable build.** |
+| M3 | GUI: timeline + video in one window, playback and shuttle, scrub with jump points, trim, full cut workflow, save/load, export a multi-audio MKV. **This is the first genuinely usable build.** |
 | M4 | Lua config fully wired: custom motions, text objects, keymaps, hooks, export presets. |
-| M5 | Overlays and subtitle tracks editable and exportable (burn-in and sidecar). |
-| M6 | Optional TUI frontend behind `--features tui`, passing cross-frontend parity. Cut without regret if it is not thin. |
-| M7 | Hardened: soak-tested, benchmarked, crash recovery, documented default keymap. |
+| M5 | Audio operations: mute, solo, gain, fades, waveforms - completing workflow step 3. |
+| M6 | Overlays, subtitle tracks, and transitions editable and exportable. |
+| M7 | Optional TUI frontend behind `--features tui`, passing cross-frontend parity. Cut without regret if it is not thin. |
+| M8 | Hardened: soak-tested, 1080p60 validated, crash recovery, documented default keymap. |
 
-The ordering rule: **nothing before M3 is a product.** M6 is deliberately
-after export, Lua, and subtitles - the TUI is a convenience, and shipping it
-early would mean maintaining two frontends through every core change.
+The ordering rule: **nothing before M3 is a product.** M7 is deliberately
+last-but-one - the TUI is a convenience, and shipping it early would mean
+maintaining two frontends through every core change.
 Correspondingly, `vimci-app` and `vimci-present` are built with two hosts in
 mind from the start (cheap), but only one host is *implemented* until M6
 (avoids the three-implementations trap).
@@ -488,5 +617,7 @@ mind from the start (cheap), but only one host is *implemented* until M6
   primary path.
 - Custom subtitle layout engine vs. MLT built-in producers (spec §10.6).
 - Beat detection as a jump-point source.
+- Advanced audio: EQ, compression, noise reduction beyond `:duck`.
+- Video effects/filters beyond transform and transitions.
 - ML-based scene detection hook.
 - Plugin distribution/package manager.

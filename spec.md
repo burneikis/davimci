@@ -58,6 +58,38 @@ Mode is shown in a status line near the playhead (e.g. `-- VISUAL (V1,A2) --`).
 - Configurable: `jump_point_density`, and whether jump points snap to
   (clip bounds | markers | beat-detected audio peaks | silence boundaries).
 
+### 3.2.1 Transport / playback
+
+Playback is a first-class mode-independent action, not a motion. `<Space>` is
+the **leader** key; pressing it twice is play/pause, so the most common action
+is also the easiest to reach without spending a dedicated key.
+
+| Key | Action |
+|---|---|
+| `<Space><Space>` | Play / pause toggle |
+| `L` / `J` | Shuttle forward / backward; press repeatedly to increase speed (1x, 2x, 4x, 8x) |
+| `K` | Stop shuttle (return to 1x paused) |
+| `<Space>p` | Play from playhead, return playhead to origin on stop (preview-and-return) |
+| `<Space>l` | Loop the current selection (or current clip in NORMAL) |
+
+Uppercase `J`/`K`/`L` are deliberately the JKL shuttle familiar from other
+NLEs; lowercase `j`/`k`/`l` keep their vim meanings (track focus, jump points).
+
+On stop, the playhead **commits** to its current position by default
+(`<Space>p` is the explicit return-to-origin variant). Configurable:
+
+```lua
+require("vimci.transport").configure({
+  leader = "<Space>",
+  play_pause = "<Space><Space>",   -- or e.g. "<C-Space>"
+  on_stop = "commit",              -- or "return"
+  shuttle_speeds = { 1, 2, 4, 8 },
+})
+```
+
+All transport keys are remappable like any other binding. A user who wants
+`<Space>` bare as play/pause simply loses it as leader and remaps.
+
 ### 3.3 Clip/edit-point motions
 
 | Key | Action |
@@ -118,6 +150,23 @@ Core verbs the user called out as most important: **move playhead, split at play
 | `.` | Repeat last edit verb (e.g. repeat a ripple-delete pattern across many cuts) |
 | `q<reg>` / `@<reg>` | Record / replay macro |
 
+### 4.0.1 Trim verbs
+
+Trimming adjusts clip edges without splitting. The edge under consideration is
+the one nearest the playhead on the current track unless a scope object says
+otherwise.
+
+| Key | Action |
+|---|---|
+| `t` + motion | **Ripple trim** the nearest edge to the motion target (later clips shift) |
+| `gt` + motion | **Roll** edit: move the cut point, both adjacent clips absorb the change, total duration unchanged |
+| `<` / `>` | Trim edge left / right by one jump point (count-prefixed) |
+| `T` | Slip: shift a clip's source in/out points without moving it on the timeline |
+| `gT` | Slide: move a clip along the timeline, adjacent clips absorb the change |
+
+Note this reassigns `gt`/`gT` from §3.3's track cycling; track cycling moves to
+`]t` / `[t` to free the more valuable trim bindings.
+
 ### 4.1 `dW`-style scoping (the user's shorthand)
 
 Interpreting the user's `dW ig?` shorthand: the intent is ripple-delete with a
@@ -169,9 +218,76 @@ Within visual mode:
 
 ---
 
+## 6.1 Audio Operations
+
+Audio is workflow step 3 and needs verbs beyond deletion - most "remove the
+talking" cases are better served by muting or ducking than by cutting.
+
+| Key / command | Action |
+|---|---|
+| `<Space>m` | Toggle mute on current track |
+| `<Space>s` | Toggle solo on current track |
+| `+` / `-` | Adjust gain on current clip or selection by a step (default 1 dB, count-prefixed) |
+| `:gain <db>` | Set absolute gain on the current clip/selection |
+| `:normalize [target_db]` | Normalize selection to a target loudness |
+| `f` + motion | **Fade** across the motion range (fade in if at clip head, out if at tail) |
+| `:fade in\|out <ms>` | Explicit fade with a duration |
+| `:duck <track> <db>` | Duck this track wherever another track is above a threshold |
+
+Gain and fades are **clip properties**, not destructive edits - they are stored
+on the clip, apply as filters at render time, and are undoable like any other
+command. Because they change the audio, they invalidate the analysis cache for
+that clip and require a re-run of `:analyze` for accurate predicate motions
+(spec §10.2).
+
+## 6.2 Transitions
+
+Transitions occupy the overlap between two adjacent clips and are what `ac`
+("a clip including its adjoining transition") refers to.
+
+| Key / command | Action |
+|---|---|
+| `gx` | Create a default transition at the nearest cut (default: 12-frame crossfade / dissolve) |
+| `:transition <name> [duration]` | Create a named transition at the nearest cut |
+| `dax` | Delete the transition at the nearest cut |
+| `:set transition.duration <frames>` | Adjust the transition under the playhead |
+
+Creating a transition consumes handle frames from both clips; if either clip
+lacks sufficient handles, the operation fails with a clear error rather than
+silently shortening the result. Transition types are extensible from Lua and
+map onto MLT transitions.
+
+---
+
 ## 7. File Format & Export Support
 
 - **Import**: MKV as first-class citizen (multi-track audio and multi-subtitle streams inside a single MKV must be exposed as separate audio/text tracks on import, individually editable). Also support common containers (MP4, MOV, WebM) via the same import pipeline (likely FFmpeg-based demuxing).
+### 7.1 Timeline normalization (single framerate and resolution)
+
+**The timeline has exactly one framerate and one resolution.** They are fixed
+when the project is created (defaulting to the first imported clip's
+properties, overridable at creation and via `:set timeline.fps` /
+`:set timeline.resolution`).
+
+Every imported source is **conformed** to the timeline on import:
+
+- **Framerate**: sources at a different rate are retimed to the timeline rate.
+  Integer-ratio cases (30 -> 60) duplicate frames; non-integer cases (23.976 ->
+  30) use nearest-frame mapping by default, with optional blending configurable
+  per-clip. The clip's timeline duration is always an exact whole number of
+  timeline frames.
+- **Resolution**: sources are scaled to fit the timeline frame, preserving
+  aspect ratio, with configurable letterbox/pillarbox or crop-to-fill.
+- **Audio**: resampled to the project sample rate.
+
+This keeps the core `Frame(u64)` time model exact - there is one and only one
+notion of "frame N" in a project, so splits, ripples, and marks can never drift
+between tracks. Conforming is a *display and render* transformation; the
+original source is untouched and export always relinks to it (spec §10.3).
+
+Changing `timeline.fps` after clips exist re-conforms all clips and is a single
+undoable command; the editor warns that frame-exact edit points may shift.
+
 - **Multi-track audio**: each audio stream (whether from a multi-track MKV or separately imported files) becomes its own track - independently trimmable, mutable, ripple-delete-able, volume/gain-editable.
 - **Export options**:
   - Configurable container/codec (MKV, MP4/H.264, MP4/H.265, WebM/VP9, ProRes for pro workflows)
@@ -392,5 +508,66 @@ The project, config directory, Lua module namespace, and project-local file all 
 | `v`/`V`/`Ctrl-v` | visual / visual-line / visual-block (track) select |
 | `ma`/`` `a `` | set / jump to mark |
 | `q`/`@` | record / replay macro |
+| `<Space><Space>` | play / pause |
+| `J`/`K`/`L` | shuttle back / stop / shuttle forward |
+| `t`/`<`/`>`/`T` | ripple trim / trim edge / slip |
+| `f` + motion | audio fade |
+| `+`/`-` | gain adjust |
+| `gx` | create transition at nearest cut |
 | `:export`, `:render` | export via command mode |
+| `:w`, `:q`, `:wq`, `:e` | project lifecycle (see §12) |
 | `]a`, `[a` (example) | scripted predicate motions (user-defined) |
+
+---
+
+## 12. Project Lifecycle & Buffers
+
+Projects behave like vim buffers, with the same command vocabulary.
+
+| Command | Action |
+|---|---|
+| `:w [path]` | Save project (compacted snapshot + command log, spec §10.4) |
+| `:q` / `:q!` | Close project; `:q` refuses on unsaved changes |
+| `:wq` / `:x` | Save and close |
+| `:e <path>` | Open a project or import a media file into a new timeline |
+| `:ls` | List open timelines |
+| `:bn` / `:bp` / `:b <n>` | Switch between open timelines |
+| `:new` | New empty timeline (prompts for fps/resolution, see §7.1) |
+| `:analyze` | Re-run analysis on the current project (§10.2) |
+
+- Multiple timelines may be open simultaneously; registers and marks are
+  **global** across timelines, so a yank in one can be pasted into another.
+- Autosave writes the command log continuously to `.vimci/autosave/`, enabling
+  crash recovery on next open. Autosave never overwrites the project file.
+- `ProjectLoaded` fires after project-local `.vimci.lua` evaluation (§9.7).
+
+---
+
+## 13. Licensing
+
+The project is open source and not commercial.
+
+- **vimci is GPL-3.0.** This is the least restrictive option that is also
+  unambiguously safe given the dependency graph, and it costs nothing here.
+- **MLT** (`extra/mlt`, 7.40.0) is `LGPL-2.1-only`, so dynamic linking imposes
+  no obligation beyond LGPL compliance; GPL-3.0 is compatible.
+- **Constraint:** link `libmlt` dynamically, never statically, and never link
+  or vendor `melt`/`melted` (GPL-2). Shell out to them if ever needed.
+- FFmpeg reaches us transitively through MLT's modules. If a build ever enables
+  GPL-licensed FFmpeg components, the GPL-3.0 choice already accommodates it.
+- Any Lua config a user writes is their own work and is not a derivative work
+  of vimci.
+
+---
+
+## 14. Performance Targets
+
+Deliberately coarse; the only hard requirement:
+
+- **1080p60 playback and editing must be smooth**, with preview scaling (§10.3,
+  proxies) permitted to hit it on expensive sources.
+- Editing operations (split, ripple delete, undo) should feel instant on a
+  timeline of a few hundred clips.
+- Predicate motions are indexed lookups and must not scan (§10.2).
+
+Anything beyond this is measured before it is optimized.
