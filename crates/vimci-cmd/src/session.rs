@@ -4,7 +4,7 @@
 //! [`Session::exec`], so undo, `.`-repeat, macros, and the project format all
 //! see the same command log.
 
-use vimci_core::Timeline;
+use vimci_core::{Frame, Mark, Timeline, TrackId};
 
 use crate::command::{Command, EditCommand};
 use crate::error::CmdError;
@@ -45,6 +45,21 @@ impl Session {
     #[must_use]
     pub fn macros(&self) -> &MacroRecorder {
         &self.macros
+    }
+
+    /// Move the playhead / change track focus. Not a `Command`: motions are
+    /// navigation, not edits, and are never undoable (plan.md Phase 3/4).
+    pub fn set_playhead(&mut self, frame: Frame, track: TrackId) -> Result<(), CmdError> {
+        self.timeline.set_playhead_frame(frame);
+        self.timeline.focus_track(track)?;
+        Ok(())
+    }
+
+    /// `m<char>`: set a mark at the playhead. Also not a `Command` - marks
+    /// are bookkeeping, not timeline content, and are not undoable in vim
+    /// either.
+    pub fn set_mark(&mut self, name: char, frame: Frame, track: Option<TrackId>) {
+        self.timeline.marks.insert(name, Mark { frame, track });
     }
 
     pub fn macros_mut(&mut self) -> &mut MacroRecorder {

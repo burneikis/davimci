@@ -486,6 +486,7 @@ dependencies = [
  "thiserror",
  "vimci-cmd",
  "vimci-core",
+ "vimci-motion",
 ]
 
 [[package]]

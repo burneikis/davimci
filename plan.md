@@ -263,6 +263,22 @@ Testing:
 - End-to-end headless tests: feed keys -> assert final timeline snapshot,
   giving executable coverage of the keybinding table in spec §11.
 
+Status: complete. The grammar (`vimci-keys::parser`) is a pure state machine
+over `vimci-motion`'s `BuiltinMotion`/`TextObject` types and never touches a
+`Timeline`, so golden key-string tests need no fixture. A separate `engine`
+module gives the parsed `Action` meaning against a live `vimci_cmd::Session`,
+which is the layer plan.md Phase 2 deferred ("`vimci-keys` gives the tokens
+meaning"). Playhead motion and marks are intentionally outside the undo log -
+`Session` gained narrow `set_playhead`/`set_mark` escape hatches for this,
+since navigation was never meant to be a `Command`.
+
+Known gaps, tracked against later phases rather than left silent: `i`/`a`/`r`
+need the Phase 5 media picker; `gx`/`dax` wait on Phase 9f transitions;
+`<`/`>` jump-point edge trims parse but are not wired to a command yet;
+visual-mode text-object narrowing (typing `it`/`at` while a selection is
+live, spec §6) is not implemented - operators in a `VISUAL*` mode act on the
+whole selection instead.
+
 ---
 
 ## Phase 5 - Media Import, Conform & Analysis (`vimci-analysis`)
