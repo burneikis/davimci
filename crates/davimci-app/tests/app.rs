@@ -202,3 +202,67 @@ fn zoom_keys_drive_the_viewport() {
     }
     assert_eq!(app.viewport().zoom(), davimci_motion::Zoom::default());
 }
+
+/// A host whose import appends one 600-frame clip, so the app can be observed
+/// fitting the viewport to it.
+#[derive(Debug, Default)]
+struct ImportHost;
+
+impl Host for ImportHost {
+    fn import_media(
+        &mut self,
+        _path: &std::path::Path,
+        _intent: davimci_keys::MediaIntent,
+        session: &mut Session,
+    ) -> Result<Option<String>, AppError> {
+        let track = session
+            .timeline()
+            .tracks()
+            .first()
+            .map(|t| t.id)
+            .expect("fixture timelines have a track");
+        let id = davimci_core::ClipId(9_001);
+        let clip = davimci_core::Clip::generated(id, "imported", Frame(0), Frame(600));
+        let at = session.timeline().duration();
+        session
+            .exec(&davimci_cmd::EditCommand::Insert {
+                track,
+                at,
+                clip,
+                new_id: None,
+            })
+            .map_err(|e| AppError::UnhandledCommand(e.to_string()))?;
+        Ok(None)
+    }
+}
+
+#[test]
+fn first_import_fits_the_clip_in_the_viewport_width() {
+    let mut app = App::new(Session::new(fixture(&[("V1", &[])])));
+    app.resize(Surface {
+        columns: 30,
+        rows: 4,
+    });
+    let mut host = ImportHost;
+    app.key(Key::parse_str("a")[0], &mut host);
+    app.event(Event::MediaChosen("clip.mp4".into()), &mut host);
+
+    let vp = app.viewport();
+    assert_eq!(vp.start(), Frame::ZERO);
+    assert!(vp.span() >= Frame(600), "clip does not fit: {vp:?}");
+    assert!(vp.span() < Frame(2 * 600), "fit left the clip tiny: {vp:?}");
+}
+
+#[test]
+fn a_later_import_leaves_the_viewport_alone() {
+    let mut app = App::new(Session::new(timeline()));
+    app.resize(Surface {
+        columns: 30,
+        rows: 4,
+    });
+    let before = app.viewport();
+    let mut host = ImportHost;
+    app.key(Key::parse_str("a")[0], &mut host);
+    app.event(Event::MediaChosen("clip.mp4".into()), &mut host);
+    assert_eq!(app.viewport().zoom(), before.zoom());
+}

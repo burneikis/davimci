@@ -745,6 +745,11 @@ order.
 - **Zoom keys:** `zi` in, `zo` out, `z0` back to the default level. Zoom is
   view state, not an edit: it never enters the undo log, and a pointer wheel
   or a menu drives the same path.
+- **Fit on first import:** importing media into an empty timeline picks the
+  finest zoom level at which the whole new duration fits in the viewport
+  width, and scrolls to frame 0. This applies only when the timeline was
+  empty beforehand - a later import never moves the user's view - and, like
+  every zoom, is view state rather than an edit.
 
 ### 15.3 Command line
 

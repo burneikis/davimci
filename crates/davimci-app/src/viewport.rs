@@ -196,6 +196,28 @@ impl Viewport {
         self.clamp(playhead, duration);
     }
 
+    /// Zoom to show the whole of `duration` at once, scrolled to the start.
+    ///
+    /// Picks the finest level whose span still covers `duration`, so an
+    /// imported clip fills the width instead of a few columns. An empty
+    /// timeline fits at [`Zoom::MAX`]; a timeline longer than the widest
+    /// span pins to [`Zoom::OUT`] and is simply clipped.
+    pub fn fit(&mut self, duration: Frame) {
+        let columns = u64::from(self.columns());
+        let mut best = Zoom::OUT;
+        for level in 0..=Zoom::MAX.level() {
+            let zoom = Zoom::new(level);
+            let span = frames_per_column(zoom).saturating_mul(columns);
+            if span >= duration.get() {
+                best = zoom;
+            } else {
+                break;
+            }
+        }
+        self.zoom = best;
+        self.start = Frame::ZERO;
+    }
+
     /// Horizontal scroll by whole columns, positive is later in time.
     pub fn scroll_columns(&mut self, delta: i64, playhead: Frame, duration: Frame) {
         let step = self
@@ -313,6 +335,35 @@ mod tests {
         assert!(v.start() <= Frame(1_000));
         v.scroll_columns(-10_000, Frame::ZERO, Frame(1_000));
         assert_eq!(v.start(), Frame::ZERO);
+    }
+
+    #[test]
+    fn fit_picks_the_finest_zoom_that_still_shows_everything() {
+        let mut v = Viewport::new(100, 3);
+        v.fit(Frame(400));
+        assert_eq!(v.start(), Frame::ZERO);
+        assert!(v.span() >= Frame(400));
+        // One level finer would no longer fit.
+        assert!(
+            frames_per_column(v.zoom().zoom_in()) * 100 < 400 || v.zoom() == Zoom::MAX,
+            "fit left a level of slack: {:?}",
+            v.zoom()
+        );
+    }
+
+    #[test]
+    fn fit_pins_to_zoom_out_for_a_timeline_wider_than_any_span() {
+        let mut v = Viewport::new(10, 3);
+        v.fit(Frame(u64::MAX));
+        assert_eq!(v.zoom(), Zoom::OUT);
+        assert_eq!(v.start(), Frame::ZERO);
+    }
+
+    #[test]
+    fn fit_on_an_empty_timeline_is_max_zoom() {
+        let mut v = Viewport::new(80, 3);
+        v.fit(Frame::ZERO);
+        assert_eq!(v.zoom(), Zoom::MAX);
     }
 
     #[test]

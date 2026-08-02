@@ -6,6 +6,7 @@
 //! frontend that skipped this would be a second editor.
 
 use davimci_cmd::Session;
+use davimci_core::Frame;
 use davimci_keys::engine::{Outcome, TransportCmd};
 use davimci_keys::{Engine, Key, Keymap, MediaIntent, Mode, ZoomIntent};
 use davimci_motion::{JumpConfig, Zoom};
@@ -300,8 +301,16 @@ impl App {
                         .push(Message::error("no media picker is open".to_string()));
                     return Response::Continue;
                 };
+                // An import into an empty timeline is the one place the view
+                // may move on its own: the default zoom would show a clip as
+                // a couple of columns, which reads as "nothing happened".
+                let was_empty = self.session.timeline().duration() == Frame::ZERO;
                 match host.import_media(&path, intent, &mut self.session) {
                     Ok(msg) => {
+                        if was_empty {
+                            self.viewport.fit(self.session.timeline().duration());
+                            self.engine.set_zoom(self.viewport.zoom());
+                        }
                         // Importing is an edit: the graph is stale and the
                         // frame under the playhead may have changed.
                         host.timeline_changed(&self.session);
