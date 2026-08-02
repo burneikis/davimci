@@ -121,6 +121,15 @@ impl Editor {
         self.playhead_moved(session);
     }
 
+    /// Recompose the current frame at the presenter's *current* surface.
+    ///
+    /// A composed frame is sized to the surface it was composed for, so
+    /// resizing the video pane invalidates it. Without this the picture keeps
+    /// its old size and sits in the corner of a resized pane.
+    pub fn refresh_preview(&mut self, session: &Session) {
+        self.show_playhead(session);
+    }
+
     /// Push the graph to the backend, reporting failure as a status message
     /// rather than killing the session - an unprojectable timeline is still
     /// an editable one (Phase 0: degrade locally).

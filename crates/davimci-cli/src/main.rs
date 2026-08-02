@@ -23,6 +23,8 @@ fn main() -> Result<()> {
     let mut commands: Vec<String> = Vec::new();
     let mut keys: Option<String> = None;
     let mut ticks: u32 = 0;
+    #[allow(unused_mut, unused_assignments)]
+    let mut no_window = false;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -36,6 +38,7 @@ fn main() -> Result<()> {
             }
             "-c" => commands.push(args.next().context("-c needs a command")?),
             "-k" => keys = Some(args.next().context("-k needs a key sequence")?),
+            "--no-window" => no_window = true,
             "--ticks" => {
                 ticks = args
                     .next()
@@ -84,10 +87,57 @@ fn main() -> Result<()> {
         return run_session(ws, &script, ticks);
     }
 
+    // With no script and no `:` commands, the editor is what the user asked
+    // for: open the window.
+    #[cfg(feature = "window")]
+    if commands.is_empty() && !no_window {
+        return run_window(ws);
+    }
+
     for line in ws.list() {
         println!("{line}");
     }
     Ok(())
+}
+
+/// Open the editor window.
+#[cfg(feature = "window")]
+fn run_window(ws: Workspace) -> Result<()> {
+    let session = ws.current_session();
+    let (backend, presenter) = engine_for(&session);
+    let mut editor = davimci_cli::Editor::new(ws, backend, presenter);
+    let app = App::new(session);
+    editor.prime(app.session());
+    davimci_cli::Window::new(app, editor)
+        .run()
+        .map_err(|e| anyhow::anyhow!("the window could not open: {e}"))
+}
+
+/// Build the render backend and presenter for a session.
+///
+/// MLT is only touched here, in the binary: no frontend may reference it
+/// (spec §10.1). A missing or broken `libmlt` degrades to the mock backend
+/// rather than refusing to start, so editing still works without a working
+/// decoder (Phase 0: recoverable errors degrade locally).
+fn engine_for(session: &davimci_cmd::Session) -> (Box<dyn RenderBackend>, Presenter) {
+    let props = session.timeline().props;
+    let backend: Box<dyn RenderBackend> = match davimci_mlt::MltBackend::new(props) {
+        Ok(b) => Box::new(b),
+        Err(e) => {
+            eprintln!("{e}");
+            eprintln!("falling back to the mock backend; preview will be synthetic");
+            Box::new(davimci_backend::MockBackend::new(props.resolution))
+        }
+    };
+    let presenter = Presenter::new(
+        PresentHost::Embedded,
+        Resolution {
+            width: 640,
+            height: 360,
+        },
+        Fps::new(props.fps.num, props.fps.den).unwrap_or(Fps::FPS_60),
+    );
+    (backend, presenter)
 }
 
 /// Drive a scripted session through the whole editor.
@@ -98,27 +148,7 @@ fn main() -> Result<()> {
 /// with `<Space><Space>` actually advances.
 fn run_session(ws: Workspace, script: &str, ticks: u32) -> Result<()> {
     let session = ws.current_session();
-    let props = session.timeline().props;
-
-    // MLT is only touched here, in the binary: no frontend may reference it.
-    let backend: Box<dyn RenderBackend> = match davimci_mlt::MltBackend::new(props) {
-        Ok(b) => Box::new(b),
-        Err(e) => {
-            eprintln!("{e}");
-            eprintln!("falling back to the mock backend; preview will be synthetic");
-            Box::new(davimci_backend::MockBackend::new(props.resolution))
-        }
-    };
-
-    let presenter = Presenter::new(
-        PresentHost::Embedded,
-        Resolution {
-            width: 640,
-            height: 360,
-        },
-        Fps::new(props.fps.num, props.fps.den).unwrap_or(Fps::FPS_60),
-    );
-
+    let (backend, presenter) = engine_for(&session);
     let mut editor = Editor::new(ws, backend, presenter);
     let mut app = App::new(session);
     editor.prime(app.session());
@@ -195,12 +225,13 @@ fn print_help() {
            -c <cmd>    run a : command after opening (repeatable)\n  \
            -k <keys>   run a vim-style key sequence through the editor\n  \
            --ticks <n> presentation ticks to run after the keys\n  \
+           --no-window stay on the command line instead of opening a window\n  \
            --version   print the version\n  \
            -h, --help  this text\n\n\
-         there is no window yet (plan.md Phase 9c's shell). -c drives the\n\
-         spec \u{a7}12 lifecycle; -k drives the whole editor - key grammar,\n\
-         commands, MLT backend, presenter and transport - with the headless\n\
-         frontend in the window's place.",
+         with no -c and no -k, davimci opens the editor window. -c drives\n\
+         the spec \u{a7}12 lifecycle from the command line; -k runs a scripted\n\
+         key session through the whole editor with the headless frontend in\n\
+         the window's place.",
         env!("CARGO_PKG_VERSION")
     );
 }

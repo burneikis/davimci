@@ -15,6 +15,8 @@
 //! tests keep passing with no display present.
 
 pub mod cmdline;
+#[cfg(feature = "window")]
+pub mod egui_shell;
 pub mod input;
 pub mod layout;
 pub mod paint;

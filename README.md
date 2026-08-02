@@ -12,11 +12,12 @@ remappable keys, and hookable events.
 
 <!-- Keep this current. It must never claim more than the code does. -->
 
-**Phases 9a-9c landed, and the editor is now assembled.** Keys drive the
-command layer, edits reproject the MLT graph, motions seek and present, and
-`<Space><Space>`/`J`/`K`/`L` play and shuttle. What is *not* there yet is a
-window: no `winit`/`wgpu` surface and no `egui` shell, so the only frontend
-that can run it is the headless one. Phase 8b (export presets and `:render`) and the windowed shell
+**Phase 9a-9c complete: davimci opens a window and edits video.** Keys drive
+the command layer, edits reproject the MLT graph, motions seek and present,
+`<Space><Space>`/`J`/`K`/`L` play and shuttle, and the timeline is painted
+from the shared view state. This is the first build that can be used by
+pointing it at a file, though it is a prototype, not a product: see M3 in
+plan.md for what still separates the two. Phase 8b (export presets and `:render`) and the windowed shell
 are next. Workspace builds; `just test` and `just lint` are green, and
 `just fixtures && just test-slow` passes against generated media, including
 real decode, preview, and export through MLT.
@@ -28,17 +29,17 @@ both hosts; `davimci-gui` owns layout, painting, key translation and the
 modals. A scripted session already runs through two frontends (GUI and
 headless) and produces identical view state.
 
-The binary still does not open a window, but it does run the real editor:
-
 ```sh
-davimci clip.mkv -k "ll<Right>s"        # import, move, split - through the key grammar
+davimci clip.mkv                        # open the editor window
+davimci clip.mkv -k "ll<Right>s"        # same editor, scripted, no window
 davimci clip.mkv -k "  " --ticks 30     # play, pulling real frames through MLT
-davimci project.davimci -c ':w'         # spec §12 lifecycle, as before
+davimci project.davimci -c ':w'         # spec §12 lifecycle from the command line
 ```
 
 `-k` drives the whole stack - key grammar, commands, MLT backend, presenter,
-transport - with `HeadlessFrontend` standing in for the window, and prints the
-resulting view state and preview status. The backend can project a timeline, seek frame-exactly,
+transport - with `HeadlessFrontend` standing in for the window, which is how
+the editor is tested without a display. `--no-window` keeps any invocation on
+the command line. The backend can project a timeline, seek frame-exactly,
 pull frames, play audio, and encode a file, and a config file can bind keys,
 define motions and export presets, and hook events - but only a test drives
 any of it.
@@ -113,7 +114,9 @@ it is linked dynamically, since davimci is GPL-3.0 over LGPL-2.1 MLT.
 | Transport: play/pause, shuttle with rate stepping, preview-and-return | implemented, tested |
 | Playback moves the playhead off the audio clock, never through the undo log | implemented, tested |
 | Edits reproject the render graph; motions seek and present | implemented, tested |
-| Windowed shell: `winit` + `wgpu` surface, `egui` chrome | not started |
+| Windowed shell: `eframe` window, `DrawList` rasteriser, video texture | implemented, runs |
+| egui key translation, including `Space` and Control chords | implemented, tested |
+| Media picker opener (`i`/`a`/`r`), click-to-seek | not started |
 | Export presets, `:render` (Phase 8b), TUI frontend (9d) | not started |
 | Everything else | placeholder crates |
 
@@ -148,10 +151,12 @@ session to hand it between the app and the workspace.
 
 In `davimci-present` and `davimci-gui`: composition is software and integral
 on purpose, so the parity and pacing tests are byte-exact rather than
-tolerance-based, and a future GPU path must reproduce these pixels rather
-than redefine them. No window is created, so nothing drives playback, clicks
-translate to timeline columns but not yet to seeks, and the media
-picker/subtitle modals have no opener.
+tolerance-based; the shell uploads those pixels as a texture rather than
+recomputing them. The window is not covered by automated tests - the
+rasteriser's input (`DrawList`) and its key translation are, but nothing
+asserts on what reaches the screen. Clicks translate to timeline columns but
+not yet to seeks, and the media picker and subtitle modals have no opener, so
+`i`/`a`/`r` still report `NotImplemented`.
 
 In `davimci-mlt`: transitions are not projected until Phase 9f, and export
 presets arrive in Phase 8b (`RenderSettings` is currently filled in by hand).

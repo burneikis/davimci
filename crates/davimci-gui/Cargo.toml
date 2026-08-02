@@ -15,6 +15,7 @@ davimci-app.workspace = true
 davimci-present.workspace = true
 davimci-core.workspace = true
 davimci-keys.workspace = true
+egui = { workspace = true, optional = true }
 
 [dev-dependencies]
 davimci-app = { workspace = true, features = ["testing"] }
@@ -23,4 +24,7 @@ davimci-core = { workspace = true, features = ["testing"] }
 davimci-headless.workspace = true
 
 [features]
+default = ["window"]
+# The egui rasteriser. Off, the crate is pure and needs no display at all.
+window = ["dep:egui"]
 slow-tests = []

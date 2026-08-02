@@ -72,6 +72,27 @@ fn an_edit_reprojects_the_backend() {
     );
 }
 
+/// Regression: the composed frame is sized to the surface it was composed
+/// for, and nothing recomposed it when the video pane resized - so the
+/// picture kept its startup size and sat in the corner of the pane.
+#[test]
+fn resizing_the_video_pane_recomposes_the_frame_at_the_new_size() {
+    let (app, mut editor) = editor();
+    let start = editor.presentation().expect("a primed frame").surface;
+    let bigger = Resolution {
+        width: start.width * 2,
+        height: start.height * 2,
+    };
+    editor.presenter_mut().resize(bigger);
+    editor.refresh_preview(app.session());
+    let after = editor.presentation().expect("a recomposed frame");
+    assert_eq!(after.surface, bigger, "the frame kept its old surface");
+    assert_eq!(
+        after.pixels.len(),
+        (bigger.width as usize) * (bigger.height as usize) * 4
+    );
+}
+
 #[test]
 fn a_motion_seeks_and_presents_without_touching_the_undo_log() {
     let (mut app, mut editor) = editor();

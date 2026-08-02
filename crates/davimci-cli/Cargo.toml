@@ -28,6 +28,9 @@ davimci-backend.workspace = true
 davimci-keys.workspace = true
 davimci-present.workspace = true
 davimci-headless.workspace = true
+davimci-gui.workspace = true
+eframe = { workspace = true, optional = true }
+egui = { workspace = true, optional = true }
 davimci-mlt.workspace = true
 serde = { workspace = true }
 serde_json.workspace = true
@@ -38,5 +41,8 @@ davimci-tui = { workspace = true, optional = true }
 davimci-core = { workspace = true, features = ["testing"] }
 
 [features]
+default = ["window"]
+# The window. Off, the binary is the scriptable driver and needs no display.
+window = ["dep:eframe", "dep:egui", "davimci-gui/window"]
 slow-tests = ["davimci-analysis/slow-tests", "davimci-mlt/slow-tests"]
 tui = ["dep:davimci-tui"]

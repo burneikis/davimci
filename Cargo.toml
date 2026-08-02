@@ -36,6 +36,8 @@ serde_json = "1"
 tracing   = "0.1"
 proptest  = "1"
 insta     = { version = "1", features = ["yaml"] }
+egui      = "0.35"
+eframe    = { version = "0.35", default-features = false, features = ["wgpu", "x11", "wayland", "default_fonts"] }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

@@ -17,6 +17,8 @@ pub mod editor;
 pub mod error;
 pub mod excmd;
 pub mod transport;
+#[cfg(feature = "window")]
+pub mod window;
 pub mod workspace;
 
 #[cfg(test)]
@@ -27,4 +29,6 @@ pub use editor::Editor;
 pub use error::CliError;
 pub use excmd::{ExCommand, ExOutcome, parse};
 pub use transport::{Transport, TransportState};
+#[cfg(feature = "window")]
+pub use window::Window;
 pub use workspace::{Buffer, Globals, Workspace};

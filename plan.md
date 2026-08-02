@@ -745,10 +745,45 @@ Amendments made during implementation:
 - A two-way parity test already runs (GUI vs headless: same script, identical
   view dumps); it becomes the three-way test of 9d when the TUI lands.
 
-Not yet wired: no window, so nothing calls `Gui::set_chrome` with a real
-presenter surface, clicks are translated to columns but not yet to a seek,
-and the picker/subtitle modals have no production opener - `i`/`a`/`r` still
-report `NotImplemented` from `davimci-keys`.
+### The shell
+
+Status: complete. `davimci-gui`'s `egui_shell` is the one module in the
+project that knows what a colour or a font is; it rasterises the `DrawList`
+that `layout::paint` already computed and uploads the RGBA surface that
+`davimci-present` already composited. It sits behind a `window` feature, so
+with it off the crate is pure and needs no display - which is how the layout,
+painting and input tests still run headless.
+
+`davimci_cli::Window` is the eframe application, and it lives in the binary
+for the same reason `Editor` does: it holds a frontend and a render backend at
+once, and no frontend may reference MLT. eframe 0.35 splits `App::logic` from
+`App::ui`, which lines up exactly with the split this codebase already had -
+decisions in `logic`, pixels in `ui`.
+
+Running `davimci <media>` with no `-c`/`-k` now opens the editor: a real
+window, a real MLT decode, the timeline painted from the view state, and keys
+going through the grammar. Verified against a generated 1080p60 fixture.
+
+Amendments made during implementation:
+
+- Printable keys are taken from egui's `Event::Text` (already shifted by the
+  platform layout) and named keys and Control chords from `Event::Key`, since
+  `Text` is emitted for neither. Whitespace text is dropped so `Space` cannot
+  arrive twice - it is a leader (spec §3.2.1) and a double press would fire
+  the wrong binding.
+- The presenter's surface is kept equal to the video pane, so
+  `davimci-present` letterboxes into exactly the rectangle that will be
+  drawn and the shell never scales an image twice.
+
+Defect found by looking at the window: a composed frame is sized to the
+surface it was composed for, and nothing recomposed it when the pane resized,
+so the picture kept its startup size in the corner of the pane.
+`Editor::refresh_preview` now recomposes on a size change, with a regression
+test (`resizing_the_video_pane_recomposes_the_frame_at_the_new_size`).
+
+Not yet wired: clicks are translated to columns but not to a seek, and the
+picker/subtitle modals have no production opener - `i`/`a`/`r` still report
+`NotImplemented` from `davimci-keys`.
 
 ### Wiring and transport (the glue)
 
