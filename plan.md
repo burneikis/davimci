@@ -14,7 +14,9 @@ the ordering; phases are ordered by dependency only.
 | Lua runtime | `mlua` (LuaJIT or Lua 5.4) | Sandboxable, mature, maps cleanly to the `require("vimci.*")` namespace. |
 | Render backend | `libmlt` via a hand-written `-sys` crate + safe wrapper | Per spec §10.1. |
 | Media probing | `ffprobe`/`libavformat` through MLT producers where possible | Avoid a second demux stack. |
-| TUI/UI | Terminal-first timeline (ratatui) + separate SDL preview window from MLT's consumer | Keyboard-first; decouples preview from UI toolkit choice. |
+| Video presentation | `winit` + `wgpu` textured quad, frames pulled from MLT, audio clock as master | A terminal cannot present real-time video; MLT's own `sdl2` consumer owns its window and can't be composited with our overlays. |
+| Primary UI | Single-window GUI: `egui`-on-`wgpu` chrome + custom-painted timeline, sharing the surface with the video quad | Keyboard-first is an input grammar, not a pixel backend. One window, one focus, overlays on the video. |
+| Secondary UI | Optional TUI (`ratatui`) in the terminal + a detached, non-focusable video window | Reuses the same presenter crate; useful over SSH-with-display, tiling setups, and as an early checkpoint. |
 | Serialization | `serde` + a versioned on-disk format (JSON for the project, binary for analysis cache) | Human-diffable projects, compact caches. |
 
 Workspace layout:
@@ -30,12 +32,50 @@ crates/
   vimci-mlt/       safe wrapper implementing RenderBackend
   vimci-lua/       Lua API surface, config loader, autocmds
   vimci-keys/      key sequence parser (counts, operators, objects), mode FSM
-  vimci-tui/       timeline render, status line, pickers
-  vimci-cli/       binary, arg parsing, project open/save
+  vimci-app/       frontend-agnostic app state: viewport, zoom, selection, msgs
+  vimci-present/   winit+wgpu video surface: texture upload, frame pacing, sync
+  vimci-gui/       primary frontend: present + egui chrome + painted timeline
+  vimci-tui/       secondary frontend: ratatui timeline + detached present window
+  vimci-headless/  scriptable frontend: no window, used by tests and CI
+  vimci-cli/       binary, arg parsing, frontend selection, project open/save
 ```
 
 The hard rule from spec §10.1: nothing outside `vimci-mlt` may reference MLT
 types. `vimci-core` must compile and be fully testable with the backend absent.
+
+---
+
+## 0.1 Frontend Strategy (one product, three hosts)
+
+The risk called out explicitly: **three frontends must not become three
+implementations.** They are avoided by making the frontends thin.
+
+Everything meaningful lives below the frontend line:
+
+```
+            vimci-app  (viewport, zoom, selection, status, pending input)
+                 |  Frontend trait: present_frame / draw / poll_input
+   +-------------+-------------+--------------------+
+   |             |             |                    |
+headless        gui           tui            (future frontends)
+(no window)  present+egui   ratatui + present-only window
+```
+
+- `vimci-app` owns *all* view state - zoom level, scroll offset, which tracks
+  are visible, selection highlighting, status-line content, message queue. A
+  frontend asks it "what should be on screen" and draws it. No frontend
+  computes layout semantics.
+- `vimci-present` is the single video path. The GUI hosts it inside its main
+  surface; the TUI hosts it in a bare window with no widgets and
+  `with_decorations(false)` / focusable disabled, so the terminal keeps
+  keyboard focus. **The TUI mode adds a window host, not a renderer.**
+- Input always flows through `vimci-keys` into commands. A frontend translates
+  platform key events into vimci key tokens and does nothing else with them.
+
+**Priority is explicit:** headless proves the model, the GUI is the product,
+the TUI is opt-in. The TUI is a `--features tui` build and is allowed to lag
+in capability (no in-video overlays, coarser preview). If it ever demands
+divergent core changes, it gets cut rather than accommodated.
 
 ---
 
@@ -178,7 +218,14 @@ Testing:
 
 Deliverables:
 - `RenderBackend` trait: `probe`, `seek`, `frame_at`, `preview_start/stop`,
-  `render(job)`, `progress`.
+  `next_preview_frame`, `audio_clock_position`, `render(job)`, `progress`.
+- **Frame-pull preview, not MLT's video window.** Audio realtime output uses
+  MLT's `sdl2_audio` / `rtaudio` consumer; video frames are pulled by us as
+  RGBA buffers and handed to `vimci-present`. This is the Shotcut pattern and
+  is what allows overlays, and what makes GUI and TUI share one video path.
+- Preview scaling wired through: request width/height on `mlt_frame_get_image()`
+  so scrubbing can drop to half/quarter res, and the TUI's small window is
+  cheap by construction.
 - Raw bindings; safe wrapper with RAII refcount handling.
 - Timeline -> MLT tractor/playlist projection, incremental where possible so
   split/ripple are playlist mutations rather than rebuilds.
@@ -195,6 +242,10 @@ Testing:
   seek points, OCR-free check via a known per-frame color signature; asserts
   seek lands on the exact frame.
 - A/V sync test: click track aligned to a flash frame; assert offset is zero.
+- Frame-pull test: pull N consecutive frames headlessly, assert monotonic
+  presentation timestamps, no duplicates, and correct pixel signatures.
+- Preview-scaling test: quarter-res pull yields the expected dimensions and
+  the same frame content, scaled - never a different frame.
 - Render smoke test per export preset, gated behind a `--features slow-tests`
   flag so the default suite stays fast.
 
@@ -249,26 +300,101 @@ Testing:
 
 ---
 
-## Phase 9 - TUI, Preview, Status Line (`vimci-tui`)
+## Phase 9a - View State (`vimci-app`)
+
+Built before any frontend, so no frontend can invent its own.
 
 Deliverables:
-- Timeline view: tracks, clips, ruler with jump-point tick marks (spec §3.2),
-  playhead, selection highlighting, current-track indicator.
-- Status line with mode + scope (`-- VISUAL (V1,A2) --`), analysis/proxy job
-  progress, and messages.
-- Command line (`:`) with history and completion.
-- Media picker for `i`/`a`/`r`; text-edit INSERT mode for subtitle clips.
-- Preview window wiring, play/pause/scrub sync with the playhead.
+- Viewport model: zoom level, scroll offset, visible time range, visible track
+  range, and the derived jump-point tick positions for the ruler.
+- Selection/highlight description, current-track indicator, mode + scope
+  string (`-- VISUAL (V1,A2) --`), message/notification queue, job progress.
+- `Frontend` trait and an app event loop that is generic over it.
+- Scroll-follow rules: playhead must remain within the viewport after any
+  motion; zoom anchors on the playhead.
 
 Testing:
-- Snapshot tests of rendered frames at fixed terminal sizes (ratatui test
-  backend) covering each mode and selection kind.
-- Layout tests at extreme sizes (very narrow, very short, more tracks than
-  rows) asserting no panic and a sane viewport.
-- Zoom/scroll tests: playhead always remains within the viewport after any
-  motion.
-- Preview sync tested against `MockBackend` for clock/playhead agreement;
-  manual checklist for the real SDL consumer.
+- Pure unit tests, no rendering: viewport arithmetic, zoom anchoring,
+  scroll-follow, tick-position generation at each zoom level.
+- Property test: after any random motion or zoom sequence, the playhead is
+  inside the visible range and the viewport is within timeline bounds.
+- Snapshot tests on a textual dump of the view state, shared as the golden
+  input for every frontend's rendering tests.
+
+---
+
+## Phase 9b - Video Presenter (`vimci-present`)
+
+One crate, two hosts. This is the anti-duplication keystone.
+
+Deliverables:
+- `winit` + `wgpu` surface, RGBA texture upload, aspect/letterbox handling.
+- Frame pacing against the backend's audio clock; drop-late / repeat-on-starve
+  policy with counters exposed for tests.
+- Two host modes:
+  - `Embedded` - renders into a surface owned by the GUI, alongside egui.
+  - `Detached` - owns a bare undecorated, non-focusable window for TUI mode,
+    so the terminal never loses keyboard focus.
+- Optional overlay layer (playhead timecode, safe areas) in `Embedded` only.
+- A `HeadlessPresenter` that writes frames to memory for tests.
+
+Testing:
+- Frame-pacing tests against `MockBackend` with a synthetic clock: assert
+  dropped/repeated frame counts match expectation for fast, slow, and jittery
+  sources.
+- Image-diff snapshot tests via `wgpu` offscreen rendering: known input frame
+  in, golden PNG out, with a small perceptual tolerance.
+- Letterbox/aspect matrix test across source and window aspect ratios.
+- Host-parity test: the same input frame through `Embedded` and `Detached`
+  produces identical video pixels - proves the paths have not diverged.
+- Detached-window focus behavior is a manual checklist item (i3, floating).
+
+---
+
+## Phase 9c - GUI Frontend (`vimci-gui`) - primary
+
+Deliverables:
+- Single window: video quad (`vimci-present` embedded) + custom-painted
+  timeline (tracks, clips, ruler with jump-point ticks, playhead, selection)
+  + `egui` chrome.
+- Status line, command line (`:`) with history and completion.
+- Media picker for `i`/`a`/`r`; text-edit INSERT mode for subtitle clips;
+  clip properties panel (spec §8 transforms).
+- Key event translation into `vimci-keys` tokens; nothing else.
+
+Testing:
+- Image-diff snapshot tests of the full window at fixed sizes, covering each
+  mode, selection kind, and panel state.
+- Layout tests at extreme sizes (very short, very narrow, more tracks than
+  fit) asserting no panic and a sane viewport.
+- Input-translation tests: synthetic `winit` events produce the expected key
+  tokens, including modifiers and `<Left>`/`<Right>`.
+- Golden view-state reuse: renders are driven by the Phase 9a fixtures, so a
+  view-state regression fails in both `vimci-app` and here.
+
+---
+
+## Phase 9d - TUI Frontend (`vimci-tui`) - optional, `--features tui`
+
+Explicitly a stepping stone and a nice-to-have. Ships only if it stays thin.
+
+Deliverables:
+- `ratatui` timeline, ruler with tick marks, status line, command line -
+  rendered from the same `vimci-app` view state as the GUI.
+- Preview via `vimci-present` in `Detached` mode; `:set preview off` for
+  no-display sessions.
+- Terminal key translation into `vimci-keys` tokens.
+- Documented limitations: no in-video overlays, no properties panel (falls
+  back to command mode `:set clip.*`), coarser timeline resolution.
+
+Testing:
+- Terminal snapshot tests (`ratatui` test backend) at fixed sizes per mode.
+- **Cross-frontend parity test:** one scripted session driven through headless,
+  GUI, and TUI must produce an identical final timeline snapshot and identical
+  `vimci-app` view state. This is the test that keeps three hosts from becoming
+  three products; any divergence is a bug in the frontend, never in core.
+- Degradation test: with preview disabled and no display available, the TUI
+  still starts and all editing works.
 
 ---
 
@@ -306,7 +432,10 @@ Testing:
 | MLT wrapper | Sanitizer-backed refcount tests, golden XML projection |
 | Lua API | Spec snippets as executable acceptance tests |
 | Export | `ffprobe` assertions on real output |
-| TUI | Terminal snapshot tests |
+| View state | Pure viewport/zoom unit + property tests |
+| Presenter | Offscreen image-diff snapshots, synthetic-clock pacing tests |
+| GUI | Window image-diff snapshots + input translation tests |
+| TUI | Terminal snapshot tests + cross-frontend parity |
 | Whole app | Scripted headless sessions + soak fuzzing |
 
 Standing rules:
@@ -317,8 +446,14 @@ Standing rules:
    behind `--features slow-tests` and runs in CI only.
 4. Test media is generated, never committed.
 5. CI matrix: default suite, slow-tests suite, sanitizer build, clippy +
-   rustfmt, and a Lua-config compatibility suite that loads every example
-   config in the docs.
+   rustfmt, a Lua-config compatibility suite that loads every example config
+   in the docs, and a headless-GPU (`lavapipe`) job for presenter and GUI
+   snapshot tests.
+6. No frontend may contain view logic. If a fix needs to land in both
+   `vimci-gui` and `vimci-tui`, it belongs in `vimci-app` or `vimci-present`
+   instead - the cross-frontend parity test exists to catch this.
+7. The GUI is the reference frontend. Headless and TUI are validated against
+   it, not the reverse.
 
 ---
 
@@ -326,18 +461,31 @@ Standing rules:
 
 | M | Definition of done |
 |---|---|
-| M1 | Headless: load a fixture timeline, move playhead, split, ripple delete, undo - all via keys, verified by snapshot tests. |
-| M2 | Import a multi-track MKV, see it in the TUI, scrub with jump points, preview plays. |
-| M3 | Full cut workflow to export of a single-video/multi-audio MKV with a working preset. |
+| M1 | Headless: load a fixture timeline, move playhead, split, ripple delete, undo - all via keys, verified by snapshot tests. No window code exists yet. |
+| M2 | Import a multi-track MKV; frames pull from MLT into `vimci-present` and play in sync with audio in a bare window. No editing UI - proves the video path. |
+| M3 | GUI: timeline + video in one window, scrub with jump points, full cut workflow, export a multi-audio MKV with a working preset. **This is the first genuinely usable build.** |
 | M4 | Lua config fully wired: custom motions, text objects, keymaps, hooks, export presets. |
 | M5 | Overlays and subtitle tracks editable and exportable (burn-in and sidecar). |
-| M6 | Hardened: soak-tested, benchmarked, crash recovery, documented default keymap. |
+| M6 | Optional TUI frontend behind `--features tui`, passing cross-frontend parity. Cut without regret if it is not thin. |
+| M7 | Hardened: soak-tested, benchmarked, crash recovery, documented default keymap. |
+
+The ordering rule: **nothing before M3 is a product.** M6 is deliberately
+after export, Lua, and subtitles - the TUI is a convenience, and shipping it
+early would mean maintaining two frontends through every core change.
+Correspondingly, `vimci-app` and `vimci-present` are built with two hosts in
+mind from the start (cheap), but only one host is *implemented* until M6
+(avoids the three-implementations trap).
 
 ---
 
 ## Deferred (tracked, not in v1)
 
-- GPU preview path (spec §10.6).
+- GPU preview path (spec §10.6) - largely resolved by the `wgpu` presenter;
+  what remains deferred is zero-copy hardware-decode surface import.
+- Terminal-inline preview (kitty/sixel via `ratatui-image`) as a fallback for
+  the TUI when no window can be opened. Explicitly low priority: escape-
+  sequence throughput gives no frame-pacing guarantees, so it can never be the
+  primary path.
 - Custom subtitle layout engine vs. MLT built-in producers (spec §10.6).
 - Beat detection as a jump-point source.
 - ML-based scene detection hook.
