@@ -7,25 +7,25 @@ version = "0.0.0"
 edition = "2024"
 rust-version = "1.90"
 license = "GPL-3.0-only"
-repository = "https://github.com/sponge/vimci"
-authors = ["vimci contributors"]
+repository = "https://github.com/burneikis/davimci"
+authors = ["davimci contributors"]
 
 [workspace.dependencies]
 # internal
-vimci-core      = { path = "crates/vimci-core" }
-vimci-cmd       = { path = "crates/vimci-cmd" }
-vimci-motion    = { path = "crates/vimci-motion" }
-vimci-analysis  = { path = "crates/vimci-analysis" }
-vimci-backend   = { path = "crates/vimci-backend" }
-vimci-mlt-sys   = { path = "crates/vimci-mlt-sys" }
-vimci-mlt       = { path = "crates/vimci-mlt" }
-vimci-lua       = { path = "crates/vimci-lua" }
-vimci-keys      = { path = "crates/vimci-keys" }
-vimci-app       = { path = "crates/vimci-app" }
-vimci-present   = { path = "crates/vimci-present" }
-vimci-gui       = { path = "crates/vimci-gui" }
-vimci-tui       = { path = "crates/vimci-tui" }
-vimci-headless  = { path = "crates/vimci-headless" }
+davimci-core      = { path = "crates/davimci-core" }
+davimci-cmd       = { path = "crates/davimci-cmd" }
+davimci-motion    = { path = "crates/davimci-motion" }
+davimci-analysis  = { path = "crates/davimci-analysis" }
+davimci-backend   = { path = "crates/davimci-backend" }
+davimci-mlt-sys   = { path = "crates/davimci-mlt-sys" }
+davimci-mlt       = { path = "crates/davimci-mlt" }
+davimci-lua       = { path = "crates/davimci-lua" }
+davimci-keys      = { path = "crates/davimci-keys" }
+davimci-app       = { path = "crates/davimci-app" }
+davimci-present   = { path = "crates/davimci-present" }
+davimci-gui       = { path = "crates/davimci-gui" }
+davimci-tui       = { path = "crates/davimci-tui" }
+davimci-headless  = { path = "crates/davimci-headless" }
 
 # external
 thiserror = "2"

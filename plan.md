@@ -1,4 +1,4 @@
-# vimci - Implementation Plan
+# davimci - Implementation Plan
 
 Companion to `spec.md`. Defines the build order, module boundaries, and the
 test strategy for each layer. No schedule or effort estimates are implied by
@@ -36,25 +36,25 @@ Workspace layout:
 
 ```
 crates/
-  vimci-core/      timeline model, clips, tracks, grouping, marks, registers
-  vimci-cmd/       command objects (apply/invert), undo tree, macro recorder
-  vimci-motion/    motions, text objects, jump points, predicate index
-  vimci-analysis/  waveform/RMS, silence, scene change, proxy jobs, cache
-  vimci-backend/   RenderBackend trait
-  vimci-mlt-sys/   raw FFI bindings
-  vimci-mlt/       safe wrapper implementing RenderBackend
-  vimci-lua/       Lua API surface, config loader, autocmds
-  vimci-keys/      key sequence parser (counts, operators, objects), mode FSM
-  vimci-app/       frontend-agnostic app state: viewport, zoom, selection, msgs
-  vimci-present/   winit+wgpu video surface: texture upload, frame pacing, sync
-  vimci-gui/       primary frontend: present + egui chrome + painted timeline
-  vimci-tui/       secondary frontend: ratatui timeline + detached present window
-  vimci-headless/  scriptable frontend: no window, used by tests and CI
-  vimci-cli/       binary, arg parsing, frontend selection, project open/save
+  davimci-core/      timeline model, clips, tracks, grouping, marks, registers
+  davimci-cmd/       command objects (apply/invert), undo tree, macro recorder
+  davimci-motion/    motions, text objects, jump points, predicate index
+  davimci-analysis/  waveform/RMS, silence, scene change, proxy jobs, cache
+  davimci-backend/   RenderBackend trait
+  davimci-mlt-sys/   raw FFI bindings
+  davimci-mlt/       safe wrapper implementing RenderBackend
+  davimci-lua/       Lua API surface, config loader, autocmds
+  davimci-keys/      key sequence parser (counts, operators, objects), mode FSM
+  davimci-app/       frontend-agnostic app state: viewport, zoom, selection, msgs
+  davimci-present/   winit+wgpu video surface: texture upload, frame pacing, sync
+  davimci-gui/       primary frontend: present + egui chrome + painted timeline
+  davimci-tui/       secondary frontend: ratatui timeline + detached present window
+  davimci-headless/  scriptable frontend: no window, used by tests and CI
+  davimci-cli/       binary, arg parsing, frontend selection, project open/save
 ```
 
-The hard rule from spec §10.1: nothing outside `vimci-mlt` may reference MLT
-types. `vimci-core` must compile and be fully testable with the backend absent.
+The hard rule from spec §10.1: nothing outside `davimci-mlt` may reference MLT
+types. `davimci-core` must compile and be fully testable with the backend absent.
 
 ---
 
@@ -66,7 +66,7 @@ implementations.** They are avoided by making the frontends thin.
 Everything meaningful lives below the frontend line:
 
 ```
-            vimci-app  (viewport, zoom, selection, status, pending input)
+            davimci-app  (viewport, zoom, selection, status, pending input)
                  |  Frontend trait: present_frame / draw / poll_input
    +-------------+-------------+--------------------+
    |             |             |                    |
@@ -74,16 +74,16 @@ headless        gui           tui            (future frontends)
 (no window)  present+egui   ratatui + present-only window
 ```
 
-- `vimci-app` owns *all* view state - zoom level, scroll offset, which tracks
+- `davimci-app` owns *all* view state - zoom level, scroll offset, which tracks
   are visible, selection highlighting, status-line content, message queue. A
   frontend asks it "what should be on screen" and draws it. No frontend
   computes layout semantics.
-- `vimci-present` is the single video path. The GUI hosts it inside its main
+- `davimci-present` is the single video path. The GUI hosts it inside its main
   surface; the TUI hosts it in a bare window with no widgets and
   `with_decorations(false)` / focusable disabled, so the terminal keeps
   keyboard focus. **The TUI mode adds a window host, not a renderer.**
-- Input always flows through `vimci-keys` into commands. A frontend translates
-  platform key events into vimci key tokens and does nothing else with them.
+- Input always flows through `davimci-keys` into commands. A frontend translates
+  platform key events into davimci key tokens and does nothing else with them.
 
 **Priority is explicit:** headless proves the model, the GUI is the product,
 the TUI is opt-in. The TUI is a `--features tui` build and is allowed to lag
@@ -126,7 +126,7 @@ Testing:
 
 ---
 
-## Phase 1 - Timeline Model Core (`vimci-core`)
+## Phase 1 - Timeline Model Core (`davimci-core`)
 
 Deliverables:
 - `Timeline`, `Track` (video/audio/text/overlay), `Clip`, `Segment`, `Marker`,
@@ -160,7 +160,7 @@ testing, with zero backend code linked.
 
 ---
 
-## Phase 2 - Command Layer & Undo Tree (`vimci-cmd`)
+## Phase 2 - Command Layer & Undo Tree (`davimci-cmd`)
 
 Deliverables:
 - `trait Command { fn apply(&self, &mut Timeline) -> Result<Effect>; fn describe(&self) -> String; }`
@@ -198,13 +198,13 @@ Exit criteria: undo/redo/repeat/macros all operate solely through the command
 log; no direct timeline mutation path exists outside a command.
 
 Status: complete. Macros store opaque input tokens rather than commands, so
-replay is keystroke-shaped as in vim; `vimci-keys` (Phase 4) gives the tokens
+replay is keystroke-shaped as in vim; `davimci-keys` (Phase 4) gives the tokens
 meaning. History itself is not yet persisted - a reopened project starts a
 fresh undo tree from the saved state.
 
 ---
 
-## Phase 3 - Motions, Jump Points, Text Objects (`vimci-motion`)
+## Phase 3 - Motions, Jump Points, Text Objects (`davimci-motion`)
 
 Deliverables:
 - Motion trait returning a target (frame, track) or a range.
@@ -236,7 +236,7 @@ Phase 9f adds transitions (spec §4.1).
 
 ---
 
-## Phase 4 - Key Parser & Mode FSM (`vimci-keys`)
+## Phase 4 - Key Parser & Mode FSM (`davimci-keys`)
 
 Deliverables:
 - Input grammar: `[count] [register] operator [count] motion|textobject`,
@@ -263,11 +263,11 @@ Testing:
 - End-to-end headless tests: feed keys -> assert final timeline snapshot,
   giving executable coverage of the keybinding table in spec §11.
 
-Status: complete. The grammar (`vimci-keys::parser`) is a pure state machine
-over `vimci-motion`'s `BuiltinMotion`/`TextObject` types and never touches a
+Status: complete. The grammar (`davimci-keys::parser`) is a pure state machine
+over `davimci-motion`'s `BuiltinMotion`/`TextObject` types and never touches a
 `Timeline`, so golden key-string tests need no fixture. A separate `engine`
-module gives the parsed `Action` meaning against a live `vimci_cmd::Session`,
-which is the layer plan.md Phase 2 deferred ("`vimci-keys` gives the tokens
+module gives the parsed `Action` meaning against a live `davimci_cmd::Session`,
+which is the layer plan.md Phase 2 deferred ("`davimci-keys` gives the tokens
 meaning"). Playhead motion and marks are intentionally outside the undo log -
 `Session` gained narrow `set_playhead`/`set_mark` escape hatches for this,
 since navigation was never meant to be a `Command`.
@@ -281,7 +281,7 @@ whole selection instead.
 
 ---
 
-## Phase 5 - Media Import, Conform & Analysis (`vimci-analysis`)
+## Phase 5 - Media Import, Conform & Analysis (`davimci-analysis`)
 
 Deliverables:
 - Import pipeline: probe container, expose every audio and subtitle stream in
@@ -295,7 +295,7 @@ Deliverables:
 - Analysis pass: peak + RMS at a 10 ms hop, silence spans, optional
   scene-change keyframes.
 - Indexed store enabling O(log n) predicate lookups; sidecar cache at
-  `.vimci/cache/<content_hash>.analysis`, versioned and invalidated on bump.
+  `.davimci/cache/<content_hash>.analysis`, versioned and invalidated on bump.
 - Proxy generation per spec §10.3, with the `BeforeExport` original-source
   guard.
 
@@ -337,7 +337,7 @@ Amendments made during implementation:
 - Re-conform is *not* self-inverse: rounding at one rate is not reversible at
   another, and a clip that rounds to zero frames has to be repaired rather
   than lost. `Reconform` therefore inverts to `RestoreConform`, which replays
-  the exact prior geometry (`vimci_core::conform`). Undo of a rate change is
+  the exact prior geometry (`davimci_core::conform`). Undo of a rate change is
   byte-identical.
 - Predicate queries index a threshold chosen at *query* time, which a sorted
   list cannot answer in log time. `index::MaxTree` is a max segment tree with
@@ -353,14 +353,14 @@ and analysis measures the source rather than the post-gain signal, so the
 
 ---
 
-## Phase 6 - Render Backend (`vimci-backend`, `vimci-mlt-sys`, `vimci-mlt`)
+## Phase 6 - Render Backend (`davimci-backend`, `davimci-mlt-sys`, `davimci-mlt`)
 
 Deliverables:
 - `RenderBackend` trait: `probe`, `seek`, `frame_at`, `preview_start/stop`,
   `next_preview_frame`, `audio_clock_position`, `render(job)`, `progress`.
 - **Frame-pull preview, not MLT's video window.** Audio realtime output uses
   MLT's `sdl2_audio` / `rtaudio` consumer; video frames are pulled by us as
-  RGBA buffers and handed to `vimci-present`. This is the Shotcut pattern and
+  RGBA buffers and handed to `davimci-present`. This is the Shotcut pattern and
   is what allows overlays, and what makes GUI and TUI share one video path.
 - Preview scaling wired through: request width/height on `mlt_frame_get_image()`
   so scrubbing can drop to half/quarter res, and the TUI's small window is
@@ -391,7 +391,7 @@ Testing:
 Status: complete. The crate is layered by testability: `projection` turns a
 `Timeline` into the shape the graph must have (pure data, no MLT), `xml`
 serialises that shape for the golden tests, `patch` diffs two projections, and
-only `ffi`/`backend` touch the C API. `MockBackend` lives in `vimci-backend`
+only `ffi`/`backend` touch the C API. `MockBackend` lives in `davimci-backend`
 and decodes nothing: a mock frame's colour is a pure function of its position,
 so an upstream test asserts *which* frame it got from four bytes.
 
@@ -424,9 +424,9 @@ Amendments made during implementation:
   directly rather than relying on a sanitizer. `just sanitize` now runs
   (nightly + `rust-src` installed via `rustup`) and is green with a narrow,
   documented LSAN suppression file
-  (`crates/vimci-mlt/lsan-suppressions.txt`) for MLT's own one-time
+  (`crates/davimci-mlt/lsan-suppressions.txt`) for MLT's own one-time
   module-init state and its internal blank-producer path, neither of which
-  vimci constructs or holds a handle to. LeakSanitizer's stack scan is
+  davimci constructs or holds a handle to. LeakSanitizer's stack scan is
   conservative and can miss a real leak, so a clean run is evidence for the
   wrapper, not proof; the `ref_count()` assertions remain the primary
   guarantee.
@@ -438,14 +438,14 @@ MLT transitions yet, and the export preset registry that would exercise
 
 ---
 
-## Phase 7 - Lua Config & Plugin API (`vimci-lua`)
+## Phase 7 - Lua Config & Plugin API (`davimci-lua`)
 
 Deliverables:
-- Config loader honoring `~/.config/vimci/init.lua`, `keymaps.lua`,
-  `motions/`, `presets/`, `plugin/`, and opt-in `.vimci.lua` project-local
+- Config loader honoring `~/.config/davimci/init.lua`, `keymaps.lua`,
+  `motions/`, `presets/`, `plugin/`, and opt-in `.davimci.lua` project-local
   overrides with an explicit trust prompt.
-- Modules: `vimci.keymap`, `vimci.motions`, `vimci.textobject`, `vimci.export`,
-  `vimci.timeline`, `vimci.media`, `vimci.autocmd`, `vimci.editor`.
+- Modules: `davimci.keymap`, `davimci.motions`, `davimci.textobject`, `davimci.export`,
+  `davimci.timeline`, `davimci.media`, `davimci.autocmd`, `davimci.editor`.
 - Event dispatch for the v1 event list (`PlayheadMoved`, `SplitPerformed`,
   `ClipDeleted`, `ClipInserted`, `ModeChanged`, `BeforeExport`, `AfterExport`,
   `ProjectLoaded`).
@@ -459,14 +459,14 @@ Testing:
   keymap, harness feeds keys, asserts resulting timeline state.
 - Hook ordering and cancellation: a `BeforeExport` handler returning an error
   must abort the render.
-- Sandbox tests: project-local `.vimci.lua` is not executed without trust;
+- Sandbox tests: project-local `.davimci.lua` is not executed without trust;
   untrusted config cannot reach `os.execute`/`io` by default.
 - Panic-safety test: user callback that throws leaves the editor usable and
   the timeline unmodified.
 
 Status: complete. The crate's shape follows one rule - **Lua asks, it never
-writes.** A `vimci.*` call either registers something or appends a `Request`;
-the host runs each request through `vimci_cmd::Session`, so a plugin edit is
+writes.** A `davimci.*` call either registers something or appends a `Request`;
+the host runs each request through `davimci_cmd::Session`, so a plugin edit is
 an ordinary undo-tree entry and the single-write-path rule holds at the
 plugin boundary. That is also what keeps the crate testable: `Runtime` needs
 no timeline, no backend, and no window, and the spec §9 snippets run verbatim
@@ -475,7 +475,7 @@ as the acceptance suite.
 Amendments made during implementation:
 
 - A Lua function right-hand side (spec §9.2) had nothing to resolve to, since
-  `vimci-keys` must not depend on `vimci-lua`. `Action::Plugin(u32)` and
+  `davimci-keys` must not depend on `davimci-lua`. `Action::Plugin(u32)` and
   `Outcome::Plugin(u32)` carry an opaque callback id instead: the engine
   reports it, the host invokes it, and `Engine::execute_action` (new, public)
   runs whatever edits come back. Spec §9.9 now documents the request model
@@ -484,16 +484,16 @@ Amendments made during implementation:
   second write path, so it receives a `MotionEnv` snapshot - playhead,
   focused track, clip bounds, analysis samples. `find_next` over an
   unanalysed track reports `Pending` rather than `NoMatch`, matching
-  `vimci_motion::Answer`; a Lua motion cannot accidentally be more confident
+  `davimci_motion::Answer`; a Lua motion cannot accidentally be more confident
   than the analysis it queries.
 - Cancellation needed defining, not just implementing: a `BeforeExport`
   handler refuses by returning `false` *or* by throwing. Throwing also
   disables the handler (Phase 0 recoverable policy); a `false` return is a
   deliberate veto and leaves it in place. Spec §9.8 says so now.
 - Trust is not a binary: spec §9.7 said "opt-in" without saying what a
-  trusted file may do. An untrusted `.vimci.lua` is never read, and a trusted
+  trusted file may do. An untrusted `.davimci.lua` is never read, and a trusted
   one still runs sandboxed (no `os`, `io`, `load`, `dofile`, and a `require`
-  that resolves `vimci.*` only). Spec §9.7 now spells this out.
+  that resolves `davimci.*` only). Spec §9.7 now spells this out.
 - Export presets validate at definition, and codec names map to ffmpeg
   encoders here rather than in the preset, so §10.3's "never a marketing
   name" rule cannot be broken by a config.
@@ -503,16 +503,16 @@ no production caller; `Request::Import`/`Analyze` wait on Phase 8/9e, and
 text objects registered from Lua are resolvable but not yet reachable from
 the key grammar, which still resolves only the built-in `ic`/`ac`/`it`/`at`/
 `is`. Keymap overrides are applied for `NORMAL` only, because
-`vimci_keys::Keymap` is a single table for every mode.
+`davimci_keys::Keymap` is a single table for every mode.
 
 ---
 
-## Phase 8 - Project Lifecycle (`vimci-cli`)
+## Phase 8 - Project Lifecycle (`davimci-cli`)
 
 Deliverables (spec §12):
 - `:w`, `:q`, `:q!`, `:wq`, `:e`, `:new`, `:ls`, `:bn`/`:bp`/`:b <n>`.
 - Multiple open timelines with global registers and marks shared across them.
-- Continuous autosave of the command log to `.vimci/autosave/`, never touching
+- Continuous autosave of the command log to `.davimci/autosave/`, never touching
   the project file; crash recovery prompt on next open.
 - `:relink` for offline media (Phase 0 policy).
 
@@ -526,7 +526,7 @@ Testing:
 
 ---
 
-## Phase 8b - Export (`vimci-export` within `vimci-cli`)
+## Phase 8b - Export (`davimci-export` within `davimci-cli`)
 
 Deliverables:
 - Preset registry (built-in + Lua-defined), validation with clear errors.
@@ -547,7 +547,7 @@ Testing:
 
 ---
 
-## Phase 9a - View State (`vimci-app`)
+## Phase 9a - View State (`davimci-app`)
 
 Built before any frontend, so no frontend can invent its own.
 
@@ -570,7 +570,7 @@ Testing:
 
 ---
 
-## Phase 9b - Video Presenter (`vimci-present`)
+## Phase 9b - Video Presenter (`davimci-present`)
 
 One crate, two hosts. This is the anti-duplication keystone.
 
@@ -598,16 +598,16 @@ Testing:
 
 ---
 
-## Phase 9c - GUI Frontend (`vimci-gui`) - primary
+## Phase 9c - GUI Frontend (`davimci-gui`) - primary
 
 Deliverables:
-- Single window: video quad (`vimci-present` embedded) + custom-painted
+- Single window: video quad (`davimci-present` embedded) + custom-painted
   timeline (tracks, clips, ruler with jump-point ticks, playhead, selection)
   + `egui` chrome.
 - Status line, command line (`:`) with history and completion.
 - Media picker for `i`/`a`/`r`; text-edit INSERT mode for subtitle clips;
   clip properties panel (spec §8 transforms).
-- Key event translation into `vimci-keys` tokens; nothing else.
+- Key event translation into `davimci-keys` tokens; nothing else.
 
 Testing:
 - Image-diff snapshot tests of the full window at fixed sizes, covering each
@@ -617,20 +617,20 @@ Testing:
 - Input-translation tests: synthetic `winit` events produce the expected key
   tokens, including modifiers and `<Left>`/`<Right>`.
 - Golden view-state reuse: renders are driven by the Phase 9a fixtures, so a
-  view-state regression fails in both `vimci-app` and here.
+  view-state regression fails in both `davimci-app` and here.
 
 ---
 
-## Phase 9d - TUI Frontend (`vimci-tui`) - optional, `--features tui`
+## Phase 9d - TUI Frontend (`davimci-tui`) - optional, `--features tui`
 
 Explicitly a stepping stone and a nice-to-have. Ships only if it stays thin.
 
 Deliverables:
 - `ratatui` timeline, ruler with tick marks, status line, command line -
-  rendered from the same `vimci-app` view state as the GUI.
-- Preview via `vimci-present` in `Detached` mode; `:set preview off` for
+  rendered from the same `davimci-app` view state as the GUI.
+- Preview via `davimci-present` in `Detached` mode; `:set preview off` for
   no-display sessions.
-- Terminal key translation into `vimci-keys` tokens.
+- Terminal key translation into `davimci-keys` tokens.
 - Documented limitations: no in-video overlays, no properties panel (falls
   back to command mode `:set clip.*`), coarser timeline resolution.
 
@@ -638,14 +638,14 @@ Testing:
 - Terminal snapshot tests (`ratatui` test backend) at fixed sizes per mode.
 - **Cross-frontend parity test:** one scripted session driven through headless,
   GUI, and TUI must produce an identical final timeline snapshot and identical
-  `vimci-app` view state. This is the test that keeps three hosts from becoming
+  `davimci-app` view state. This is the test that keeps three hosts from becoming
   three products; any divergence is a bug in the frontend, never in core.
 - Degradation test: with preview disabled and no display available, the TUI
   still starts and all editing works.
 
 ---
 
-## Phase 9e - Audio Operations (`vimci-core` + `vimci-mlt`)
+## Phase 9e - Audio Operations (`davimci-core` + `davimci-mlt`)
 
 Deferred to here deliberately (spec §6.1): these are clip properties applied as
 render-time filters, so they need the backend and a UI to be worth having.
@@ -668,7 +668,7 @@ Testing:
 
 ---
 
-## Phase 9f - Transitions (`vimci-core` + `vimci-mlt`)
+## Phase 9f - Transitions (`davimci-core` + `davimci-mlt`)
 
 Deliverables (spec §6.2):
 - Transition objects occupying a clip overlap; `gx`, `:transition`, `dax`.
@@ -729,7 +729,7 @@ Testing:
 | Whole app | Scripted headless sessions + soak fuzzing |
 
 Standing rules:
-1. `vimci-core` and `vimci-cmd` have no backend or I/O dependency and must
+1. `davimci-core` and `davimci-cmd` have no backend or I/O dependency and must
    stay 100% unit-testable in-process.
 2. Every bug fix lands with a regression test naming the issue.
 3. Default `cargo test` must be fast; anything requiring real decode/encode is
@@ -740,7 +740,7 @@ Standing rules:
    in the docs, and a headless-GPU (`lavapipe`) job for presenter and GUI
    snapshot tests.
 6. No frontend may contain view logic. If a fix needs to land in both
-   `vimci-gui` and `vimci-tui`, it belongs in `vimci-app` or `vimci-present`
+   `davimci-gui` and `davimci-tui`, it belongs in `davimci-app` or `davimci-present`
    instead - the cross-frontend parity test exists to catch this.
 7. The GUI is the reference frontend. Headless and TUI are validated against
    it, not the reverse.
@@ -752,7 +752,7 @@ Standing rules:
 | M | Definition of done |
 |---|---|
 | M1 | Headless: load a fixture timeline, move playhead, split, ripple delete, undo - all via keys, verified by snapshot tests. No window code exists yet. |
-| M2 | Import a multi-track MKV; frames pull from MLT into `vimci-present` and play in sync with audio in a bare window. No editing UI - proves the video path. |
+| M2 | Import a multi-track MKV; frames pull from MLT into `davimci-present` and play in sync with audio in a bare window. No editing UI - proves the video path. |
 | M3 | GUI: timeline + video in one window, playback and shuttle, scrub with jump points, trim, full cut workflow, save/load, export a multi-audio MKV. **This is the first genuinely usable build.** |
 | M4 | Lua config fully wired: custom motions, text objects, keymaps, hooks, export presets. |
 | M5 | Audio operations: mute, solo, gain, fades, waveforms - completing workflow step 3. |
@@ -763,7 +763,7 @@ Standing rules:
 The ordering rule: **nothing before M3 is a product.** M7 is deliberately
 last-but-one - the TUI is a convenience, and shipping it early would mean
 maintaining two frontends through every core change.
-Correspondingly, `vimci-app` and `vimci-present` are built with two hosts in
+Correspondingly, `davimci-app` and `davimci-present` are built with two hosts in
 mind from the start (cheap), but only one host is *implemented* until M6
 (avoids the three-implementations trap).
 

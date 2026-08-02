@@ -1,4 +1,4 @@
-# AGENTS.md - vimci
+# AGENTS.md - davimci
 
 ## Source of truth
 
@@ -19,11 +19,11 @@ and which phase is in progress.
 These are load-bearing; breaking one is a design defect rather than a style
 issue.
 
-Nothing outside `vimci-mlt` may reference MLT types - the backend sits behind
-the `RenderBackend` trait so it can be replaced. `vimci-core` and `vimci-cmd`
+Nothing outside `davimci-mlt` may reference MLT types - the backend sits behind
+the `RenderBackend` trait so it can be replaced. `davimci-core` and `davimci-cmd`
 have no backend and no I/O, and must stay testable with no window, GPU, or
 media. No frontend contains view logic; if a change has to land in both
-`vimci-gui` and `vimci-tui`, it belongs in `vimci-app` or `vimci-present`.
+`davimci-gui` and `davimci-tui`, it belongs in `davimci-app` or `davimci-present`.
 
 All mutation goes through a `Command` with `apply`/`invert`. There is no other
 write path to the timeline - undo, `.`-repeat, macros, the Lua API, and the
@@ -35,7 +35,7 @@ A timeline has one framerate and one resolution; sources are conformed on
 import. Time is `Frame(u64)`, with no floats in the model.
 
 `libmlt` is linked dynamically and `melt`/`melted` are never vendored, since
-vimci is GPL-3.0 over LGPL-2.1 MLT (spec §13).
+davimci is GPL-3.0 over LGPL-2.1 MLT (spec §13).
 
 ## Errors
 

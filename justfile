@@ -1,4 +1,4 @@
-# vimci dev tasks. Run `just` for the list.
+# davimci dev tasks. Run `just` for the list.
 
 default:
     @just --list
@@ -23,11 +23,11 @@ test-slow: fixtures
 test-all: test test-slow sanitize
 
 # Leak/UB detection, aimed at the MLT refcount wrapper (plan.md Phase 6).
-# Suppressions filter MLT's own one-time module-init state, not vimci's -
-# see crates/vimci-mlt/lsan-suppressions.txt for what and why.
+# Suppressions filter MLT's own one-time module-init state, not davimci's -
+# see crates/davimci-mlt/lsan-suppressions.txt for what and why.
 sanitize:
-    LSAN_OPTIONS="suppressions=$(pwd)/crates/vimci-mlt/lsan-suppressions.txt" \
-    RUSTFLAGS="-Zsanitizer=address" cargo +nightly test -p vimci-mlt \
+    LSAN_OPTIONS="suppressions=$(pwd)/crates/davimci-mlt/lsan-suppressions.txt" \
+    RUSTFLAGS="-Zsanitizer=address" cargo +nightly test -p davimci-mlt \
         --target x86_64-unknown-linux-gnu
 
 lint:
@@ -39,11 +39,11 @@ fix:
     cargo fmt
 
 run *ARGS:
-    cargo run -p vimci-cli -- {{ARGS}}
+    cargo run -p davimci-cli -- {{ARGS}}
 
 # Optional terminal frontend (plan.md Phase 9d).
 run-tui *ARGS:
-    cargo run -p vimci-cli --features tui -- {{ARGS}}
+    cargo run -p davimci-cli --features tui -- {{ARGS}}
 
 bench:
     cargo bench --workspace

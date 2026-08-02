@@ -1,0 +1,20 @@
+[package]
+name = "davimci-mlt-sys"
+description = "Raw FFI bindings to libmlt"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+links = "mlt"
+build = "build.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+
+[build-dependencies]
+pkg-config = "0.3"
+

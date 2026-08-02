@@ -73,6 +73,153 @@ dependencies = [
 ]
 
 [[package]]
+name = "davimci-analysis"
+version = "0.0.0"
+dependencies = [
+ "davimci-cmd",
+ "davimci-core",
+ "davimci-motion",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "davimci-app"
+version = "0.0.0"
+dependencies = [
+ "davimci-cmd",
+ "davimci-core",
+ "davimci-keys",
+ "thiserror",
+]
+
+[[package]]
+name = "davimci-backend"
+version = "0.0.0"
+dependencies = [
+ "davimci-core",
+ "thiserror",
+]
+
+[[package]]
+name = "davimci-cli"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "davimci-analysis",
+ "davimci-core",
+ "davimci-mlt",
+ "davimci-tui",
+]
+
+[[package]]
+name = "davimci-cmd"
+version = "0.0.0"
+dependencies = [
+ "davimci-core",
+ "insta",
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "davimci-core"
+version = "0.0.0"
+dependencies = [
+ "insta",
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "davimci-gui"
+version = "0.0.0"
+dependencies = [
+ "davimci-app",
+ "davimci-present",
+]
+
+[[package]]
+name = "davimci-headless"
+version = "0.0.0"
+dependencies = [
+ "davimci-app",
+]
+
+[[package]]
+name = "davimci-keys"
+version = "0.0.0"
+dependencies = [
+ "davimci-cmd",
+ "davimci-core",
+ "davimci-motion",
+ "thiserror",
+]
+
+[[package]]
+name = "davimci-lua"
+version = "0.0.0"
+dependencies = [
+ "davimci-backend",
+ "davimci-cmd",
+ "davimci-core",
+ "davimci-keys",
+ "davimci-motion",
+ "mlua",
+ "thiserror",
+]
+
+[[package]]
+name = "davimci-mlt"
+version = "0.0.0"
+dependencies = [
+ "davimci-backend",
+ "davimci-core",
+ "davimci-mlt-sys",
+ "insta",
+ "proptest",
+ "thiserror",
+]
+
+[[package]]
+name = "davimci-mlt-sys"
+version = "0.0.0"
+dependencies = [
+ "pkg-config",
+]
+
+[[package]]
+name = "davimci-motion"
+version = "0.0.0"
+dependencies = [
+ "davimci-core",
+ "proptest",
+ "thiserror",
+]
+
+[[package]]
+name = "davimci-present"
+version = "0.0.0"
+dependencies = [
+ "davimci-backend",
+ "davimci-core",
+ "thiserror",
+]
+
+[[package]]
+name = "davimci-tui"
+version = "0.0.0"
+dependencies = [
+ "davimci-app",
+ "davimci-present",
+]
+
+[[package]]
 name = "either"
 version = "1.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -554,153 +701,6 @@ name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
-
-[[package]]
-name = "vimci-analysis"
-version = "0.0.0"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror",
- "vimci-cmd",
- "vimci-core",
- "vimci-motion",
-]
-
-[[package]]
-name = "vimci-app"
-version = "0.0.0"
-dependencies = [
- "thiserror",
- "vimci-cmd",
- "vimci-core",
- "vimci-keys",
-]
-
-[[package]]
-name = "vimci-backend"
-version = "0.0.0"
-dependencies = [
- "thiserror",
- "vimci-core",
-]
-
-[[package]]
-name = "vimci-cli"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "vimci-analysis",
- "vimci-core",
- "vimci-mlt",
- "vimci-tui",
-]
-
-[[package]]
-name = "vimci-cmd"
-version = "0.0.0"
-dependencies = [
- "insta",
- "proptest",
- "serde",
- "serde_json",
- "thiserror",
- "vimci-core",
-]
-
-[[package]]
-name = "vimci-core"
-version = "0.0.0"
-dependencies = [
- "insta",
- "proptest",
- "serde",
- "serde_json",
- "thiserror",
-]
-
-[[package]]
-name = "vimci-gui"
-version = "0.0.0"
-dependencies = [
- "vimci-app",
- "vimci-present",
-]
-
-[[package]]
-name = "vimci-headless"
-version = "0.0.0"
-dependencies = [
- "vimci-app",
-]
-
-[[package]]
-name = "vimci-keys"
-version = "0.0.0"
-dependencies = [
- "thiserror",
- "vimci-cmd",
- "vimci-core",
- "vimci-motion",
-]
-
-[[package]]
-name = "vimci-lua"
-version = "0.0.0"
-dependencies = [
- "mlua",
- "thiserror",
- "vimci-backend",
- "vimci-cmd",
- "vimci-core",
- "vimci-keys",
- "vimci-motion",
-]
-
-[[package]]
-name = "vimci-mlt"
-version = "0.0.0"
-dependencies = [
- "insta",
- "proptest",
- "thiserror",
- "vimci-backend",
- "vimci-core",
- "vimci-mlt-sys",
-]
-
-[[package]]
-name = "vimci-mlt-sys"
-version = "0.0.0"
-dependencies = [
- "pkg-config",
-]
-
-[[package]]
-name = "vimci-motion"
-version = "0.0.0"
-dependencies = [
- "proptest",
- "thiserror",
- "vimci-core",
-]
-
-[[package]]
-name = "vimci-present"
-version = "0.0.0"
-dependencies = [
- "thiserror",
- "vimci-backend",
- "vimci-core",
-]
-
-[[package]]
-name = "vimci-tui"
-version = "0.0.0"
-dependencies = [
- "vimci-app",
- "vimci-present",
-]
 
 [[package]]
 name = "wait-timeout"

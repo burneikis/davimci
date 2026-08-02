@@ -1,0 +1,19 @@
+[package]
+name = "davimci-present"
+description = "winit+wgpu video presenter (embedded and detached hosts)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+davimci-core.workspace = true
+davimci-backend.workspace = true
+thiserror.workspace = true
+
+[features]
+slow-tests = []

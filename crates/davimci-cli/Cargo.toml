@@ -1,0 +1,26 @@
+[package]
+name = "davimci-cli"
+description = "davimci binary"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "davimci"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+davimci-core.workspace = true
+anyhow.workspace = true
+davimci-analysis.workspace = true
+davimci-mlt.workspace = true
+davimci-tui = { workspace = true, optional = true }
+
+[features]
+slow-tests = ["davimci-analysis/slow-tests", "davimci-mlt/slow-tests"]
+tui = ["dep:davimci-tui"]

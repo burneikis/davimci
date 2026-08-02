@@ -1,8 +1,8 @@
-# vimci
+# davimci
 
 A keyboard-first, modal video editor. Vim motions, verbs, and modes for
 cutting footage, trimming audio, compositing overlays, and adding subtitles.
-Configured like Neovim: `~/.config/vimci/init.lua`, a Lua scripting API,
+Configured like Neovim: `~/.config/davimci/init.lua`, a Lua scripting API,
 remappable keys, and hookable events.
 
 - [`spec.md`](spec.md) - what it is and how it behaves
@@ -17,7 +17,7 @@ lifecycle: `:w`, `:e`, buffers, autosave) is next. Workspace builds; `just test`
 and `just fixtures && just test-slow` passes against generated media, now
 including real decode, preview, and export through MLT.
 
-Nothing is runnable yet: `vimci-cli` is still a placeholder and there is no
+Nothing is runnable yet: `davimci-cli` is still a placeholder and there is no
 frontend (see plan.md milestone M1). The backend can project a timeline, seek
 frame-exactly, pull frames, play audio, and encode a file, and a config file
 can bind keys, define motions and export presets, and hook events - but only
@@ -26,7 +26,7 @@ a test drives any of it.
 Lua 5.4 is vendored and built from source, so no system Lua is needed.
 
 `libmlt` (>= 7) is now a build prerequisite: `just check-env` verifies it, and
-it is linked dynamically, since vimci is GPL-3.0 over LGPL-2.1 MLT.
+it is linked dynamically, since davimci is GPL-3.0 over LGPL-2.1 MLT.
 
 | Area | State |
 |---|---|
@@ -53,7 +53,7 @@ it is linked dynamically, since vimci is GPL-3.0 over LGPL-2.1 MLT.
 | Re-conform: `timeline.fps` change with clips present, exactly invertible | implemented, tested |
 | Analysis: peak/RMS at a 10 ms hop, silence spans, scene changes | implemented, tested |
 | Predicate index: O(log n) peak/silence/scene lookup, `Pending` while analysing | implemented, tested |
-| Analysis cache: `.vimci/cache/<hash>.analysis`, versioned, corruption-tolerant | implemented, tested |
+| Analysis cache: `.davimci/cache/<hash>.analysis`, versioned, corruption-tolerant | implemented, tested |
 | Background jobs: progress, cancellation, cancel-on-close | implemented, tested |
 | Proxies: threshold rule, frame-exact spec, `BeforeExport` original-source guard | implemented, tested |
 | `RenderBackend` trait: probe, seek, frame pull, preview, render, progress | implemented, tested |
@@ -66,7 +66,7 @@ it is linked dynamically, since vimci is GPL-3.0 over LGPL-2.1 MLT.
 | Lua edits go through the command layer as requests, never a second write path | implemented, tested |
 | Event dispatch for the v1 event list, with `BeforeExport` cancellation | implemented, tested |
 | Error isolation: a throwing callback is disabled for the session, editing continues | implemented, tested |
-| Project-local `.vimci.lua`: explicit trust, then sandboxed (no `os`/`io`) | implemented, tested |
+| Project-local `.davimci.lua`: explicit trust, then sandboxed (no `os`/`io`) | implemented, tested |
 | Export presets from Lua: codec/container validation, ffmpeg encoder mapping | implemented, tested |
 | Frame pull: RGBA buffers to the presenter, MLT never owns a window | implemented, tested (slow) |
 | Preview scaling: half/quarter requested at decode, not scaled afterwards | implemented, tested (slow) |
@@ -78,14 +78,14 @@ it is linked dynamically, since vimci is GPL-3.0 over LGPL-2.1 MLT.
 
 Caveats worth knowing: undo history is not persisted - reopening a project
 starts a fresh tree from the saved state - and `ac` resolves to the same range
-as `ic` until transitions land in Phase 9f. In `vimci-keys`: `i`/`a`/`r` need
+as `ic` until transitions land in Phase 9f. In `davimci-keys`: `i`/`a`/`r` need
 the media picker that comes with the GUI in Phase 9c and report
 `NotImplemented`; `gx`/`dax` wait on Phase 9f transitions the same way; `<`/`>`
 jump-point edge trims are parsed but not yet wired to a command; visual-mode
 track-object narrowing (typing `it`/`at` while a selection is live) is not
 implemented - operators in a `VISUAL*` mode act on the whole selection.
 
-In `vimci-analysis`: import and analysis work end to end, but nothing calls
+In `davimci-analysis`: import and analysis work end to end, but nothing calls
 them yet, since there is no frontend to import *into*. Analysis measures the
 source, not the post-gain signal, so the cache-invalidation hook for gain and
 fade changes has no caller until Phase 9e; predicate searches by clip tag
@@ -93,7 +93,7 @@ match nothing until clip tags arrive with the Lua API. Decode, scene
 detection, and proxy encoding shell out to `ffmpeg`/`ffprobe`; MLT is used for
 preview and export, not for analysis.
 
-In `vimci-mlt`: transitions are not projected until Phase 9f, and export
+In `davimci-mlt`: transitions are not projected until Phase 9f, and export
 presets arrive in Phase 8b (`RenderSettings` is currently filled in by hand).
 `just sanitize` runs clean (ASan/LSan, nightly + `rust-src` via `rustup`) with
 a narrow, documented suppression file for MLT's own module-init and
@@ -190,28 +190,28 @@ WGPU_BACKEND=vulkan VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
 
 ```
 crates/
-  vimci-core/      timeline model, clips, tracks, grouping, marks, registers
-  vimci-cmd/       command objects (apply/invert), undo tree, macro recorder
-  vimci-motion/    motions, text objects, jump points, predicate index
-  vimci-analysis/  import/conform, waveform, silence, scene change, proxies
-  vimci-backend/   RenderBackend trait
-  vimci-mlt-sys/   raw FFI bindings
-  vimci-mlt/       safe wrapper implementing RenderBackend
-  vimci-lua/       Lua API surface, config loader, autocmds
-  vimci-keys/      key sequence parser, mode FSM
-  vimci-app/       frontend-agnostic view state
-  vimci-present/   winit+wgpu video surface
-  vimci-gui/       primary frontend
-  vimci-tui/       optional terminal frontend
-  vimci-headless/  scriptable frontend for tests
-  vimci-cli/       binary
+  davimci-core/      timeline model, clips, tracks, grouping, marks, registers
+  davimci-cmd/       command objects (apply/invert), undo tree, macro recorder
+  davimci-motion/    motions, text objects, jump points, predicate index
+  davimci-analysis/  import/conform, waveform, silence, scene change, proxies
+  davimci-backend/   RenderBackend trait
+  davimci-mlt-sys/   raw FFI bindings
+  davimci-mlt/       safe wrapper implementing RenderBackend
+  davimci-lua/       Lua API surface, config loader, autocmds
+  davimci-keys/      key sequence parser, mode FSM
+  davimci-app/       frontend-agnostic view state
+  davimci-present/   winit+wgpu video surface
+  davimci-gui/       primary frontend
+  davimci-tui/       optional terminal frontend
+  davimci-headless/  scriptable frontend for tests
+  davimci-cli/       binary
 ```
 
 Two hard rules:
 
-1. Nothing outside `vimci-mlt` may reference MLT types.
-2. No frontend may contain view logic - it belongs in `vimci-app` or
-   `vimci-present`. The cross-frontend parity test enforces this.
+1. Nothing outside `davimci-mlt` may reference MLT types.
+2. No frontend may contain view logic - it belongs in `davimci-app` or
+   `davimci-present`. The cross-frontend parity test enforces this.
 
 ---
 

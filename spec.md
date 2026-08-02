@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-A keyboard-first, modal video editor for cutting down footage, trimming audio, compositing overlays, and adding text/subtitles - controlled with vim-style motions, verbs, and modes. Configured like Neovim: a `.config/vimci/init.lua` entrypoint with a Lua scripting API, remappable keys, and hookable events.
+A keyboard-first, modal video editor for cutting down footage, trimming audio, compositing overlays, and adding text/subtitles - controlled with vim-style motions, verbs, and modes. Configured like Neovim: a `.config/davimci/init.lua` entrypoint with a Lua scripting API, remappable keys, and hookable events.
 
 Primary workflow this is designed around:
 1. Import source video (MKV + others)
@@ -88,7 +88,7 @@ On stop, the playhead **commits** to its current position by default
 (`<Space>p` is the explicit return-to-origin variant). Configurable:
 
 ```lua
-require("vimci.transport").configure({
+require("davimci.transport").configure({
   leader = "<Space>",
   play_pause = "<Space><Space>",   -- or e.g. "<C-Space>"
   on_stop = "commit",              -- or "return"
@@ -356,7 +356,7 @@ undoable command; the editor warns that frame-exact edit points may shift.
 ### 9.1 Location & structure
 
 ```
-~/.config/vimci/
+~/.config/davimci/
 ├── init.lua              -- entrypoint, like nvim's init.lua
 ├── keymaps.lua           -- optional split-out keybindings
 ├── motions/              -- user-defined custom motions
@@ -371,13 +371,13 @@ undoable command; the editor warns that frame-exact edit points may shift.
 ### 9.2 Keymap API
 
 ```lua
-local map = require("vimci.keymap").map
+local map = require("davimci.keymap").map
 
 -- mode, lhs, rhs (rhs can be a string command or a Lua function)
 map("normal", "s", "editor.split_at_playhead")
 map("normal", "x", "editor.ripple_delete")
 map("normal", "<leader>e", function()
-  require("vimci.export").run("youtube_1080p")
+  require("davimci.export").run("youtube_1080p")
 end)
 
 -- rebind arrow keys' frame-step behavior
@@ -393,7 +393,7 @@ is first pressed.
 ### 9.3 Custom motions (predicate-based)
 
 ```lua
-local motions = require("vimci.motions")
+local motions = require("davimci.motions")
 
 motions.register("next_loud_audio", function(ctx, opts)
   return ctx.timeline:find_next({
@@ -413,7 +413,7 @@ This directly supports the requested "jump to next audio above -2dB in audio tra
 ### 9.4 Custom text objects
 
 ```lua
-local textobj = require("vimci.textobject")
+local textobj = require("davimci.textobject")
 
 textobj.register("c", { -- clip
   inner = function(clip) return clip.core_range end,
@@ -426,7 +426,7 @@ Users can define new objects (e.g. `is` for silence-detected segment) the same w
 ### 9.5 Export presets
 
 ```lua
-require("vimci.export").preset("youtube_1080p", {
+require("davimci.export").preset("youtube_1080p", {
   container = "mp4",
   video_codec = "h264",
   audio_codec = "aac",        -- optional, defaults to aac
@@ -446,7 +446,7 @@ render.
 ### 9.6 Zoom / jump-point config
 
 ```lua
-require("vimci.timeline").configure({
+require("davimci.timeline").configure({
   jump_points = { "clip_bounds", "markers", "silence" },
   jump_point_density_per_zoom = {
     [1] = "clip_bounds_only",
@@ -459,24 +459,24 @@ require("vimci.timeline").configure({
 
 ### 9.7 Project-local overrides
 
-- `.vimci.lua` in a project directory, auto-loaded on open, for per-project export presets, track linkage defaults, etc. - same modelines/local-config pattern as nvim's project-local `.nvimrc`-style setups (loaded opt-in for safety).
-- Opt-in means what it says: an untrusted `.vimci.lua` is not read, not
+- `.davimci.lua` in a project directory, auto-loaded on open, for per-project export presets, track linkage defaults, etc. - same modelines/local-config pattern as nvim's project-local `.nvimrc`-style setups (loaded opt-in for safety).
+- Opt-in means what it says: an untrusted `.davimci.lua` is not read, not
   compiled, and not run, and the user is told it was skipped. Trust is
   granted per file path.
 - A trusted project-local file still runs sandboxed. It sees `math`,
-  `string`, `table`, the usual pure builtins, and the `vimci.*` modules. It
+  `string`, `table`, the usual pure builtins, and the `davimci.*` modules. It
   does not see `os`, `io`, `load`, `dofile`, or `loadfile`, and its `require`
-  resolves `vimci.*` and nothing else. "I want this project's export presets"
+  resolves `davimci.*` and nothing else. "I want this project's export presets"
   is not "I want this directory to run arbitrary commands".
 
 ### 9.8 Hooks / events
 
 ```lua
-require("vimci.autocmd").on("SplitPerformed", function(event)
+require("davimci.autocmd").on("SplitPerformed", function(event)
   -- e.g. auto-tag both resulting clips
 end)
 
-require("vimci.autocmd").on("BeforeExport", function(ctx)
+require("davimci.autocmd").on("BeforeExport", function(ctx)
   -- e.g. validate no muted tracks are accidentally included
 end)
 ```
@@ -493,8 +493,8 @@ and leaves it in place.
 ### 9.9 What Lua may and may not do
 
 Lua **asks, it never writes.** Every call that means "change something"
-(`vimci.editor.*`, `vimci.export.run`, `vimci.media.import`,
-`vimci.motions.run`) queues a request, and the editor runs it through the
+(`davimci.editor.*`, `davimci.export.run`, `davimci.media.import`,
+`davimci.motions.run`) queues a request, and the editor runs it through the
 same command layer a keystroke would. Plugin edits are therefore ordinary
 undo-tree entries, repeatable with `.` and recordable in a macro; there is no
 second write path into the timeline.
@@ -544,7 +544,7 @@ Resolutions for the previously-open architectural questions. Each records the ch
 
 **Accepted risk:** MLT's documentation is thin and the API is C with manual refcounting; expect a hand-written safe wrapper layer and a test suite that exercises it.
 
-**Preview is a frame pull, not an MLT window.** Audio goes to a realtime MLT audio consumer, which owns the master clock; video frames are lifted out as RGBA buffers and presented by vimci. MLT never opens a window of its own, because a window it owned could not be composited with vimci's overlays and could not be shared between the GUI and the TUI.
+**Preview is a frame pull, not an MLT window.** Audio goes to a realtime MLT audio consumer, which owns the master clock; video frames are lifted out as RGBA buffers and presented by davimci. MLT never opens a window of its own, because a window it owned could not be composited with davimci's overlays and could not be shared between the GUI and the TUI.
 
 **Preview scaling** is a decode-time request, not a post-scale: a half- or quarter-resolution pull asks for that size at `mlt_frame_get_image()`, so scrubbing and the TUI's small preview are cheap by construction.
 
@@ -556,7 +556,7 @@ Resolutions for the previously-open architectural questions. Each records the ch
 
 **How:**
 - One analysis pass per source on import: peak + RMS waveform at a fixed hop (default 10 ms), silence spans, and optional scene-change keyframes.
-- Results cached to a versioned sidecar at `.vimci/cache/<content_hash>.analysis`. Cache version bumps invalidate.
+- Results cached to a versioned sidecar at `.davimci/cache/<content_hash>.analysis`. Cache version bumps invalidate.
 - Predicate motions (§3.4) become an indexed lookup (O(log n)), so `]a` is instant and correct even when zoomed fully out.
 - The job runs in the background with progress in the status line. Editing is allowed immediately; predicate motions report `analysis pending` until the relevant range is ready.
 - Re-analysis is user-triggered (`:analyze`) after gain/filter changes.
@@ -572,7 +572,7 @@ Resolutions for the previously-open architectural questions. Each records the ch
 **Controls:**
 
 ```lua
-require("vimci.media").configure({
+require("davimci.media").configure({
   proxy = { auto = true, height = 540, codec = "prores_ks" },
 })
 ```
@@ -597,7 +597,7 @@ The inverse is produced *by* applying, not derived from the command alone: the i
 
 ### 10.5 Naming
 
-The project, config directory, Lua module namespace, and project-local file all use `vimci`: `~/.config/vimci/`, `require("vimci.*")`, `.vimci.lua`.
+The project, config directory, Lua module namespace, and project-local file all use `davimci`: `~/.config/davimci/`, `require("davimci.*")`, `.davimci.lua`.
 
 ### 10.6 Still open
 
@@ -652,9 +652,9 @@ Projects behave like vim buffers, with the same command vocabulary.
 
 - Multiple timelines may be open simultaneously; registers and marks are
   **global** across timelines, so a yank in one can be pasted into another.
-- Autosave writes the command log continuously to `.vimci/autosave/`, enabling
+- Autosave writes the command log continuously to `.davimci/autosave/`, enabling
   crash recovery on next open. Autosave never overwrites the project file.
-- `ProjectLoaded` fires after project-local `.vimci.lua` evaluation (§9.7).
+- `ProjectLoaded` fires after project-local `.davimci.lua` evaluation (§9.7).
 
 ---
 
@@ -662,7 +662,7 @@ Projects behave like vim buffers, with the same command vocabulary.
 
 The project is open source and not commercial.
 
-- **vimci is GPL-3.0.** This is the least restrictive option that is also
+- **davimci is GPL-3.0.** This is the least restrictive option that is also
   unambiguously safe given the dependency graph, and it costs nothing here.
 - **MLT** (`extra/mlt`, 7.40.0) is `LGPL-2.1-only`, so dynamic linking imposes
   no obligation beyond LGPL compliance; GPL-3.0 is compatible.
@@ -671,7 +671,7 @@ The project is open source and not commercial.
 - FFmpeg reaches us transitively through MLT's modules. If a build ever enables
   GPL-licensed FFmpeg components, the GPL-3.0 choice already accommodates it.
 - Any Lua config a user writes is their own work and is not a derivative work
-  of vimci.
+  of davimci.
 
 ---
 

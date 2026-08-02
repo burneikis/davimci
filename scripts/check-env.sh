@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Verify the vimci development environment. Exits non-zero if anything is missing.
+# Verify the davimci development environment. Exits non-zero if anything is missing.
 set -uo pipefail
 
 missing=0
@@ -18,7 +18,7 @@ need_bin() {
   fi
 }
 
-echo "vimci environment check"
+echo "davimci environment check"
 echo
 echo "Toolchain:"
 need_bin cargo   "install: pacman -S rust  (or rustup.rs)" --version

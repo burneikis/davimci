@@ -1,0 +1,20 @@
+[package]
+name = "davimci-keys"
+description = "Key sequence parser and mode state machine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+davimci-core.workspace = true
+davimci-cmd.workspace = true
+davimci-motion.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+davimci-core = { workspace = true, features = ["testing"] }

@@ -1,0 +1,23 @@
+[package]
+name = "davimci-lua"
+description = "Lua configuration and plugin API"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+davimci-core.workspace = true
+davimci-motion.workspace = true
+davimci-keys.workspace = true
+davimci-backend.workspace = true
+mlua.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+davimci-cmd.workspace = true
+davimci-core = { workspace = true, features = ["testing"] }

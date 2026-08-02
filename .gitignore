@@ -1,5 +1,5 @@
 /target
-/.vimci
+/.davimci
 **/*.rs.bk
 *.pending-snap
 /target/fixtures

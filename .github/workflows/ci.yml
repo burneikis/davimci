@@ -60,7 +60,7 @@ jobs:
         env:
           WGPU_BACKEND: vulkan
           LIBGL_ALWAYS_SOFTWARE: "1"
-        run: cargo test -p vimci-present -p vimci-gui
+        run: cargo test -p davimci-present -p davimci-gui
 
   # Aimed at the MLT refcount wrapper (spec §10.1 accepted risk).
   sanitize:
@@ -78,7 +78,7 @@ jobs:
       - name: ASan
         env:
           RUSTFLAGS: -Zsanitizer=address
-        run: cargo test -p vimci-mlt --target x86_64-unknown-linux-gnu
+        run: cargo test -p davimci-mlt --target x86_64-unknown-linux-gnu
 
   # Every example config in the docs must load (plan.md Phase 7).
   lua-configs:
@@ -89,7 +89,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: sudo apt-get update && sudo apt-get install -y libmlt-dev
-      - run: cargo test -p vimci-lua -- --include-ignored
+      - run: cargo test -p davimci-lua -- --include-ignored
 
   # Licence hygiene: MLT must never be static-linked, melt never vendored.
   licence:
