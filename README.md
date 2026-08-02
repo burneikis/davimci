@@ -83,11 +83,12 @@ match nothing until clip tags arrive with the Lua API. Decode, scene
 detection, and proxy encoding shell out to `ffmpeg`/`ffprobe`; MLT is used for
 preview and export, not for analysis.
 
-In `vimci-mlt`: transitions are not projected until Phase 9f, export presets
-arrive in Phase 8b (`RenderSettings` is currently filled in by hand), and the
-sanitizer job in `just sanitize` needs a nightly toolchain that is not
-installed here - the refcount guarantees are covered by wrapper unit tests
-instead.
+In `vimci-mlt`: transitions are not projected until Phase 9f, and export
+presets arrive in Phase 8b (`RenderSettings` is currently filled in by hand).
+`just sanitize` runs clean (ASan/LSan, nightly + `rust-src` via `rustup`) with
+a narrow, documented suppression file for MLT's own module-init and
+blank-producer state; the refcount guarantees ultimately rest on the wrapper
+unit tests, which assert MLT's own `ref_count()` directly.
 
 See `plan.md` for the phase order and `plan.md` milestones for what counts as
 usable (M3).

@@ -420,8 +420,16 @@ Amendments made during implementation:
   stopping a preview double-freed.
 - Refcount testing is the wrapper unit tests (`clone_ref` is balanced by drop,
   64 create/clone/drop cycles do not grow the count, a playlist planted in a
-  tractor outlives its wrapper). The sanitizer run in `just sanitize` still
-  needs a nightly toolchain and has not been run on this machine.
+  tractor outlives its wrapper) - they assert on MLT's own `ref_count()`
+  directly rather than relying on a sanitizer. `just sanitize` now runs
+  (nightly + `rust-src` installed via `rustup`) and is green with a narrow,
+  documented LSAN suppression file
+  (`crates/vimci-mlt/lsan-suppressions.txt`) for MLT's own one-time
+  module-init state and its internal blank-producer path, neither of which
+  vimci constructs or holds a handle to. LeakSanitizer's stack scan is
+  conservative and can miss a real leak, so a clean run is evidence for the
+  wrapper, not proof; the `ref_count()` assertions remain the primary
+  guarantee.
 
 Not yet wired: nothing calls this from a frontend, because there is no
 frontend. Transitions are absent until Phase 9f, so the projection plants no

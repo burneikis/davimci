@@ -23,7 +23,10 @@ test-slow: fixtures
 test-all: test test-slow sanitize
 
 # Leak/UB detection, aimed at the MLT refcount wrapper (plan.md Phase 6).
+# Suppressions filter MLT's own one-time module-init state, not vimci's -
+# see crates/vimci-mlt/lsan-suppressions.txt for what and why.
 sanitize:
+    LSAN_OPTIONS="suppressions=$(pwd)/crates/vimci-mlt/lsan-suppressions.txt" \
     RUSTFLAGS="-Zsanitizer=address" cargo +nightly test -p vimci-mlt \
         --target x86_64-unknown-linux-gnu
 
