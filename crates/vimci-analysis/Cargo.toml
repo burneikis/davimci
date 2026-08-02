@@ -12,8 +12,14 @@ workspace = true
 
 [dependencies]
 vimci-core.workspace = true
+vimci-cmd.workspace = true
+vimci-motion.workspace = true
 thiserror.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+vimci-core = { workspace = true, features = ["testing"] }
 
 [features]
 slow-tests = []

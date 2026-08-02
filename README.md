@@ -12,8 +12,9 @@ remappable keys, and hookable events.
 
 <!-- Keep this current. It must never claim more than the code does. -->
 
-**Phase 4 complete - key parser and mode FSM.** Phase 5 (media import, conform
-& analysis) is next. Workspace builds; `just test` and `just lint` are green.
+**Phase 5 complete - media import, conform, and analysis.** Phase 6 (the MLT
+render backend) is next. Workspace builds; `just test` and `just lint` are
+green, and `just fixtures && just test-slow` passes against generated media.
 
 Nothing is runnable yet: `vimci-cli` is still a placeholder, and the model has
 no backend and no frontend (see plan.md milestone M1). `vimci-keys` can drive
@@ -34,22 +35,39 @@ real keyboard events yet.
 | Motions: frame, jump point, clip, marker, `%`, marks, track focus | implemented, tested |
 | Jump-point engine: zoom-aware, cached, monotonic in zoom | implemented, tested |
 | Text objects `ic`/`ac`/`it`/`at`/`is` with track scope | implemented, tested |
-| Predicate motions (`PredicateIndex` trait, `Pending` until analysis exists) | interface only |
+| Predicate motions (`PredicateIndex` trait) | implemented, tested |
 | Key grammar: counts, registers, operators, objects, `g`-prefixed and `<Space>`-leader sequences | implemented, tested |
 | Mode FSM: NORMAL/VISUAL/VISUAL-LINE/VISUAL-BLOCK/INSERT/COMMAND, strict transitions | implemented, tested |
 | Keymap table: defaults + user overrides, longest match wins, ambiguity/timeout handling | implemented, tested |
 | Engine: grammar -> `Session` commands for split/ripple-delete/lift/yank/paste/trim family/gain/fades/undo/redo/repeat/macros | implemented, tested |
-| Analysis, backend, Lua, frontends | not started |
+| Probe: ffprobe JSON to streams, exact rational rates | implemented, tested |
+| Conform: framerate retime, letterbox/crop fit, audio resample flag | implemented, tested |
+| Import: one track per audio/subtitle stream, SRT cues to text clips, one undoable command | implemented, tested |
+| Re-conform: `timeline.fps` change with clips present, exactly invertible | implemented, tested |
+| Analysis: peak/RMS at a 10 ms hop, silence spans, scene changes | implemented, tested |
+| Predicate index: O(log n) peak/silence/scene lookup, `Pending` while analysing | implemented, tested |
+| Analysis cache: `.vimci/cache/<hash>.analysis`, versioned, corruption-tolerant | implemented, tested |
+| Background jobs: progress, cancellation, cancel-on-close | implemented, tested |
+| Proxies: threshold rule, frame-exact spec, `BeforeExport` original-source guard | implemented, tested |
+| Backend, Lua, frontends | not started |
 | Everything else | placeholder crates |
 
 Caveats worth knowing: undo history is not persisted - reopening a project
 starts a fresh tree from the saved state - and `ac` resolves to the same range
 as `ic` until transitions land in Phase 9f. In `vimci-keys`: `i`/`a`/`r` need
-the Phase 5 media picker and report `NotImplemented`; `gx`/`dax` wait on
-Phase 9f transitions the same way; `<`/`>` jump-point edge trims are parsed
-but not yet wired to a command; visual-mode track-object narrowing (typing
-`it`/`at` while a selection is live) is not implemented - operators in a
-`VISUAL*` mode act on the whole selection.
+the media picker that comes with the GUI in Phase 9c and report
+`NotImplemented`; `gx`/`dax` wait on Phase 9f transitions the same way; `<`/`>`
+jump-point edge trims are parsed but not yet wired to a command; visual-mode
+track-object narrowing (typing `it`/`at` while a selection is live) is not
+implemented - operators in a `VISUAL*` mode act on the whole selection.
+
+In `vimci-analysis`: import and analysis work end to end, but nothing calls
+them yet, since there is no frontend to import *into*. Analysis measures the
+source, not the post-gain signal, so the cache-invalidation hook for gain and
+fade changes has no caller until Phase 9e; predicate searches by clip tag
+match nothing until clip tags arrive with the Lua API. Decode, scene
+detection, and proxy encoding shell out to `ffmpeg`/`ffprobe` - MLT does not
+enter the picture until Phase 6.
 
 See `plan.md` for the phase order and `plan.md` milestones for what counts as
 usable (M3).

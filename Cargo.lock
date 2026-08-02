@@ -409,8 +409,11 @@ name = "vimci-analysis"
 version = "0.0.0"
 dependencies = [
  "serde",
+ "serde_json",
  "thiserror",
+ "vimci-cmd",
  "vimci-core",
+ "vimci-motion",
 ]
 
 [[package]]
@@ -461,6 +464,7 @@ dependencies = [
  "insta",
  "proptest",
  "serde",
+ "serde_json",
  "thiserror",
 ]
 

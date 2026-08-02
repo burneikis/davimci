@@ -319,6 +319,38 @@ Testing:
 - Concurrency test: editing during an in-flight analysis job leaves predicate
   motions returning `Pending`, never stale or wrong results.
 
+Status: complete. The crate is split so that everything expressible as a pure
+function of data is one - ffprobe JSON parsing, the fit rectangle, the conform
+matrix, SRT parsing, silence detection, the predicate index, the proxy
+threshold rule - and only `probe::FfprobeProber`, `decode`, `proxy::generate`
+and `cache` touch the outside world. That is what keeps the default suite free
+of decode/encode; the fixture-backed tests live in `tests/media.rs` behind
+`--features slow-tests`.
+
+Amendments made during implementation:
+
+- Import had to become a real edit, so Phase 2's command set gained `AddTrack`
+  and `RemoveTrack` and Phase 1 gained `add_track_with_id`/`remove_track`. An
+  import is one `Sequence`; undoing it removes the tracks it created.
+- A command cannot mint an id its own siblings need, so ids are pinned before
+  the sequence is built (`Timeline::reserve_ids`, `Session::reserve_ids`).
+- Re-conform is *not* self-inverse: rounding at one rate is not reversible at
+  another, and a clip that rounds to zero frames has to be repaired rather
+  than lost. `Reconform` therefore inverts to `RestoreConform`, which replays
+  the exact prior geometry (`vimci_core::conform`). Undo of a rate change is
+  byte-identical.
+- Predicate queries index a threshold chosen at *query* time, which a sorted
+  list cannot answer in log time. `index::MaxTree` is a max segment tree with
+  a directional descent, so `]a` is O(log n) for any threshold and never
+  scans.
+- Spec §10.3's `prores_proxy` was not an ffmpeg encoder name; the slow tests
+  caught it. The default is now `prores_ks` at profile 0, and spec.md says so.
+
+Not yet wired: nothing calls this from a frontend, because there is no
+frontend. `Predicate::Tagged` matches nothing until clip tags exist (Phase 7),
+and analysis measures the source rather than the post-gain signal, so the
+`invalidate`/`:analyze` path in Phase 9e is a hook without a caller.
+
 ---
 
 ## Phase 6 - Render Backend (`vimci-backend`, `vimci-mlt-sys`, `vimci-mlt`)

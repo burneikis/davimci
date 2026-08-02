@@ -91,11 +91,76 @@ impl Timeline {
     }
 
     pub fn add_track(&mut self, kind: TrackKind) -> TrackId {
-        let n = self.tracks.iter().filter(|t| t.kind == kind).count() + 1;
         let id = self.ids.track();
-        self.tracks
-            .push(Track::new(id, format!("{}{n}", kind.prefix()), kind));
+        let name = self.next_track_name(kind);
+        self.tracks.push(Track::new(id, name, kind));
         id
+    }
+
+    /// The name [`Timeline::add_track`] would give the next track of `kind`.
+    #[must_use]
+    pub fn next_track_name(&self, kind: TrackKind) -> String {
+        let n = self.tracks.iter().filter(|t| t.kind == kind).count() + 1;
+        format!("{}{n}", kind.prefix())
+    }
+
+    /// Add a track with an id and name chosen by the caller.
+    ///
+    /// The command layer needs this so that redoing an import reproduces the
+    /// same track ids, exactly as `split_at_with_id` does for clips
+    /// (plan.md Phase 2).
+    pub fn add_track_with_id(
+        &mut self,
+        id: TrackId,
+        name: impl Into<String>,
+        kind: TrackKind,
+    ) -> Result<(), CoreError> {
+        let name = name.into();
+        if self.track(id).is_some() {
+            return Err(CoreError::DuplicateTrack(id.to_string()));
+        }
+        if self.track_by_name(&name).is_some() {
+            return Err(CoreError::DuplicateTrack(name));
+        }
+        self.tracks.push(Track::new(id, name, kind));
+        self.debug_assert_invariants();
+        Ok(())
+    }
+
+    /// Reserve `n` raw ids for a caller that must pin them before it can
+    /// build its commands - an import names the track a clip goes on before
+    /// the `AddTrack` that creates it has run (plan.md Phase 5).
+    ///
+    /// Ids are monotonic and never reused, so ids reserved by a plan that is
+    /// then rejected are simply skipped.
+    pub fn reserve_ids(&mut self, n: usize) -> Vec<u64> {
+        (0..n).map(|_| self.ids.clip().get()).collect()
+    }
+
+    /// Allocate the next track id, for a command that must record the id it
+    /// used (see [`Timeline::add_track_with_id`]).
+    pub fn new_track_id(&mut self) -> TrackId {
+        self.ids.track()
+    }
+
+    /// Remove an empty track. A track with clips is refused: dropping content
+    /// is an edit, and has to be one the log can see.
+    pub fn remove_track(&mut self, id: TrackId) -> Result<(String, TrackKind), CoreError> {
+        let t = self.require_track(id)?;
+        if !t.is_empty() {
+            return Err(CoreError::TrackNotEmpty(t.name.clone()));
+        }
+        if self.tracks.len() == 1 {
+            return Err(CoreError::TrackNotEmpty(t.name.clone()));
+        }
+        let (name, kind) = (t.name.clone(), t.kind);
+        self.tracks.retain(|t| t.id != id);
+        if self.playhead.track == id {
+            // The playhead cannot focus a track that is gone.
+            self.playhead.track = self.tracks[0].id;
+        }
+        self.debug_assert_invariants();
+        Ok((name, kind))
     }
 
     #[must_use]

@@ -62,6 +62,14 @@ impl Session {
         self.timeline.marks.insert(name, Mark { frame, track });
     }
 
+    /// Reserve ids for a caller that must pin them before it can build its
+    /// commands - see [`vimci_core::Timeline::reserve_ids`]. Not a write to
+    /// the timeline's content: the id cursor is bookkeeping, and undo
+    /// reconciles it either way.
+    pub fn reserve_ids(&mut self, n: usize) -> Vec<u64> {
+        self.timeline.reserve_ids(n)
+    }
+
     pub fn macros_mut(&mut self) -> &mut MacroRecorder {
         &mut self.macros
     }

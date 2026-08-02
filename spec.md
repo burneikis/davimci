@@ -290,6 +290,11 @@ map onto MLT transitions.
 ## 7. File Format & Export Support
 
 - **Import**: MKV as first-class citizen (multi-track audio and multi-subtitle streams inside a single MKV must be exposed as separate audio/text tracks on import, individually editable). Also support common containers (MP4, MOV, WebM) via the same import pipeline (likely FFmpeg-based demuxing).
+- **Import is one edit.** Every track and clip a file produces is added by a
+  single undoable command, so `u` after an import removes exactly what the
+  import added - tracks included - and redo reproduces the same ids. An import
+  into an empty project also sets the timeline properties (§7.1) as part of
+  that same command.
 ### 7.1 Timeline normalization (single framerate and resolution)
 
 **The timeline has exactly one framerate and one resolution.** They are fixed
@@ -483,13 +488,13 @@ Resolutions for the previously-open architectural questions. Each records the ch
 
 **Rule:** generate a proxy when the source is above 1080p, or uses a long-GOP / expensive-to-seek codec (H.265, 10-bit, HEVC screen captures). Below that threshold, decode the original directly.
 
-**Format:** 540p (configurable) intra-only ProRes Proxy or DNxHR LB, matching the source framerate and timecode so frame numbers stay identical.
+**Format:** 540p (configurable) intra-only ProRes Proxy or DNxHR LB, matching the source framerate and timecode so frame numbers stay identical. ProRes Proxy is the `prores_ks` encoder at profile 0; `codec` names an ffmpeg encoder, not a marketing name.
 
 **Controls:**
 
 ```lua
 require("vimci.media").configure({
-  proxy = { auto = true, height = 540, codec = "prores_proxy" },
+  proxy = { auto = true, height = 540, codec = "prores_ks" },
 })
 ```
 

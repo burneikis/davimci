@@ -26,8 +26,10 @@
 use serde::{Deserialize, Serialize};
 
 use vimci_core::{
-    Clip, ClipId, ClipProps, CoreError, Edge, Frame, GroupId, Register, Timeline, TrackId,
+    Clip, ClipId, ClipProps, ConformState, CoreError, Edge, Frame, GroupId, Register,
+    TimelineProps, TrackId,
 };
+use vimci_core::{Timeline, TrackKind};
 
 use crate::error::CmdError;
 
@@ -145,6 +147,23 @@ pub enum EditCommand {
         clip: ClipId,
         group: Option<GroupId>,
     },
+    /// Add a track (spec §7 import: one track per stream).
+    AddTrack {
+        kind: TrackKind,
+        /// `None` takes the next name in the `V1`/`A2` sequence.
+        name: Option<String>,
+        /// `None` mints a fresh id; the log always records `Some`.
+        new_id: Option<TrackId>,
+    },
+    /// Remove an empty track.
+    RemoveTrack { track: TrackId },
+    /// Change the timeline's framerate/resolution, retiming every clip
+    /// (spec §7.1). One undoable command, however many clips it moves.
+    Reconform { props: TimelineProps },
+    /// Put back a geometry captured by a re-conform. This, not another
+    /// `Reconform`, is a re-conform's inverse: rounding is not reversible,
+    /// so undo replays the exact prior state instead of recomputing it.
+    RestoreConform { state: Box<ConformState> },
     /// Replace a clip's non-destructive properties (spec §6.1, §8).
     SetProps {
         track: TrackId,
@@ -174,6 +193,10 @@ pub const VARIANT_NAMES: &[&str] = &[
     "Slide",
     "Link",
     "SetGroup",
+    "AddTrack",
+    "RemoveTrack",
+    "Reconform",
+    "RestoreConform",
     "SetProps",
     "Sequence",
 ];
@@ -197,6 +220,10 @@ impl EditCommand {
             Self::Slide { .. } => "Slide",
             Self::Link { .. } => "Link",
             Self::SetGroup { .. } => "SetGroup",
+            Self::AddTrack { .. } => "AddTrack",
+            Self::RemoveTrack { .. } => "RemoveTrack",
+            Self::Reconform { .. } => "Reconform",
+            Self::RestoreConform { .. } => "RestoreConform",
             Self::SetProps { .. } => "SetProps",
             Self::Sequence(_) => "Sequence",
         }
@@ -247,6 +274,12 @@ impl EditCommand {
                 clips: clips.clone(),
                 group: None,
             },
+            Self::AddTrack { kind, .. } => Self::AddTrack {
+                kind: *kind,
+                // A repeated import makes another track, not a name clash.
+                name: None,
+                new_id: None,
+            },
             Self::Sequence(v) => Self::Sequence(v.iter().map(Self::for_repeat).collect()),
             other => other.clone(),
         }
@@ -277,6 +310,15 @@ impl Command for EditCommand {
                 clip,
                 group: Some(g),
             } => format!("put {clip} in {g}"),
+            Self::AddTrack { kind, name, .. } => match name {
+                Some(n) => format!("add track {n}"),
+                None => format!("add a {} track", kind.prefix()),
+            },
+            Self::RemoveTrack { track } => format!("remove track {track}"),
+            Self::Reconform { props } => format!("conform the timeline to {props}"),
+            Self::RestoreConform { state } => {
+                format!("conform the timeline back to {}", state.props)
+            }
             Self::SetProps { clip, .. } => format!("set properties of {clip}"),
             Self::Sequence(v) => match v.len() {
                 0 => "nothing".to_string(),
@@ -589,6 +631,61 @@ impl Command for EditCommand {
                 })
             }
 
+            Self::AddTrack { kind, name, new_id } => {
+                let name = name.clone().unwrap_or_else(|| tl.next_track_name(*kind));
+                let cursor = tl.id_cursor();
+                let id = match new_id {
+                    Some(id) => *id,
+                    None => tl.new_track_id(),
+                };
+                match tl.add_track_with_id(id, name.clone(), *kind) {
+                    Ok(()) => Ok(Effect {
+                        applied: Self::AddTrack {
+                            kind: *kind,
+                            name: Some(name),
+                            new_id: Some(id),
+                        },
+                        inverse: Self::RemoveTrack { track: id },
+                    }),
+                    Err(e) => {
+                        tl.set_id_cursor(cursor);
+                        Err(e.into())
+                    }
+                }
+            }
+
+            Self::RemoveTrack { track } => {
+                let (name, kind) = tl.remove_track(*track)?;
+                Ok(Effect {
+                    applied: self.clone(),
+                    inverse: Self::AddTrack {
+                        kind,
+                        name: Some(name),
+                        new_id: Some(*track),
+                    },
+                })
+            }
+
+            Self::Reconform { props } => {
+                let before = tl.reconform(*props)?;
+                Ok(Effect {
+                    applied: self.clone(),
+                    inverse: Self::RestoreConform {
+                        state: Box::new(before),
+                    },
+                })
+            }
+
+            Self::RestoreConform { state } => {
+                let before = tl.restore_conform(state)?;
+                Ok(Effect {
+                    applied: self.clone(),
+                    inverse: Self::RestoreConform {
+                        state: Box::new(before),
+                    },
+                })
+            }
+
             Self::SetProps {
                 track,
                 clip,
@@ -764,7 +861,7 @@ fn push_flat(out: &mut Vec<EditCommand>, cmd: EditCommand) {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
     use vimci_core::testing::{clip_ids, fixture, media_fixture, track_id};
@@ -1228,6 +1325,18 @@ mod tests {
                 clip,
                 group: Some(GroupId(2)),
             },
+            EditCommand::AddTrack {
+                kind: TrackKind::Audio,
+                name: Some("A9".into()),
+                new_id: Some(TrackId(42)),
+            },
+            EditCommand::RemoveTrack { track },
+            EditCommand::Reconform {
+                props: TimelineProps::default(),
+            },
+            EditCommand::RestoreConform {
+                state: Box::new(fixture(&[("V1", &[(0, 10, "a")])]).conform_state()),
+            },
             EditCommand::SetProps {
                 track,
                 clip,
@@ -1254,6 +1363,66 @@ mod tests {
             assert!(seen.contains(name), "no sample command for {name}");
         }
         assert_eq!(seen.len(), VARIANT_NAMES.len());
+    }
+
+    #[test]
+    fn adding_a_track_is_undoable_and_redoes_to_the_same_id() {
+        let mut tl = fixture(&[("V1", &[(0, 100, "a")])]);
+        let effect = roundtrip(
+            &mut tl,
+            &EditCommand::AddTrack {
+                kind: TrackKind::Audio,
+                name: None,
+                new_id: None,
+            },
+        );
+        match effect.applied {
+            // The log must pin both the id and the generated name, or a redo
+            // could name the track differently.
+            EditCommand::AddTrack { name, new_id, .. } => {
+                assert_eq!(name.as_deref(), Some("A2"));
+                assert!(new_id.is_some());
+            }
+            other => panic!("unexpected applied form: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_track_with_clips_on_it_cannot_be_removed() {
+        let mut tl = fixture(&[("V1", &[(0, 100, "a")])]);
+        let v1 = track_id(&tl, "V1");
+        let before = json(&tl);
+        assert!(
+            EditCommand::RemoveTrack { track: v1 }
+                .apply(&mut tl)
+                .is_err()
+        );
+        assert_eq!(json(&tl), before);
+    }
+
+    #[test]
+    fn reconform_is_one_undoable_command_that_restores_exactly() {
+        // plan.md Phase 5: "change timeline.fps with clips present, assert it
+        // is a single undoable command that restores exactly on undo".
+        let mut tl = fixture(&[
+            ("V1", &[(0, 100, "a"), (100, 3, "b")]),
+            ("A1", &[(0, 250, "c")]),
+        ]);
+        tl.props = TimelineProps {
+            fps: vimci_core::Fps::FPS_30,
+            ..TimelineProps::default()
+        };
+        let effect = roundtrip(
+            &mut tl,
+            &EditCommand::Reconform {
+                props: TimelineProps {
+                    fps: vimci_core::Fps::FPS_23_976,
+                    ..TimelineProps::default()
+                },
+            },
+        );
+        assert!(matches!(effect.inverse, EditCommand::RestoreConform { .. }));
+        assert_eq!(tl.props.fps, vimci_core::Fps::FPS_23_976);
     }
 
     #[test]

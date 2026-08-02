@@ -74,6 +74,12 @@ pub enum CoreError {
     #[error("clip {0} is already on the timeline")]
     DuplicateClip(String),
 
+    #[error("track {0} is already on the timeline")]
+    DuplicateTrack(String),
+
+    #[error("track {0} still has clips on it")]
+    TrackNotEmpty(String),
+
     #[error("invalid clip property: {reason}")]
     InvalidProps { reason: String },
 
@@ -118,6 +124,8 @@ impl Classify for CoreError {
             | Self::CannotLink { .. }
             | Self::CannotJoin { .. }
             | Self::DuplicateClip(_)
+            | Self::DuplicateTrack(_)
+            | Self::TrackNotEmpty(_)
             | Self::InvalidProps { .. }
             | Self::InvalidRange { .. }
             | Self::ZeroDuration
@@ -231,6 +239,8 @@ mod tests {
                 reason: "different sources".into(),
             },
             CoreError::DuplicateClip("c4".into()),
+            CoreError::DuplicateTrack("t4".into()),
+            CoreError::TrackNotEmpty("A2".into()),
             CoreError::InvalidProps {
                 reason: "fades are longer than the clip".into(),
             },
