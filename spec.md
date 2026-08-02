@@ -57,6 +57,12 @@ Mode is shown in a status line near the playhead (e.g. `-- VISUAL (V1,A2) --`).
   user can see where `h`/`l` will land before pressing it.
 - Configurable: `jump_point_density`, and whether jump points snap to
   (clip bounds | markers | beat-detected audio peaks | silence boundaries).
+- Density is **monotonic in zoom**: zooming in only ever adds points, never
+  moves or removes one, so a landing spot never shifts under the user. Below a
+  configurable zoom level there are no subdivisions at all and `h`/`l` are
+  purely clip- and marker-level; above it, subdivision spacing halves per level
+  down to one frame.
+- Frame zero and the end of the timeline are always jump points.
 
 ### 3.2.1 Transport / playback
 
@@ -117,6 +123,12 @@ or bound:
 ```lua
 map("normal", "]a", motions.next_audio_peak({ track = "A2", threshold_db = -2 }))
 ```
+
+Predicate motions are answered by the analysis index (§10.2), which is built
+in the background. A query therefore has three outcomes, not two: a match, a
+definite no-match, or **pending**. A partially analysed track always reports
+pending - the playhead does not move and the status line says analysis is
+still running, because a guessed landing frame is worse than none.
 
 Built-in predicate motion library (extensible):
 - `next_audio_peak(track, threshold_db)`
@@ -186,6 +198,21 @@ So:
 - `dac` → ripple-delete clip + transition
 - `dit` → ripple-delete on this track only, other tracks unaffected (gap stays on them unless ripple-linked)
 - `dat` → ripple-delete across the linked track-group (e.g. video clip + its sync'd audio)
+
+Every object resolves to a **(range, scope)** pair, where the scope is the set
+of tracks the verb may touch:
+
+| Object | Range | Scope |
+|---|---|---|
+| `ic` | the clip under the playhead, transitions excluded | focused track only |
+| `ac` | the clip plus its adjoining transitions | focused track only |
+| `it` | the clip's extent | focused track only, link groups ignored |
+| `at` | the clip's extent | every track the clip's link group reaches; identical to `it` for an unlinked clip |
+| `is` | the VISUAL selection; fails outside VISUAL | focused track only |
+
+Until transitions exist (§6.2), `ac` resolves to the same range as `ic`; it
+widens automatically once a transition can be attached, with no change at the
+call site.
 
 This directly answers the "edit single tracks at a time, or grouped tracks"
 requirement: **the object you delete/select determines whether the operation

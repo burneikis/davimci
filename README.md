@@ -12,8 +12,8 @@ remappable keys, and hookable events.
 
 <!-- Keep this current. It must never claim more than the code does. -->
 
-**Phase 2 complete - command layer and undo tree.** Phase 3 (motions, jump
-points, text objects) is next. Workspace builds; `just test` and `just lint`
+**Phase 3 complete - motions, jump points, and text objects.** Phase 4 (key
+parser and mode FSM) is next. Workspace builds; `just test` and `just lint`
 are green.
 
 Nothing is runnable yet: `vimci-cli` is still a placeholder, and the model has
@@ -30,12 +30,17 @@ no backend, no keys, and no frontend (see plan.md milestone M1).
 | Undo tree: `u`, `Ctrl-r`, `g-`/`g+`, `:undolist`, snapshot drift guard | implemented, tested |
 | Repeat register (`.`) and macro record/replay buffers (`q`/`@`) | implemented, tested |
 | Project format: snapshot + command log, versioned with a migration hook | implemented, tested |
-| Motions, key parser, analysis, backend, Lua, frontends | not started |
+| Motions: frame, jump point, clip, marker, `%`, marks, track focus | implemented, tested |
+| Jump-point engine: zoom-aware, cached, monotonic in zoom | implemented, tested |
+| Text objects `ic`/`ac`/`it`/`at`/`is` with track scope | implemented, tested |
+| Predicate motions (`PredicateIndex` trait, `Pending` until analysis exists) | interface only |
+| Key parser, analysis, backend, Lua, frontends | not started |
 | Everything else | placeholder crates |
 
 Caveats worth knowing: macros hold opaque input tokens until `vimci-keys`
-exists to interpret them, and undo history is not persisted - reopening a
-project starts a fresh tree from the saved state.
+exists to interpret them, undo history is not persisted - reopening a project
+starts a fresh tree from the saved state - and `ac` resolves to the same range
+as `ic` until transitions land in Phase 9f.
 
 See `plan.md` for the phase order and `plan.md` milestones for what counts as
 usable (M3).

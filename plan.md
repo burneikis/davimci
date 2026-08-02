@@ -226,6 +226,14 @@ Testing:
 - Text-object scope matrix test: each object x each grouping configuration,
   asserting exactly which tracks the resolved scope touches.
 
+Status: complete. Motions and objects are pure queries - they resolve a target
+and never mutate, so a verb can validate before building a command. The
+jump-point set is memoised behind a fingerprint of everything it reads, so a
+stale hit is not representable. Predicate motions go through the
+`PredicateIndex` trait and report `Pending` until Phase 5 implements it;
+`ac` currently resolves to the same range as `ic` and widens on its own once
+Phase 9f adds transitions (spec §4.1).
+
 ---
 
 ## Phase 4 - Key Parser & Mode FSM (`vimci-keys`)

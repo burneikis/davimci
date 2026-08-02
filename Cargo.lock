@@ -514,6 +514,7 @@ version = "0.0.0"
 name = "vimci-motion"
 version = "0.0.0"
 dependencies = [
+ "proptest",
  "thiserror",
  "vimci-core",
 ]
