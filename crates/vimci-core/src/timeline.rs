@@ -393,6 +393,53 @@ impl Timeline {
         Ok(())
     }
 
+    /// Set a track's mute flag (spec §6.1, `<Space>m`).
+    ///
+    /// Track state, not clip state: muting changes what the backend renders
+    /// and nothing about the media or the clips.
+    pub fn set_track_muted(&mut self, track: TrackId, muted: bool) -> Result<(), CoreError> {
+        self.require_track(track)?;
+        if let Some(t) = self.track_mut(track) {
+            t.muted = muted;
+        }
+        Ok(())
+    }
+
+    /// Set a track's solo flag (spec §6.1, `<Space>s`).
+    ///
+    /// Solo is exclusive by *effect*, not by state: any soloed track silences
+    /// every non-soloed one, which the backend resolves at projection time.
+    /// Several tracks may therefore be soloed at once.
+    pub fn set_track_solo(&mut self, track: TrackId, solo: bool) -> Result<(), CoreError> {
+        self.require_track(track)?;
+        if let Some(t) = self.track_mut(track) {
+            t.solo = solo;
+        }
+        Ok(())
+    }
+
+    /// Flag a clip's media offline, or bring it back (Phase 0 policy).
+    ///
+    /// The project stays editable either way; the flag is what makes the
+    /// backend render a placeholder and what blocks export.
+    pub fn set_media_offline(&mut self, clip: ClipId, offline: bool) -> Result<(), CoreError> {
+        let (track, c) = self
+            .find_clip(clip)
+            .ok_or_else(|| CoreError::NoSuchClip(clip.to_string()))?;
+        if c.media.is_none() {
+            return Err(CoreError::InvalidProps {
+                reason: "a generated clip has no media to take offline".into(),
+            });
+        }
+        if let Some(t) = self.track_mut(track)
+            && let Some(c) = t.clip_mut(clip)
+            && let Some(m) = c.media.as_mut()
+        {
+            m.offline = offline;
+        }
+        Ok(())
+    }
+
     /// Every clip in `group`, as `(track, clip id)` pairs.
     #[must_use]
     pub fn group_members(&self, group: GroupId) -> Vec<(TrackId, ClipId)> {
@@ -540,6 +587,39 @@ mod tests {
         assert_eq!(tl.playhead().frame, Frame::ZERO);
         assert_eq!(tl.duration(), Frame::ZERO);
         tl.assert_invariants();
+    }
+
+    #[test]
+    fn mute_and_solo_are_track_state_and_reject_unknown_tracks() {
+        let mut tl = fixture(&[("A1", &[(0, 10, "a")]), ("A2", &[(0, 10, "b")])]);
+        let a1 = tl.tracks()[0].id;
+        tl.set_track_muted(a1, true).unwrap();
+        tl.set_track_solo(a1, true).unwrap();
+        assert!(tl.tracks()[0].muted && tl.tracks()[0].solo);
+        assert!(!tl.tracks()[1].muted && !tl.tracks()[1].solo);
+        tl.set_track_muted(a1, false).unwrap();
+        assert!(!tl.tracks()[0].muted);
+        assert!(tl.set_track_muted(TrackId(9999), true).is_err());
+        tl.assert_invariants();
+    }
+
+    #[test]
+    fn offline_flagging_needs_media_and_leaves_the_clip_editable() {
+        let mut tl = crate::testing::media_fixture(&[(0, 10, 0, 100)]);
+        let media_clip = tl.tracks()[0].clips()[0].id;
+        tl.set_media_offline(media_clip, true).unwrap();
+        let (_, c) = tl.find_clip(media_clip).unwrap();
+        assert!(c.media.as_ref().is_some_and(|m| m.offline));
+        assert_eq!(c.duration, Frame(10), "going offline is not an edit");
+        tl.set_media_offline(media_clip, false).unwrap();
+        assert!(
+            tl.find_clip(media_clip)
+                .is_some_and(|(_, c)| c.media.as_ref().is_some_and(|m| !m.offline))
+        );
+
+        let mut generated = fixture(&[("V1", &[(0, 10, "a")])]);
+        let gen_clip = generated.tracks()[0].clips()[0].id;
+        assert!(generated.set_media_offline(gen_clip, true).is_err());
     }
 
     #[test]

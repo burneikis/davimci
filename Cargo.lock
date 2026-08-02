@@ -156,6 +156,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
+name = "pkg-config"
+version = "0.3.33"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
+
+[[package]]
 name = "ppv-lite86"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -505,6 +511,8 @@ dependencies = [
 name = "vimci-mlt"
 version = "0.0.0"
 dependencies = [
+ "insta",
+ "proptest",
  "thiserror",
  "vimci-backend",
  "vimci-core",
@@ -514,6 +522,9 @@ dependencies = [
 [[package]]
 name = "vimci-mlt-sys"
 version = "0.0.0"
+dependencies = [
+ "pkg-config",
+]
 
 [[package]]
 name = "vimci-motion"

@@ -12,14 +12,18 @@ remappable keys, and hookable events.
 
 <!-- Keep this current. It must never claim more than the code does. -->
 
-**Phase 5 complete - media import, conform, and analysis.** Phase 6 (the MLT
-render backend) is next. Workspace builds; `just test` and `just lint` are
-green, and `just fixtures && just test-slow` passes against generated media.
+**Phase 6 complete - the MLT render backend.** Phase 7 (the Lua config and
+plugin API) is next. Workspace builds; `just test` and `just lint` are green,
+and `just fixtures && just test-slow` passes against generated media, now
+including real decode, preview, and export through MLT.
 
-Nothing is runnable yet: `vimci-cli` is still a placeholder, and the model has
-no backend and no frontend (see plan.md milestone M1). `vimci-keys` can drive
-a `Session` end-to-end from raw key strings in tests, but nothing feeds it
-real keyboard events yet.
+Nothing is runnable yet: `vimci-cli` is still a placeholder and there is no
+frontend (see plan.md milestone M1). The backend can project a timeline, seek
+frame-exactly, pull frames, play audio, and encode a file - but only a test
+drives it.
+
+`libmlt` (>= 7) is now a build prerequisite: `just check-env` verifies it, and
+it is linked dynamically, since vimci is GPL-3.0 over LGPL-2.1 MLT.
 
 | Area | State |
 |---|---|
@@ -49,7 +53,17 @@ real keyboard events yet.
 | Analysis cache: `.vimci/cache/<hash>.analysis`, versioned, corruption-tolerant | implemented, tested |
 | Background jobs: progress, cancellation, cancel-on-close | implemented, tested |
 | Proxies: threshold rule, frame-exact spec, `BeforeExport` original-source guard | implemented, tested |
-| Backend, Lua, frontends | not started |
+| `RenderBackend` trait: probe, seek, frame pull, preview, render, progress | implemented, tested |
+| `MockBackend`: deterministic frames, no decode, for every upstream test | implemented, tested |
+| MLT FFI: hand-written bindings, RAII wrappers, refcount-balanced `clone_ref` | implemented, tested |
+| Timeline -> tractor/playlist projection, with golden MLT XML | implemented, tested |
+| Incremental projection: split/ripple patch playlists instead of rebuilding | implemented, tested |
+| Frame pull: RGBA buffers to the presenter, MLT never owns a window | implemented, tested (slow) |
+| Preview scaling: half/quarter requested at decode, not scaled afterwards | implemented, tested (slow) |
+| Preview: realtime audio consumer as master clock, frames lifted from it | implemented, tested (slow) |
+| Export: `avformat` consumer, polled progress, cancellation | implemented, tested (slow) |
+| Mute/solo and offline-media flags on the model, honoured by the projection | implemented, tested |
+| Lua, frontends | not started |
 | Everything else | placeholder crates |
 
 Caveats worth knowing: undo history is not persisted - reopening a project
@@ -66,8 +80,14 @@ them yet, since there is no frontend to import *into*. Analysis measures the
 source, not the post-gain signal, so the cache-invalidation hook for gain and
 fade changes has no caller until Phase 9e; predicate searches by clip tag
 match nothing until clip tags arrive with the Lua API. Decode, scene
-detection, and proxy encoding shell out to `ffmpeg`/`ffprobe` - MLT does not
-enter the picture until Phase 6.
+detection, and proxy encoding shell out to `ffmpeg`/`ffprobe`; MLT is used for
+preview and export, not for analysis.
+
+In `vimci-mlt`: transitions are not projected until Phase 9f, export presets
+arrive in Phase 8b (`RenderSettings` is currently filled in by hand), and the
+sanitizer job in `just sanitize` needs a nightly toolchain that is not
+installed here - the refcount guarantees are covered by wrapper unit tests
+instead.
 
 See `plan.md` for the phase order and `plan.md` milestones for what counts as
 usable (M3).

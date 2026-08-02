@@ -388,6 +388,46 @@ Testing:
 - Render smoke test per export preset, gated behind a `--features slow-tests`
   flag so the default suite stays fast.
 
+Status: complete. The crate is layered by testability: `projection` turns a
+`Timeline` into the shape the graph must have (pure data, no MLT), `xml`
+serialises that shape for the golden tests, `patch` diffs two projections, and
+only `ffi`/`backend` touch the C API. `MockBackend` lives in `vimci-backend`
+and decodes nothing: a mock frame's colour is a pure function of its position,
+so an upstream test asserts *which* frame it got from four bytes.
+
+The incremental projection is real, not aspirational: a split patches one
+playlist entry and inserts one, and a ripple delete removes one - both assert
+that the rebuild counter did not move. A property test applies every generated
+patch to the previous entry list and requires the result to equal a full
+rebuild, which is what makes patching safe to prefer.
+
+Amendments made during implementation:
+
+- The projection reads track mute/solo and the media offline flag, and nothing
+  could set them, so Phase 1 gained `set_track_muted`, `set_track_solo`, and
+  `set_media_offline`. Solo turned out to need a defined meaning; spec §6.1
+  now says it is exclusive by effect, so any solo silences every non-solo
+  track and the backend resolves it at projection time.
+- Pulling frames directly from a tractor bypasses the consumer that normally
+  plants MLT's normalising filters, so `mlt_frame_get_image` returned native
+  YUV at native size and ignored the requested dimensions - preview scaling
+  would have been a lie. Producers now carry `avcolor_space`/`rescale`/`resize`
+  themselves, and `FrameRef::rgba` verifies the *returned* format instead of
+  trusting the requested one. Trusting it read past the end of a smaller YUV
+  buffer; the slow tests caught it as a segfault.
+- `mlt_events_listen` hands back an event the properties bag still owns, so the
+  listener handle takes `mlt_event_inc_ref` before it can be closed. Without it
+  stopping a preview double-freed.
+- Refcount testing is the wrapper unit tests (`clone_ref` is balanced by drop,
+  64 create/clone/drop cycles do not grow the count, a playlist planted in a
+  tractor outlives its wrapper). The sanitizer run in `just sanitize` still
+  needs a nightly toolchain and has not been run on this machine.
+
+Not yet wired: nothing calls this from a frontend, because there is no
+frontend. Transitions are absent until Phase 9f, so the projection plants no
+MLT transitions yet, and the export preset registry that would exercise
+`RenderSettings` properly arrives in Phase 8b.
+
 ---
 
 ## Phase 7 - Lua Config & Plugin API (`vimci-lua`)

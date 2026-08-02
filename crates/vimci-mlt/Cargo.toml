@@ -16,5 +16,11 @@ vimci-backend.workspace = true
 vimci-mlt-sys.workspace = true
 thiserror.workspace = true
 
+[dev-dependencies]
+vimci-core = { workspace = true, features = ["testing"] }
+vimci-backend.workspace = true
+insta.workspace = true
+proptest.workspace = true
+
 [features]
 slow-tests = []

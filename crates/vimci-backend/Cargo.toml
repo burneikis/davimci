@@ -13,3 +13,6 @@ workspace = true
 [dependencies]
 vimci-core.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+vimci-core = { workspace = true, features = ["testing"] }

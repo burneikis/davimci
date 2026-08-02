@@ -261,6 +261,11 @@ talking" cases are better served by muting or ducking than by cutting.
 |---|---|
 | `<Space>m` | Toggle mute on current track |
 | `<Space>s` | Toggle solo on current track |
+
+Solo is exclusive by *effect*, not by state: any soloed track silences every
+track that is not soloed, so several tracks can be soloed at once and clearing
+the last one restores normal playback. Mute and solo are track state, not
+edits to clips, and they change only what the backend renders.
 | `+` / `-` | Adjust gain on current clip or selection by a step (default 1 dB, count-prefixed) |
 | `:gain <db>` | Set absolute gain on the current clip/selection |
 | `:normalize [target_db]` | Normalize selection to a target loudness |
@@ -476,6 +481,12 @@ Resolutions for the previously-open architectural questions. Each records the ch
 **Constraint:** the timeline model is **engine-agnostic**. We own the clip, track, grouping, and undo data structures; MLT sits behind a narrow `RenderBackend` interface (seek, preview, render, probe). A custom renderer can replace it later without touching the editor core.
 
 **Accepted risk:** MLT's documentation is thin and the API is C with manual refcounting; expect a hand-written safe wrapper layer and a test suite that exercises it.
+
+**Preview is a frame pull, not an MLT window.** Audio goes to a realtime MLT audio consumer, which owns the master clock; video frames are lifted out as RGBA buffers and presented by vimci. MLT never opens a window of its own, because a window it owned could not be composited with vimci's overlays and could not be shared between the GUI and the TUI.
+
+**Preview scaling** is a decode-time request, not a post-scale: a half- or quarter-resolution pull asks for that size at `mlt_frame_get_image()`, so scrubbing and the TUI's small preview are cheap by construction.
+
+**Offline media renders as a visible placeholder** - a distinctly coloured card, never black, so a missing source can never be mistaken for a gap. The project stays editable (Phase 0 policy) and export stays blocked.
 
 ### 10.2 Detection: precompute on import, in a background job
 
