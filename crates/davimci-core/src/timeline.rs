@@ -440,6 +440,44 @@ impl Timeline {
         Ok(())
     }
 
+    /// Point a clip's media at a different file (`:relink`, spec §12).
+    ///
+    /// The offline flag is set explicitly by the caller rather than inferred
+    /// here: `davimci-core` does no I/O, so it cannot know whether the new
+    /// path exists. Returns the previous `(path, offline)` so the command
+    /// layer can invert exactly.
+    pub fn set_media_source(
+        &mut self,
+        clip: ClipId,
+        path: impl Into<String>,
+        offline: bool,
+    ) -> Result<(String, bool), CoreError> {
+        let path = path.into();
+        if path.is_empty() {
+            return Err(CoreError::InvalidProps {
+                reason: "a media path cannot be empty".into(),
+            });
+        }
+        let (track, c) = self
+            .find_clip(clip)
+            .ok_or_else(|| CoreError::NoSuchClip(clip.to_string()))?;
+        if c.media.is_none() {
+            return Err(CoreError::InvalidProps {
+                reason: "a generated clip has no media to relink".into(),
+            });
+        }
+        let mut previous = (String::new(), false);
+        if let Some(t) = self.track_mut(track)
+            && let Some(c) = t.clip_mut(clip)
+            && let Some(m) = c.media.as_mut()
+        {
+            previous = (std::mem::replace(&mut m.path, path), m.offline);
+            m.offline = offline;
+        }
+        self.debug_assert_invariants();
+        Ok(previous)
+    }
+
     /// Every clip in `group`, as `(track, clip id)` pairs.
     #[must_use]
     pub fn group_members(&self, group: GroupId) -> Vec<(TrackId, ClipId)> {
@@ -620,6 +658,23 @@ mod tests {
         let mut generated = fixture(&[("V1", &[(0, 10, "a")])]);
         let gen_clip = generated.tracks()[0].clips()[0].id;
         assert!(generated.set_media_offline(gen_clip, true).is_err());
+    }
+
+    #[test]
+    fn relinking_swaps_the_path_and_reports_the_previous_one() {
+        let mut tl = crate::testing::media_fixture(&[(0, 10, 0, 100)]);
+        let clip = tl.tracks()[0].clips()[0].id;
+        tl.set_media_offline(clip, true).unwrap();
+        let (old_path, was_offline) = tl.set_media_source(clip, "/new.mkv", false).unwrap();
+        assert!(was_offline);
+        assert_ne!(old_path, "/new.mkv");
+        let (_, c) = tl.find_clip(clip).unwrap();
+        let media = c.media.as_ref().unwrap();
+        assert_eq!(media.path, "/new.mkv");
+        assert!(!media.offline, "a relinked clip comes back online");
+
+        assert!(tl.set_media_source(clip, "", false).is_err());
+        assert!(tl.set_media_source(ClipId(9999), "/x.mkv", false).is_err());
     }
 
     #[test]

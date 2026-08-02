@@ -108,9 +108,13 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "davimci-analysis",
+ "davimci-cmd",
  "davimci-core",
  "davimci-mlt",
  "davimci-tui",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]

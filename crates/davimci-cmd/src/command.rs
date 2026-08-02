@@ -170,6 +170,14 @@ pub enum EditCommand {
         clip: ClipId,
         props: ClipProps,
     },
+    /// Point a clip's media at another file (`:relink`, spec §12). The
+    /// `offline` flag is decided by the caller, which is the only layer that
+    /// may touch the filesystem.
+    Relink {
+        clip: ClipId,
+        path: String,
+        offline: bool,
+    },
     /// Several commands as one undo step. Rolls back completely on failure.
     Sequence(Vec<EditCommand>),
 }
@@ -198,6 +206,7 @@ pub const VARIANT_NAMES: &[&str] = &[
     "Reconform",
     "RestoreConform",
     "SetProps",
+    "Relink",
     "Sequence",
 ];
 
@@ -225,6 +234,7 @@ impl EditCommand {
             Self::Reconform { .. } => "Reconform",
             Self::RestoreConform { .. } => "RestoreConform",
             Self::SetProps { .. } => "SetProps",
+            Self::Relink { .. } => "Relink",
             Self::Sequence(_) => "Sequence",
         }
     }
@@ -320,6 +330,7 @@ impl Command for EditCommand {
                 format!("conform the timeline back to {}", state.props)
             }
             Self::SetProps { clip, .. } => format!("set properties of {clip}"),
+            Self::Relink { clip, path, .. } => format!("relink {clip} to {path}"),
             Self::Sequence(v) => match v.len() {
                 0 => "nothing".to_string(),
                 1 => v.iter().map(Command::describe).collect(),
@@ -703,6 +714,22 @@ impl Command for EditCommand {
                         track: *track,
                         clip: *clip,
                         props: previous,
+                    },
+                })
+            }
+
+            Self::Relink {
+                clip,
+                path,
+                offline,
+            } => {
+                let (previous, was_offline) = tl.set_media_source(*clip, path.clone(), *offline)?;
+                Ok(Effect {
+                    applied: self.clone(),
+                    inverse: Self::Relink {
+                        clip: *clip,
+                        path: previous,
+                        offline: was_offline,
                     },
                 })
             }
@@ -1124,6 +1151,27 @@ mod tests {
     }
 
     #[test]
+    fn relink_round_trips_and_restores_the_offline_flag() {
+        let mut tl = media_fixture(&[(0, 100, 0, 200)]);
+        let clip = clip_ids(&tl, "V1")[0];
+        tl.set_media_offline(clip, true).unwrap();
+        roundtrip(
+            &mut tl,
+            &EditCommand::Relink {
+                clip,
+                path: "/media/found.mkv".into(),
+                offline: false,
+            },
+        );
+        // `roundtrip` asserts undo and redo are both byte-exact and leaves
+        // the command applied, so the clip is relinked and back online.
+        let (_, c) = tl.find_clip(clip).unwrap();
+        let media = c.media.as_ref().unwrap();
+        assert!(!media.offline);
+        assert_eq!(media.path, "/media/found.mkv");
+    }
+
+    #[test]
     fn a_rejected_command_changes_nothing_at_all() {
         let mut tl = media_fixture(&[(0, 100, 0, 120)]);
         let v1 = track_id(&tl, "V1");
@@ -1341,6 +1389,11 @@ mod tests {
                 track,
                 clip,
                 props: ClipProps::default(),
+            },
+            EditCommand::Relink {
+                clip,
+                path: "/media/new.mkv".into(),
+                offline: false,
             },
             EditCommand::Sequence(vec![EditCommand::Join {
                 track,

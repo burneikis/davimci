@@ -7,6 +7,10 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[lib]
+name = "davimci_cli"
+path = "src/lib.rs"
+
 [[bin]]
 name = "davimci"
 path = "src/main.rs"
@@ -16,10 +20,17 @@ workspace = true
 
 [dependencies]
 davimci-core.workspace = true
+davimci-cmd.workspace = true
 anyhow.workspace = true
 davimci-analysis.workspace = true
 davimci-mlt.workspace = true
+serde = { workspace = true }
+serde_json.workspace = true
+thiserror.workspace = true
 davimci-tui = { workspace = true, optional = true }
+
+[dev-dependencies]
+davimci-core = { workspace = true, features = ["testing"] }
 
 [features]
 slow-tests = ["davimci-analysis/slow-tests", "davimci-mlt/slow-tests"]

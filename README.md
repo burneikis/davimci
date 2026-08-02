@@ -12,16 +12,18 @@ remappable keys, and hookable events.
 
 <!-- Keep this current. It must never claim more than the code does. -->
 
-**Phase 7 complete - the Lua config and plugin API.** Phase 8 (project
-lifecycle: `:w`, `:e`, buffers, autosave) is next. Workspace builds; `just test` and `just lint` are green,
+**Phase 8 complete - the project lifecycle.** Phase 8b (export presets and
+`:render`) is next. Workspace builds; `just test` and `just lint` are green,
 and `just fixtures && just test-slow` passes against generated media, now
 including real decode, preview, and export through MLT.
 
-Nothing is runnable yet: `davimci-cli` is still a placeholder and there is no
-frontend (see plan.md milestone M1). The backend can project a timeline, seek
-frame-exactly, pull frames, play audio, and encode a file, and a config file
-can bind keys, define motions and export presets, and hook events - but only
-a test drives any of it.
+The binary now does something: `davimci <project>` opens a project, offers
+crash recovery if an autosave survived, and runs `:` commands passed with
+`-c`. There is still no frontend (see plan.md milestone M1), so editing is
+not yet interactive. The backend can project a timeline, seek frame-exactly,
+pull frames, play audio, and encode a file, and a config file can bind keys,
+define motions and export presets, and hook events - but only a test drives
+any of it.
 
 Lua 5.4 is vendored and built from source, so no system Lua is needed.
 
@@ -73,7 +75,11 @@ it is linked dynamically, since davimci is GPL-3.0 over LGPL-2.1 MLT.
 | Preview: realtime audio consumer as master clock, frames lifted from it | implemented, tested (slow) |
 | Export: `avformat` consumer, polled progress, cancellation | implemented, tested (slow) |
 | Mute/solo and offline-media flags on the model, honoured by the projection | implemented, tested |
-| Lua, frontends | not started |
+| Project lifecycle: `:w`, `:q`/`:q!`, `:wq`/`:x`, `:e`, `:new`, `:ls`, `:bn`/`:bp`/`:b` | implemented, tested |
+| Multiple open timelines with global registers and marks | implemented, tested |
+| Autosave of the command log to `.davimci/autosave/`, crash recovery on reopen | implemented, tested |
+| `:relink` for offline media, as one undoable command | implemented, tested |
+| Export presets, `:render` (Phase 8b), frontends | not started |
 | Everything else | placeholder crates |
 
 Caveats worth knowing: undo history is not persisted - reopening a project
@@ -92,6 +98,11 @@ fade changes has no caller until Phase 9e; predicate searches by clip tag
 match nothing until clip tags arrive with the Lua API. Decode, scene
 detection, and proxy encoding shell out to `ffmpeg`/`ffprobe`; MLT is used for
 preview and export, not for analysis.
+
+In `davimci-cli`: the lifecycle is complete but the binary is a driver, not an
+editor - it has no keymap and no display, so `-c` is the only input. `:analyze`
+is in spec §12 but belongs to Phase 9e and is not accepted yet, and a recovered
+autosave replays into a fresh undo tree, since history is still not persisted.
 
 In `davimci-mlt`: transitions are not projected until Phase 9f, and export
 presets arrive in Phase 8b (`RenderSettings` is currently filled in by hand).

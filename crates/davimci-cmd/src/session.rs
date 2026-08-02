@@ -4,7 +4,7 @@
 //! [`Session::exec`], so undo, `.`-repeat, macros, and the project format all
 //! see the same command log.
 
-use davimci_core::{Frame, Mark, Timeline, TrackId};
+use davimci_core::{Frame, Mark, Register, Timeline, TrackId};
 
 use crate::command::{Command, EditCommand};
 use crate::error::CmdError;
@@ -60,6 +60,14 @@ impl Session {
     /// either.
     pub fn set_mark(&mut self, name: char, frame: Frame, track: Option<TrackId>) {
         self.timeline.marks.insert(name, Mark { frame, track });
+    }
+
+    /// Put content in a named register. Like marks, registers are
+    /// bookkeeping rather than timeline content, and spec §12 makes them
+    /// global across open timelines - so the workspace, not a command,
+    /// decides what they hold.
+    pub fn set_register(&mut self, name: char, register: Register) {
+        self.timeline.registers.insert(name, register);
     }
 
     /// Reserve ids for a caller that must pin them before it can build its

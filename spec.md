@@ -648,12 +648,31 @@ Projects behave like vim buffers, with the same command vocabulary.
 | `:ls` | List open timelines |
 | `:bn` / `:bp` / `:b <n>` | Switch between open timelines |
 | `:new` | New empty timeline (prompts for fps/resolution, see §7.1) |
+| `:relink [old] <new>` | Point offline clips at media that moved |
 | `:analyze` | Re-run analysis on the current project (§10.2) |
 
 - Multiple timelines may be open simultaneously; registers and marks are
-  **global** across timelines, so a yank in one can be pasted into another.
+  **global** across timelines, so a yank in one can be pasted into another. A
+  mark carries its frame across; its focused track applies only in the
+  timeline the mark was set in, since track identity is per-timeline.
+- `:q` refuses while the timeline differs from what is on disk. "Differs" is
+  a comparison against the saved point in the undo tree, not a sticky flag, so
+  undoing back to the saved state makes the timeline clean again.
+- `:e` decides what a file is by reading it, not by its extension: a davimci
+  project opens as a project, anything else is imported as media (§7).
 - Autosave writes the command log continuously to `.davimci/autosave/`, enabling
   crash recovery on next open. Autosave never overwrites the project file.
+  Each open timeline gets one log, named after the project path so two
+  projects with the same file name cannot share one. `:w` and a clean `:q`
+  delete it: a surviving log means the session did not survive, and the next
+  open of that project offers to replay it. A recovered timeline is ahead of
+  the file on disk and is therefore unsaved. A log that will not replay is
+  reported as corruption rather than partially applied.
+- `:relink` with one argument repoints the clip under the playhead; with two
+  it repoints every clip whose media path is `<old>`. It is one undoable
+  command however many clips it touches, and the clips come back online only
+  if the new path exists - otherwise they stay offline and export stays
+  blocked (§0 offline-media policy).
 - `ProjectLoaded` fires after project-local `.davimci.lua` evaluation (§9.7).
 
 ---

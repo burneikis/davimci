@@ -524,6 +524,46 @@ Testing:
   replays to the exact pre-kill state.
 - Format-migration test: load a project written by an older schema version.
 
+Status: complete. `davimci-cli` is the first crate allowed to touch the
+filesystem, and it is split so that only the parts that must: `excmd::parse`
+is a pure function from a `:` line to an `ExCommand` and is table-tested
+against the spec §12 vocabulary, while `Workspace` is the only thing that
+reads or writes. Every edit it performs is still an `EditCommand` - `:relink`
+and `:e <media>` are ordinary undo-tree entries - so the single-write-path
+rule survives contact with I/O.
+
+Amendments made during implementation:
+
+- `:relink` had no command to run, so Phase 2 gained `EditCommand::Relink`
+  and Phase 1 gained `Timeline::set_media_source`. The offline flag is decided
+  by the CLI, which is the only layer that may ask whether a file exists, and
+  passed *in* to the command; `davimci-core` never stats a path. The inverse
+  restores both the old path and the old offline flag, so a mistaken relink
+  is one `u` away. Spec §12 now documents both argument forms.
+- Spec §12 called registers and marks "global" but the model stores both on a
+  `Timeline`. `Workspace` implements global by syncing on every buffer
+  switch, and `Session::set_register` joins `set_mark` as a non-command
+  escape hatch, on the same reasoning: a register is bookkeeping, not
+  timeline content, and vim does not put either in the undo log. A mark's
+  focused track is dropped when it crosses into a timeline that has no such
+  track; spec §12 says so now.
+- Dirty state is `history().current() != saved_at`, not a flag, so undoing
+  back to the saved state is clean again. This fell out of the undo tree and
+  is worth more than a boolean: it makes `:q` refuse exactly when the file
+  and the timeline actually differ.
+- Autosave stores the log, not the state, and syncs after every edit. Undo
+  shortens the log rather than extending it, so the writer appends only when
+  the current log is an extension of what is on disk and rewrites otherwise.
+  Each line carries the id cursor, because replaying pinned commands mints no
+  ids and a recovered session would otherwise reissue ids the crashed one had
+  already used.
+
+Not yet wired: there is still no frontend, so the binary is a thin driver -
+it opens a project, answers the recovery prompt, and runs `:` commands given
+with `-c`. `:analyze` is listed in spec §12 but belongs to Phase 9e and is
+not accepted yet, and undo history is still not persisted across a save
+(Phase 2's standing gap): a recovered log replays into a fresh tree.
+
 ---
 
 ## Phase 8b - Export (`davimci-export` within `davimci-cli`)
