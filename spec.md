@@ -472,13 +472,16 @@ plus `:set proxy on|off` at runtime.
 
 ### 10.4 Undo: operational command log with an undo tree
 
-**Decision:** every edit is a serializable command object with `apply` and `invert`, recorded to a log. Not full-state snapshots.
+**Decision:** every edit is a serializable command object that applies to the timeline and reports the command that undoes it, recorded to a log. Not full-state snapshots.
+
+The inverse is produced *by* applying, not derived from the command alone: the inverse of a ripple delete is "put these clips back", which is only known once the delete has run.
 
 **Why one decision buys five features:** undo/redo, `.`-repeat, macros (`q`/`@`), the Lua scripting API surface, and the project file format all fall out of the same command representation. A snapshot model gives only undo.
 
 **Shape:**
-- Undo is a **tree**, not a stack - branching history is cheap here and fits the vim model (`u`, `Ctrl-r`, `g-`/`g+`, `:undolist`).
+- Undo is a **tree**, not a stack - branching history is cheap here and fits the vim model (`u`, `Ctrl-r`, `g-`/`g+`, `:undolist`). `Ctrl-r` follows the most recently created branch; `g-`/`g+` step through every state in change order, across branches.
 - Project file = a compacted timeline state plus the command log since it.
+- **Redo is exact, ids included.** A logged command never mints an identifier the log does not record, so an edit that incidentally cuts a clip - inserting mid-clip, deleting a part-range - is recorded as an explicit split followed by the edit. Undoing it joins the cut back up, so undo of a whole-clip delete leaves no seam, while undo of a part-range delete correctly keeps the cut its two remaining halves need.
 - **Drift guard:** a full state snapshot every N commands (default 100) and on every save, so undo cost is bounded and a buggy `invert` can never lose the project - only the commands since the last snapshot.
 
 ### 10.5 Naming

@@ -163,8 +163,20 @@ testing, with zero backend code linked.
 ## Phase 2 - Command Layer & Undo Tree (`vimci-cmd`)
 
 Deliverables:
-- `trait Command { fn apply(&self, &mut Timeline) -> Result<Effect>; fn invert(&self) -> Box<dyn Command>; }`
-  All Phase 1 primitives re-expressed as serializable command structs.
+- `trait Command { fn apply(&self, &mut Timeline) -> Result<Effect>; fn describe(&self) -> String; }`
+  where `Effect { applied, inverse }`. **Amended during implementation:** the
+  original sketch had `fn invert(&self) -> Box<dyn Command>`, which cannot
+  work - the inverse of a ripple delete is "restore *these* clips", known only
+  after the delete runs. The inverse is therefore returned by `apply`.
+  `Effect::applied` is the command as executed, with every id pinned, and is
+  what the log stores so redo is byte-exact.
+  All Phase 1 primitives re-expressed as one serializable `EditCommand` enum.
+- Commands never mint an id the log does not record: an edit that incidentally
+  cuts a clip expands into a `Sequence` with an explicit `Split` in front, and
+  undo joins those cuts back up. A rejected command also hands back reserved
+  ids, since the id cursor is part of the serialized state.
+- Phase 1 gained the four model primitives these inverses need: `join_at`,
+  id-preserving `restore`, `set_group`, and `set_clip_props`.
 - Undo **tree** with `u`, `Ctrl-r`, `g-`, `g+`, `:undolist` (spec §10.4).
 - Snapshot-every-N-commands drift guard (default 100, and on save).
 - Repeat register for `.`, macro record/replay buffers for `q`/`@`.
@@ -184,6 +196,11 @@ Testing:
 
 Exit criteria: undo/redo/repeat/macros all operate solely through the command
 log; no direct timeline mutation path exists outside a command.
+
+Status: complete. Macros store opaque input tokens rather than commands, so
+replay is keystroke-shaped as in vim; `vimci-keys` (Phase 4) gives the tokens
+meaning. History itself is not yet persisted - a reopened project starts a
+fresh undo tree from the saved state.
 
 ---
 

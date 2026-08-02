@@ -68,6 +68,15 @@ pub enum CoreError {
     #[error("cannot link these clips: {reason}")]
     CannotLink { reason: String },
 
+    #[error("cannot join at frame {frame}: {reason}")]
+    CannotJoin { frame: u64, reason: String },
+
+    #[error("clip {0} is already on the timeline")]
+    DuplicateClip(String),
+
+    #[error("invalid clip property: {reason}")]
+    InvalidProps { reason: String },
+
     #[error("{start} to {end} is not a valid range")]
     InvalidRange { start: u64, end: u64 },
 
@@ -107,6 +116,9 @@ impl Classify for CoreError {
             | Self::NoCutAt { .. }
             | Self::CannotSlide { .. }
             | Self::CannotLink { .. }
+            | Self::CannotJoin { .. }
+            | Self::DuplicateClip(_)
+            | Self::InvalidProps { .. }
             | Self::InvalidRange { .. }
             | Self::ZeroDuration
             | Self::EmptyRegister
@@ -213,6 +225,14 @@ mod tests {
             },
             CoreError::CannotLink {
                 reason: "misaligned".into(),
+            },
+            CoreError::CannotJoin {
+                frame: 10,
+                reason: "different sources".into(),
+            },
+            CoreError::DuplicateClip("c4".into()),
+            CoreError::InvalidProps {
+                reason: "fades are longer than the clip".into(),
             },
             CoreError::InvalidRange { start: 5, end: 5 },
             CoreError::ZeroDuration,

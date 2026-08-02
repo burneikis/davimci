@@ -10,6 +10,10 @@ repository.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Fixture builders for downstream crates' tests. Never enabled in a release build.
+testing = []
+
 [dependencies]
 thiserror.workspace = true
 serde.workspace = true

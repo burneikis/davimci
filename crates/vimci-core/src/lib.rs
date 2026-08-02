@@ -16,8 +16,8 @@ pub mod trim;
 mod props;
 #[cfg(test)]
 mod snapshots;
-#[cfg(test)]
-pub(crate) mod testing;
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
 
 pub use clip::{Clip, ClipProps, MediaRef, Transform};
 pub use error::{Classify, CoreError, ErrorClass, Notice};

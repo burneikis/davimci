@@ -130,6 +130,41 @@ impl Timeline {
         self.ids.clip()
     }
 
+    /// The id the next allocation would use.
+    ///
+    /// The id generator is part of the timeline's serialized state, so undo
+    /// and rollback have to be able to put it back where it was - see
+    /// [`Timeline::set_id_cursor`].
+    #[must_use]
+    pub fn id_cursor(&self) -> u64 {
+        self.ids.peek()
+    }
+
+    /// Move the id cursor, never below an id that is already in use.
+    ///
+    /// Used by the command layer: a rejected command hands back the ids it
+    /// reserved, and undo/redo restore the cursor the recorded state had, so
+    /// history navigation is byte-exact.
+    pub fn set_id_cursor(&mut self, next: u64) {
+        let mut floor = 1;
+        for t in &self.tracks {
+            floor = floor.max(t.id.get() + 1);
+            for c in t.clips() {
+                floor = floor.max(c.id.get() + 1);
+                if let Some(g) = c.group {
+                    floor = floor.max(g.get() + 1);
+                }
+            }
+        }
+        self.ids.set(next.max(floor));
+    }
+
+    /// Allocate the next group id, for a command that links clips with
+    /// [`Timeline::set_group`] and must record the id it used.
+    pub fn new_group_id(&mut self) -> GroupId {
+        self.ids.group()
+    }
+
     /// Find a clip anywhere on the timeline.
     #[must_use]
     pub fn find_clip(&self, id: ClipId) -> Option<(TrackId, &Clip)> {
@@ -210,6 +245,78 @@ impl Timeline {
         {
             c.group = None;
         }
+        Ok(())
+    }
+
+    /// Put one clip in a group, or take it out of one.
+    ///
+    /// The command layer needs this to invert `link`/`unlink` exactly: a clip
+    /// may have belonged to a different group before.
+    pub fn set_group(&mut self, clip: ClipId, group: Option<GroupId>) -> Result<(), CoreError> {
+        let (track, c) = self
+            .find_clip(clip)
+            .ok_or_else(|| CoreError::NoSuchClip(clip.to_string()))?;
+        let extent = (c.start, c.end());
+        if let Some(g) = group
+            && let Some(other) = self
+                .tracks
+                .iter()
+                .flat_map(Track::clips)
+                .find(|o| o.group == Some(g) && o.id != clip)
+            && (other.start, other.end()) != extent
+        {
+            return Err(CoreError::CannotLink {
+                reason: "linked clips must start and end on the same frames".into(),
+            });
+        }
+        if let Some(t) = self.track_mut(track)
+            && let Some(c) = t.clip_mut(clip)
+        {
+            c.group = group;
+        }
+        self.debug_assert_invariants();
+        Ok(())
+    }
+
+    /// Replace a clip's non-destructive properties (spec §6.1, §8).
+    ///
+    /// Validate-then-mutate: nonsense fades or transforms are rejected before
+    /// anything is written.
+    pub fn set_clip_props(
+        &mut self,
+        track: TrackId,
+        clip: ClipId,
+        props: crate::clip::ClipProps,
+    ) -> Result<(), CoreError> {
+        let t = self.require_track(track)?;
+        let c = t
+            .clip(clip)
+            .ok_or_else(|| CoreError::NoSuchClip(clip.to_string()))?;
+        let reject = |reason: &str| CoreError::InvalidProps {
+            reason: reason.to_string(),
+        };
+        if props.fade_in.get() + props.fade_out.get() > c.duration.get() {
+            return Err(reject("the fades are longer than the clip"));
+        }
+        if !props.gain_db.is_finite() {
+            return Err(reject("gain must be a finite number of decibels"));
+        }
+        let tf = props.transform;
+        if !(tf.x.is_finite() && tf.y.is_finite() && tf.scale.is_finite()) {
+            return Err(reject("transform values must be finite"));
+        }
+        if tf.scale <= 0.0 {
+            return Err(reject("scale must be greater than zero"));
+        }
+        if !(0.0..=1.0).contains(&tf.opacity) {
+            return Err(reject("opacity must be between 0 and 1"));
+        }
+        if let Some(t) = self.track_mut(track)
+            && let Some(c) = t.clip_mut(clip)
+        {
+            c.props = props;
+        }
+        self.debug_assert_invariants();
         Ok(())
     }
 
@@ -319,6 +426,7 @@ impl Default for Timeline {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::testing::fixture;
@@ -384,6 +492,64 @@ mod tests {
         let mut tl = fixture(&[("V1", &[(0, 100, "a")])]);
         let v = tl.track_by_name("V1").map(|t| t.clips()[0].id);
         assert!(tl.link(&[v.unwrap_or(ClipId(0))]).is_err());
+    }
+
+    #[test]
+    fn the_id_cursor_rewinds_but_never_aliases_a_live_clip() {
+        let mut tl = fixture(&[("V1", &[(0, 100, "a")])]);
+        let before = tl.id_cursor();
+        let a = tl.new_clip_id();
+        tl.set_id_cursor(before);
+        assert_eq!(tl.id_cursor(), before);
+        assert_eq!(tl.new_clip_id(), a);
+        // Rewinding onto a live clip's id is clamped away.
+        tl.set_id_cursor(1);
+        let next = tl.new_clip_id();
+        assert!(tl.find_clip(next).is_none());
+        assert!(next.get() >= a.get());
+    }
+
+    #[test]
+    fn set_group_rejects_a_misaligned_member() {
+        let mut tl = fixture(&[("V1", &[(0, 100, "a")]), ("A1", &[(0, 90, "a-aud")])]);
+        let v = tl.track_by_name("V1").map(|t| t.clips()[0].id).unwrap();
+        let a = tl.track_by_name("A1").map(|t| t.clips()[0].id).unwrap();
+        let g = GroupId(77);
+        assert!(tl.set_group(v, Some(g)).is_ok());
+        assert!(tl.set_group(a, Some(g)).is_err());
+        assert!(tl.set_group(v, None).is_ok());
+    }
+
+    #[test]
+    fn clip_props_are_validated_before_they_are_written() {
+        let mut tl = fixture(&[("V1", &[(0, 100, "a")])]);
+        let track = tl.track_by_name("V1").map(|t| t.id).unwrap();
+        let clip = tl.track_by_name("V1").map(|t| t.clips()[0].id).unwrap();
+        let before = tl.clone();
+
+        let mut props = crate::clip::ClipProps {
+            fade_in: Frame(80),
+            fade_out: Frame(80),
+            ..Default::default()
+        };
+        assert!(matches!(
+            tl.set_clip_props(track, clip, props),
+            Err(CoreError::InvalidProps { .. })
+        ));
+        props.fade_out = Frame(20);
+        assert!(tl.set_clip_props(track, clip, props).is_ok());
+        assert_eq!(
+            tl.find_clip(clip).map(|(_, c)| c.props.fade_in),
+            Some(Frame(80))
+        );
+
+        let mut bad = crate::clip::ClipProps::default();
+        bad.transform.opacity = 2.0_f32;
+        assert!(tl.set_clip_props(track, clip, bad).is_err());
+        bad.transform.opacity = 1.0;
+        bad.transform.scale = 0.0;
+        assert!(tl.set_clip_props(track, clip, bad).is_err());
+        assert_ne!(tl, before);
     }
 
     #[test]

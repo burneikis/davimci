@@ -70,6 +70,18 @@ impl IdGen {
     pub fn group(&mut self) -> GroupId {
         GroupId(self.bump())
     }
+
+    /// The id the next allocation would use.
+    #[must_use]
+    pub fn peek(self) -> u64 {
+        self.next.max(1)
+    }
+
+    /// Force the next id. Callers must have checked that nothing on the
+    /// timeline uses it - see [`crate::Timeline::set_id_cursor`].
+    pub(crate) fn set(&mut self, next: u64) {
+        self.next = next.max(1);
+    }
 }
 
 #[cfg(test)]
@@ -84,6 +96,19 @@ mod tests {
         let c = ids.group().get();
         assert_ne!(a, b);
         assert_ne!(b, c);
+    }
+
+    #[test]
+    fn the_cursor_can_be_rewound_and_advanced() {
+        let mut ids = IdGen::new();
+        let a = ids.clip();
+        let _ = ids.clip();
+        ids.set(a.get());
+        assert_eq!(ids.clip(), a);
+        ids.set(0);
+        assert_eq!(ids.peek(), 1);
+        ids.set(50);
+        assert_eq!(ids.clip().get(), 50);
     }
 
     #[test]
