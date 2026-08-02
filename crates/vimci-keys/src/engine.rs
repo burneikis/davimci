@@ -60,6 +60,9 @@ pub enum Outcome {
     Transport(TransportCmd),
     /// `:` was pressed; the caller now owns command-line input.
     EnterCommandMode,
+    /// A Lua-bound key fired; the host must run callback `.0` through
+    /// `vimci_lua::Runtime::invoke` and execute the requests it returns.
+    Plugin(u32),
     /// Something named in spec but not yet backed by a command (e.g.
     /// transitions, Phase 9f).
     NotImplemented(&'static str),
@@ -160,6 +163,14 @@ impl Engine {
         )
     }
 
+    /// Run an already-parsed action. A frontend needs this for actions that
+    /// did not come from a keystroke - a Lua plugin callback asking for an
+    /// edit (spec §9.2) goes through here, so plugin edits are ordinary
+    /// commands with ordinary undo.
+    pub fn execute_action(&mut self, action: Action, session: &mut Session) -> Outcome {
+        self.execute(action, session)
+    }
+
     fn execute(&mut self, action: Action, session: &mut Session) -> Outcome {
         match action {
             Action::Move { motion, count } => self.do_move(motion, count, session),
@@ -234,6 +245,7 @@ impl Engine {
             Action::ShuttleStop => Outcome::Transport(TransportCmd::ShuttleStop),
             Action::PreviewAndReturn => Outcome::Transport(TransportCmd::PreviewAndReturn),
             Action::LoopSelection => Outcome::Transport(TransportCmd::LoopSelection),
+            Action::Plugin(id) => Outcome::Plugin(id),
             Action::EnterCommandMode => {
                 let c = self.mode.enter(Mode::Command);
                 Outcome::Mode(c)

@@ -12,4 +12,12 @@ workspace = true
 
 [dependencies]
 vimci-core.workspace = true
+vimci-motion.workspace = true
+vimci-keys.workspace = true
+vimci-backend.workspace = true
+mlua.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+vimci-cmd.workspace = true
+vimci-core = { workspace = true, features = ["testing"] }

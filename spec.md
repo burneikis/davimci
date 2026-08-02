@@ -385,6 +385,11 @@ map("normal", "<Left>",  "editor.step_frame(-1)")
 map("normal", "<Right>", "editor.step_frame(1)")
 ```
 
+Modes are named `normal`, `visual`, `visual-line`, `visual-block`, `insert`,
+`command`. A string right-hand side must name one of the `editor.*` commands
+in §9.9; an unknown name is rejected when the config loads, not when the key
+is first pressed.
+
 ### 9.3 Custom motions (predicate-based)
 
 ```lua
@@ -424,11 +429,19 @@ Users can define new objects (e.g. `is` for silence-detected segment) the same w
 require("vimci.export").preset("youtube_1080p", {
   container = "mp4",
   video_codec = "h264",
-  resolution = "1920x1080",
-  audio_tracks = "all",       -- or {"A1", "A3"}
-  subtitle_tracks = "burned", -- or "sidecar", or {"S1"}
+  audio_codec = "aac",        -- optional, defaults to aac
+  resolution = "1920x1080",   -- optional, defaults to the timeline's
+  audio_tracks = "all",       -- or "none", or {"A1", "A3"}
+  subtitle_tracks = "burned", -- or "sidecar", "embedded", "none", or {"S1"}
 })
 ```
+
+A preset names a codec (`h264`, `h265`, `vp9`, `prores`, `aac`, `opus`,
+`flac`, `pcm`); the editor maps it to an ffmpeg encoder, so a preset never
+spells an encoder name (§10.3). Container/codec pairings are validated where
+the preset is *defined*, not where it runs: a misspelled container is a user
+error and must be reported when the config loads rather than after a long
+render.
 
 ### 9.6 Zoom / jump-point config
 
@@ -447,6 +460,14 @@ require("vimci.timeline").configure({
 ### 9.7 Project-local overrides
 
 - `.vimci.lua` in a project directory, auto-loaded on open, for per-project export presets, track linkage defaults, etc. - same modelines/local-config pattern as nvim's project-local `.nvimrc`-style setups (loaded opt-in for safety).
+- Opt-in means what it says: an untrusted `.vimci.lua` is not read, not
+  compiled, and not run, and the user is told it was skipped. Trust is
+  granted per file path.
+- A trusted project-local file still runs sandboxed. It sees `math`,
+  `string`, `table`, the usual pure builtins, and the `vimci.*` modules. It
+  does not see `os`, `io`, `load`, `dofile`, or `loadfile`, and its `require`
+  resolves `vimci.*` and nothing else. "I want this project's export presets"
+  is not "I want this directory to run arbitrary commands".
 
 ### 9.8 Hooks / events
 
@@ -461,6 +482,47 @@ end)
 ```
 
 Event list (v1): `PlayheadMoved`, `SplitPerformed`, `ClipDeleted`, `ClipInserted`, `ModeChanged`, `BeforeExport`, `AfterExport`, `ProjectLoaded`.
+
+Handlers run in registration order. `BeforeExport` is the only cancellable
+event in v1: a handler refuses the export either by returning `false` (with
+an optional message) or by raising an error, and in both cases the render
+does not start and the remaining handlers do not run. A raised error also
+disables that handler for the session; a `false` return is a deliberate veto
+and leaves it in place.
+
+### 9.9 What Lua may and may not do
+
+Lua **asks, it never writes.** Every call that means "change something"
+(`vimci.editor.*`, `vimci.export.run`, `vimci.media.import`,
+`vimci.motions.run`) queues a request, and the editor runs it through the
+same command layer a keystroke would. Plugin edits are therefore ordinary
+undo-tree entries, repeatable with `.` and recordable in a macro; there is no
+second write path into the timeline.
+
+The `editor.*` commands bindable from a keymap or callable from a callback:
+
+| Command | Meaning |
+|---|---|
+| `editor.split_at_playhead` | `s` |
+| `editor.split_all_tracks` | `gs` |
+| `editor.ripple_delete` | `x` |
+| `editor.paste` / `editor.paste_before` | `p` / `P` |
+| `editor.undo` / `editor.redo` / `editor.repeat` | `u` / `Ctrl-r` / `.` |
+| `editor.step_frame(n)` | `n` frames, sign gives direction |
+| `editor.step_jump_point(n)` | `n` jump points, sign gives direction |
+| `editor.play_pause` | `<Space><Space>` |
+| `editor.message(text)` | status-line message |
+
+A registered motion (§9.3) is a pure query: it receives a snapshot - the
+playhead, the focused track, clip bounds, and analysis samples - and returns
+a frame. It cannot move the playhead itself, and a query against a track
+whose analysis has not finished reports "not yet" rather than a frame, the
+same rule the built-in predicate motions follow (§3.4).
+
+A user callback that throws is logged, disabled for the rest of the session,
+and anything it queued before throwing is discarded, so a half-run handler
+cannot half-edit the timeline. A config file that fails to load costs that
+file only.
 
 ---
 

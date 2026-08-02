@@ -138,6 +138,11 @@ pub enum Action {
     PreviewAndReturn,
     /// `<Space>l`.
     LoopSelection,
+    /// A host-owned callback, bound by a Lua `map(mode, lhs, function)`
+    /// (spec §9.2). The id is opaque here on purpose: `vimci-keys` must not
+    /// depend on `vimci-lua`, so the engine reports it back and the host
+    /// invokes it.
+    Plugin(u32),
     /// `:`.
     EnterCommandMode,
     /// `Esc`.

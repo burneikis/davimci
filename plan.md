@@ -464,6 +464,47 @@ Testing:
 - Panic-safety test: user callback that throws leaves the editor usable and
   the timeline unmodified.
 
+Status: complete. The crate's shape follows one rule - **Lua asks, it never
+writes.** A `vimci.*` call either registers something or appends a `Request`;
+the host runs each request through `vimci_cmd::Session`, so a plugin edit is
+an ordinary undo-tree entry and the single-write-path rule holds at the
+plugin boundary. That is also what keeps the crate testable: `Runtime` needs
+no timeline, no backend, and no window, and the spec §9 snippets run verbatim
+as the acceptance suite.
+
+Amendments made during implementation:
+
+- A Lua function right-hand side (spec §9.2) had nothing to resolve to, since
+  `vimci-keys` must not depend on `vimci-lua`. `Action::Plugin(u32)` and
+  `Outcome::Plugin(u32)` carry an opaque callback id instead: the engine
+  reports it, the host invokes it, and `Engine::execute_action` (new, public)
+  runs whatever edits come back. Spec §9.9 now documents the request model
+  and the `editor.*` command set that a string right-hand side may name.
+- A registered motion cannot be handed a live `Timeline` without becoming a
+  second write path, so it receives a `MotionEnv` snapshot - playhead,
+  focused track, clip bounds, analysis samples. `find_next` over an
+  unanalysed track reports `Pending` rather than `NoMatch`, matching
+  `vimci_motion::Answer`; a Lua motion cannot accidentally be more confident
+  than the analysis it queries.
+- Cancellation needed defining, not just implementing: a `BeforeExport`
+  handler refuses by returning `false` *or* by throwing. Throwing also
+  disables the handler (Phase 0 recoverable policy); a `false` return is a
+  deliberate veto and leaves it in place. Spec §9.8 says so now.
+- Trust is not a binary: spec §9.7 said "opt-in" without saying what a
+  trusted file may do. An untrusted `.vimci.lua` is never read, and a trusted
+  one still runs sandboxed (no `os`, `io`, `load`, `dofile`, and a `require`
+  that resolves `vimci.*` only). Spec §9.7 now spells this out.
+- Export presets validate at definition, and codec names map to ffmpeg
+  encoders here rather than in the preset, so §10.3's "never a marketing
+  name" rule cannot be broken by a config.
+
+Not yet wired: no frontend calls any of this, so `Runtime::take_requests` has
+no production caller; `Request::Import`/`Analyze` wait on Phase 8/9e, and
+text objects registered from Lua are resolvable but not yet reachable from
+the key grammar, which still resolves only the built-in `ic`/`ac`/`it`/`at`/
+`is`. Keymap overrides are applied for `NORMAL` only, because
+`vimci_keys::Keymap` is a single table for every mode.
+
 ---
 
 ## Phase 8 - Project Lifecycle (`vimci-cli`)

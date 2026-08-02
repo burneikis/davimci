@@ -12,15 +12,18 @@ remappable keys, and hookable events.
 
 <!-- Keep this current. It must never claim more than the code does. -->
 
-**Phase 6 complete - the MLT render backend.** Phase 7 (the Lua config and
-plugin API) is next. Workspace builds; `just test` and `just lint` are green,
+**Phase 7 complete - the Lua config and plugin API.** Phase 8 (project
+lifecycle: `:w`, `:e`, buffers, autosave) is next. Workspace builds; `just test` and `just lint` are green,
 and `just fixtures && just test-slow` passes against generated media, now
 including real decode, preview, and export through MLT.
 
 Nothing is runnable yet: `vimci-cli` is still a placeholder and there is no
 frontend (see plan.md milestone M1). The backend can project a timeline, seek
-frame-exactly, pull frames, play audio, and encode a file - but only a test
-drives it.
+frame-exactly, pull frames, play audio, and encode a file, and a config file
+can bind keys, define motions and export presets, and hook events - but only
+a test drives any of it.
+
+Lua 5.4 is vendored and built from source, so no system Lua is needed.
 
 `libmlt` (>= 7) is now a build prerequisite: `just check-env` verifies it, and
 it is linked dynamically, since vimci is GPL-3.0 over LGPL-2.1 MLT.
@@ -58,6 +61,13 @@ it is linked dynamically, since vimci is GPL-3.0 over LGPL-2.1 MLT.
 | MLT FFI: hand-written bindings, RAII wrappers, refcount-balanced `clone_ref` | implemented, tested |
 | Timeline -> tractor/playlist projection, with golden MLT XML | implemented, tested |
 | Incremental projection: split/ripple patch playlists instead of rebuilding | implemented, tested |
+| Lua config loader: `init.lua`, `keymaps.lua`, `motions/`, `presets/`, `plugin/` | implemented, tested |
+| Lua modules: `keymap`, `motions`, `textobject`, `export`, `timeline`, `media`, `autocmd`, `editor` | implemented, tested |
+| Lua edits go through the command layer as requests, never a second write path | implemented, tested |
+| Event dispatch for the v1 event list, with `BeforeExport` cancellation | implemented, tested |
+| Error isolation: a throwing callback is disabled for the session, editing continues | implemented, tested |
+| Project-local `.vimci.lua`: explicit trust, then sandboxed (no `os`/`io`) | implemented, tested |
+| Export presets from Lua: codec/container validation, ffmpeg encoder mapping | implemented, tested |
 | Frame pull: RGBA buffers to the presenter, MLT never owns a window | implemented, tested (slow) |
 | Preview scaling: half/quarter requested at decode, not scaled afterwards | implemented, tested (slow) |
 | Preview: realtime audio consumer as master clock, frames lifted from it | implemented, tested (slow) |
