@@ -73,7 +73,10 @@ fn main() -> Result<()> {
             }
             None => OnRecovery::Discard,
         };
-        report(ws.run(&format!("e {}", path.display()), choice));
+        // Straight to the command, not through the `:` parser: a path from
+        // argv is already exact, and stringifying it just to re-split it on
+        // whitespace is how filenames with spaces get lost.
+        report(ws.run_command(&davimci_cli::ExCommand::Edit(path), choice));
     }
 
     for line in &commands {

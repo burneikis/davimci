@@ -660,6 +660,10 @@ Projects behave like vim buffers, with the same command vocabulary.
   undoing back to the saved state makes the timeline clean again.
 - `:e` decides what a file is by reading it, not by its extension: a davimci
   project opens as a project, anything else is imported as media (§7).
+- Where a command takes a single path (`:e`, `:w`, `:wq`), the argument is the
+  **rest of the line**, not one whitespace-delimited word, so a filename with
+  spaces needs no quoting or escaping. `:relink`, which takes two paths, is
+  the exception and splits on whitespace.
 - Autosave writes the command log continuously to `.davimci/autosave/`, enabling
   crash recovery on next open. Autosave never overwrites the project file.
   Each open timeline gets one log, named after the project path so two

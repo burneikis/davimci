@@ -781,6 +781,14 @@ so the picture kept its startup size in the corner of the pane.
 `Editor::refresh_preview` now recomposes on a size change, with a regression
 test (`resizing_the_video_pane_recomposes_the_frame_at_the_new_size`).
 
+Defect found on first real use: opening a file whose name contains spaces
+failed with a `:e <path>` usage error. The binary stringified an argv path
+into a `:` line, and the parser split it on whitespace. Two fixes, since
+there were two bugs: argv paths now go straight to `ExCommand::Edit` without
+a round trip through the parser, and a single-path command's argument is the
+rest of the line (spec §12), because media filenames contain spaces
+constantly. Regression tests cover both spellings.
+
 Not yet wired: clicks are translated to columns but not to a seek, and the
 picker/subtitle modals have no production opener - `i`/`a`/`r` still report
 `NotImplemented` from `davimci-keys`.

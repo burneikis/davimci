@@ -77,6 +77,17 @@ fn the_ex_grammar_covers_the_spec_12_table() {
         (":wq", ExCommand::WriteQuit(None)),
         (":x", ExCommand::WriteQuit(None)),
         (":e cut.davimci", ExCommand::Edit("cut.davimci".into())),
+        // Regression: a path argument is the rest of the line. Splitting on
+        // whitespace made `:e stupid brig scrim.mkv` a usage error, which is
+        // most media files on a real disk.
+        (
+            ":e /m/stupid brig scrim.mkv",
+            ExCommand::Edit("/m/stupid brig scrim.mkv".into()),
+        ),
+        (
+            ":w /m/my project.davimci",
+            ExCommand::Write(Some("/m/my project.davimci".into())),
+        ),
         (":new", ExCommand::New),
         (":ls", ExCommand::List),
         (":bn", ExCommand::BufferNext),

@@ -74,14 +74,27 @@ pub fn parse(line: &str) -> Result<ExCommand, CliError> {
             }),
         }
     };
-    let optional_path = || args.first().map(|a| PathBuf::from(*a));
+    // A path argument is the *rest of the line*, not one whitespace-delimited
+    // token: media filenames contain spaces constantly, and these commands
+    // take exactly one path, so there is nothing else the remainder could be.
+    let rest = || {
+        let after = line[head.len()..].trim();
+        (!after.is_empty()).then(|| after.to_string())
+    };
+    let one_path = |cmd: &str, usage: &str| -> Result<PathBuf, CliError> {
+        rest().map(PathBuf::from).ok_or_else(|| CliError::Usage {
+            cmd: cmd.to_string(),
+            usage: usage.to_string(),
+        })
+    };
+    let optional_path = || rest().map(PathBuf::from);
 
     match head {
         "w" | "write" => Ok(ExCommand::Write(optional_path())),
         "q" | "quit" => Ok(ExCommand::Quit { force: false }),
         "q!" | "quit!" => Ok(ExCommand::Quit { force: true }),
         "wq" | "x" => Ok(ExCommand::WriteQuit(optional_path())),
-        "e" | "edit" => Ok(ExCommand::Edit(PathBuf::from(one("e", "<path>")?))),
+        "e" | "edit" => Ok(ExCommand::Edit(one_path("e", "<path>")?)),
         "new" => Ok(ExCommand::New),
         "ls" | "buffers" => Ok(ExCommand::List),
         "bn" | "bnext" => Ok(ExCommand::BufferNext),
