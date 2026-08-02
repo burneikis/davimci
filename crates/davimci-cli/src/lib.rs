@@ -16,6 +16,7 @@ pub mod autosave;
 pub mod editor;
 pub mod error;
 pub mod excmd;
+pub mod export;
 pub mod transport;
 #[cfg(feature = "window")]
 pub mod window;
@@ -28,6 +29,7 @@ pub use autosave::{Autosave, OnRecovery, Recovery};
 pub use editor::Editor;
 pub use error::CliError;
 pub use excmd::{ExCommand, ExOutcome, parse};
+pub use export::{ExportEvent, Exporter};
 pub use transport::{Transport, TransportState};
 #[cfg(feature = "window")]
 pub use window::Window;

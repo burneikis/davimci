@@ -130,7 +130,9 @@ impl eframe::App for Window {
         }
 
         for event in self.gui.poll() {
-            self.app.event(event, &mut self.editor);
+            let response = self.app.event(event, &mut self.editor);
+            // `i`/`a`/`r` ask for a picker; the frontend is what has one.
+            self.gui.apply_response(&response);
         }
         // One presentation tick per frame: playback, shuttle, pacing.
         self.app.event(Event::Tick, &mut self.editor);

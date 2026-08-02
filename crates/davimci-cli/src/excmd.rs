@@ -37,6 +37,18 @@ pub enum ExCommand {
     Buffer(usize),
     /// `:relink [old] <new>`
     Relink { old: Option<String>, new: String },
+    /// `:export <path> [--preset <name>]` - render to an explicit file.
+    Export {
+        path: PathBuf,
+        preset: Option<String>,
+    },
+    /// `:render <preset>` - render with a preset, naming the file after the
+    /// project and the preset's container.
+    Render { preset: String },
+    /// `:presets` - list what `:render` will accept.
+    Presets,
+    /// `:cancel` - stop the running export.
+    CancelRender,
 }
 
 /// What running a command produced. Messages are user-facing sentences, never
@@ -89,12 +101,43 @@ pub fn parse(line: &str) -> Result<ExCommand, CliError> {
     };
     let optional_path = || rest().map(PathBuf::from);
 
+    // `--preset <name>` is a trailing flag, so the path before it may contain
+    // spaces like any other path argument.
+    let split_preset = |usage: &str| -> Result<(PathBuf, Option<String>), CliError> {
+        let tail = rest().ok_or_else(|| CliError::Usage {
+            cmd: head.to_string(),
+            usage: usage.to_string(),
+        })?;
+        match tail.split_once("--preset") {
+            Some((path, name)) => {
+                let name = name.trim();
+                if name.is_empty() {
+                    return Err(CliError::Usage {
+                        cmd: head.to_string(),
+                        usage: usage.to_string(),
+                    });
+                }
+                Ok((PathBuf::from(path.trim()), Some(name.to_string())))
+            }
+            None => Ok((PathBuf::from(tail), None)),
+        }
+    };
+
     match head {
         "w" | "write" => Ok(ExCommand::Write(optional_path())),
         "q" | "quit" => Ok(ExCommand::Quit { force: false }),
         "q!" | "quit!" => Ok(ExCommand::Quit { force: true }),
         "wq" | "x" => Ok(ExCommand::WriteQuit(optional_path())),
         "e" | "edit" => Ok(ExCommand::Edit(one_path("e", "<path>")?)),
+        "export" => {
+            let (path, preset) = split_preset("<path> [--preset <name>]")?;
+            Ok(ExCommand::Export { path, preset })
+        }
+        "render" => Ok(ExCommand::Render {
+            preset: one("render", "<preset>")?,
+        }),
+        "presets" => Ok(ExCommand::Presets),
+        "cancel" => Ok(ExCommand::CancelRender),
         "new" => Ok(ExCommand::New),
         "ls" | "buffers" => Ok(ExCommand::List),
         "bn" | "bnext" => Ok(ExCommand::BufferNext),
@@ -159,6 +202,16 @@ impl Workspace {
                 })
             }
             ExCommand::Edit(path) => self.edit(path, on_recovery),
+            // Exporting needs a render backend, which a workspace has no
+            // business owning; the editor intercepts these before they
+            // arrive here (see `Editor::command`).
+            ExCommand::Export { .. }
+            | ExCommand::Render { .. }
+            | ExCommand::Presets
+            | ExCommand::CancelRender => Err(CliError::ExportFailed {
+                reason: "exporting needs a running editor, and this session has no render backend"
+                    .into(),
+            }),
             ExCommand::New => {
                 self.new_timeline(TimelineProps::default());
                 Ok(ExOutcome::msg("new timeline"))

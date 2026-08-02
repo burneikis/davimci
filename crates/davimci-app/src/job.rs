@@ -40,6 +40,19 @@ impl Job {
     }
 }
 
+/// A job event from whoever is actually running the work.
+///
+/// The host runs jobs and the app displays them, so this is the only thing
+/// that crosses between them. It is deliberately not a `Job`: the host does
+/// not get to decide how a job is labelled once it has started, or to
+/// resurrect one the app already retired.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JobUpdate {
+    Started { id: u64, label: String },
+    Progress { id: u64, permille: u16 },
+    Finished { id: u64, state: JobState },
+}
+
 /// Every job the user should know about, newest last.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct JobList {
@@ -70,6 +83,15 @@ impl JobList {
     }
 
     /// Drop everything that is no longer running - called on project close.
+    /// Fold in an update from the host.
+    pub fn apply(&mut self, update: JobUpdate) {
+        match update {
+            JobUpdate::Started { id, label } => self.start(id, label),
+            JobUpdate::Progress { id, permille } => self.progress(id, permille),
+            JobUpdate::Finished { id, state } => self.finish(id, state),
+        }
+    }
+
     pub fn clear_finished(&mut self) {
         self.jobs.retain(|j| j.state == JobState::Running);
     }

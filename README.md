@@ -34,6 +34,7 @@ davimci clip.mkv                        # open the editor window
 davimci clip.mkv -k "ll<Right>s"        # same editor, scripted, no window
 davimci clip.mkv -k "  " --ticks 30     # play, pulling real frames through MLT
 davimci project.davimci -c ':w'         # spec §12 lifecycle from the command line
+davimci clip.mkv -c ':export out.mkv' --no-window   # batch export, with progress
 ```
 
 `-k` drives the whole stack - key grammar, commands, MLT backend, presenter,
@@ -116,8 +117,10 @@ it is linked dynamically, since davimci is GPL-3.0 over LGPL-2.1 MLT.
 | Edits reproject the render graph; motions seek and present | implemented, tested |
 | Windowed shell: `eframe` window, `DrawList` rasteriser, video texture | implemented, runs |
 | egui key translation, including `Space` and Control chords | implemented, tested |
-| Media picker opener (`i`/`a`/`r`), click-to-seek | not started |
-| Export presets, `:render` (Phase 8b), TUI frontend (9d) | not started |
+| Export: presets, `:export`/`:render`/`:presets`/`:cancel`, background jobs | implemented, real files |
+| Media picker opener (`i`/`a`/`r`): insert, append, replace | implemented, tested |
+| Multi-audio MKV export (audio tracks are still mixed to one) | **not working** |
+| Click-to-seek, TUI frontend (9d) | not started |
 | Everything else | placeholder crates |
 
 Caveats worth knowing: undo history is not persisted - reopening a project
@@ -155,8 +158,14 @@ tolerance-based; the shell uploads those pixels as a texture rather than
 recomputing them. The window is not covered by automated tests - the
 rasteriser's input (`DrawList`) and its key translation are, but nothing
 asserts on what reaches the screen. Clicks translate to timeline columns but
-not yet to seeks, and the media picker and subtitle modals have no opener, so
-`i`/`a`/`r` still report `NotImplemented`.
+not yet to seeks, and the subtitle modal still has no opener.
+
+Export writes real files - h264/h265/vp9/prores into mkv/mp4/webm/mov, driven
+by presets that name codecs rather than encoders, with progress in the status
+line and `:cancel` to stop one. **It does not yet keep audio tracks separate:**
+a multi-track project exports with its audio mixed to a single stream, so M3's
+"export a multi-audio MKV" is not met. The test for it is written and asserts
+the real requirement; it is `#[ignore]`d, not weakened, and plan.md says why.
 
 In `davimci-mlt`: transitions are not projected until Phase 9f, and export
 presets arrive in Phase 8b (`RenderSettings` is currently filled in by hand).

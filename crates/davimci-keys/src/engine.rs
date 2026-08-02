@@ -34,8 +34,18 @@ pub enum TransportCmd {
     LoopSelection,
 }
 
-/// What happened after feeding one key through the [`Engine`].
-#[derive(Debug, Clone, PartialEq)]
+/// What a chosen media file is for (spec §3.2, `i`/`a`/`r`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MediaIntent {
+    /// `i`: insert at the playhead, rippling later clips right.
+    Insert,
+    /// `a`: append after the clip under the playhead.
+    Append,
+    /// `r`: replace the clip under the playhead.
+    Replace,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
     /// A sequence is still being typed.
     Pending,
@@ -60,6 +70,10 @@ pub enum Outcome {
     Transport(TransportCmd),
     /// `:` was pressed; the caller now owns command-line input.
     EnterCommandMode,
+    /// `i`/`a`/`r`: the caller should open the media picker. The grammar has
+    /// no filesystem and no idea what media exists, so choosing the file is
+    /// the host's job; this only says what the chosen file is *for*.
+    PickMedia(MediaIntent),
     /// A Lua-bound key fired; the host must run callback `.0` through
     /// `davimci_lua::Runtime::invoke` and execute the requests it returns.
     Plugin(u32),
@@ -201,8 +215,22 @@ impl Engine {
                 ripple,
                 register,
             } => self.do_paste(before, ripple, register, session),
-            Action::Replace | Action::InsertMedia | Action::AppendMedia => {
-                Outcome::NotImplemented("media import is Phase 5")
+            Action::InsertMedia => Outcome::PickMedia(MediaIntent::Insert),
+            Action::AppendMedia => Outcome::PickMedia(MediaIntent::Append),
+            Action::Replace => {
+                // Replace needs something to replace; refusing here means the
+                // picker never opens for an edit that cannot land.
+                let head = session.timeline().playhead();
+                if session
+                    .timeline()
+                    .track(head.track)
+                    .and_then(|t| t.clip_at(head.frame))
+                    .is_some()
+                {
+                    Outcome::PickMedia(MediaIntent::Replace)
+                } else {
+                    Outcome::Error("there is no clip under the playhead to replace".to_string())
+                }
             }
             Action::Undo => run(session.undo()),
             Action::Redo => run(session.redo()),

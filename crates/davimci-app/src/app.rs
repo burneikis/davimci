@@ -7,12 +7,12 @@
 
 use davimci_cmd::Session;
 use davimci_keys::engine::{Outcome, TransportCmd};
-use davimci_keys::{Engine, Key, Keymap, Mode};
+use davimci_keys::{Engine, Key, Keymap, MediaIntent, Mode};
 use davimci_motion::{JumpConfig, Zoom};
 
 use crate::error::AppError;
 use crate::frontend::{Event, Frontend, Response, Surface};
-use crate::job::JobList;
+use crate::job::{JobList, JobUpdate};
 use crate::message::{Message, MessageQueue};
 use crate::view::{ViewInputs, ViewState};
 use crate::viewport::Viewport;
@@ -66,6 +66,29 @@ pub trait Host {
         let _ = session;
     }
 
+    /// Import the media the user picked, at the position `intent` implies.
+    ///
+    /// The host has the prober and the filesystem; the app has neither. It
+    /// still goes through `Session::exec` inside the host, so an import is
+    /// one undoable command like every other edit.
+    fn import_media(
+        &mut self,
+        path: &std::path::Path,
+        intent: MediaIntent,
+        session: &mut Session,
+    ) -> Result<Option<String>, AppError> {
+        let _ = (path, intent, session);
+        Err(AppError::UnhandledCommand(
+            "this build cannot import media".to_string(),
+        ))
+    }
+
+    /// Job progress since the last call, for anything the host runs in the
+    /// background (export, analysis). Polled every [`Event::Tick`].
+    fn jobs(&mut self) -> Vec<JobUpdate> {
+        Vec::new()
+    }
+
     /// True once the host wants the loop to stop (`:q` succeeded).
     fn wants_quit(&self) -> bool {
         false
@@ -88,6 +111,8 @@ pub struct App {
     messages: MessageQueue,
     jobs: JobList,
     command_line: Option<String>,
+    /// What an `i`/`a`/`r` picker, if one is open, will do with its answer.
+    pending_pick: Option<MediaIntent>,
     quit: bool,
 }
 
@@ -107,6 +132,7 @@ impl App {
             messages: MessageQueue::default(),
             jobs: JobList::default(),
             command_line: None,
+            pending_pick: None,
             quit: false,
         }
     }
@@ -264,8 +290,41 @@ impl App {
                 self.command_line = None;
                 Response::Continue
             }
+            Event::MediaChosen(path) => {
+                let Some(intent) = self.pending_pick.take() else {
+                    // No picker was open, so nothing asked for this file.
+                    // Silently importing it would be a write the user never
+                    // requested.
+                    self.messages
+                        .push(Message::error("no media picker is open".to_string()));
+                    return Response::Continue;
+                };
+                match host.import_media(&path, intent, &mut self.session) {
+                    Ok(msg) => {
+                        // Importing is an edit: the graph is stale and the
+                        // frame under the playhead may have changed.
+                        host.timeline_changed(&self.session);
+                        host.playhead_moved(&self.session);
+                        if let Some(m) = msg {
+                            self.messages.push(Message::info(m));
+                        }
+                    }
+                    Err(e) => self.messages.push(Message::error(e.to_string())),
+                }
+                self.follow();
+                Response::Continue
+            }
+            Event::PickerCancelled => {
+                self.pending_pick = None;
+                Response::Continue
+            }
             Event::Tick => {
                 host.tick(&mut self.session);
+                // Jobs report on the clock, not on the edit: an export runs
+                // in the background and the status line has to keep up.
+                for update in host.jobs() {
+                    self.jobs.apply(update);
+                }
                 self.follow();
                 Response::Continue
             }
@@ -317,6 +376,11 @@ impl App {
                 }
             }
             Outcome::Transport(cmd) => host.transport(cmd),
+            Outcome::PickMedia(intent) => {
+                self.pending_pick = Some(intent);
+                self.follow();
+                return Response::OpenPicker(intent);
+            }
             Outcome::EnterCommandMode => {
                 self.command_line = Some(String::new());
                 self.follow();

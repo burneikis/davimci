@@ -338,6 +338,13 @@ undoable command; the editor warns that frame-exact edit points may shift.
   - Track selection at export (choose which audio tracks / subtitle tracks make it into the final render, or export multi-track MKV preserving separation)
   - Resolution/framerate presets, custom presets savable via config
   - `:render <preset>` / `:export <path> --preset <name>` command-mode invocation
+  - `:presets` lists the presets that exist; `:cancel` stops a running export
+  - An export is a background job: the editor stays usable while it runs, and
+    its progress appears in the status line like any other job. A cancelled
+    export leaves the partial file on disk - deleting a user's file is not the
+    editor's decision.
+  - `:export` with no `--preset` infers one from the output file's extension,
+    and an output path with no extension takes the preset's.
   - Export presets definable in Lua config (see §9)
 
 ---

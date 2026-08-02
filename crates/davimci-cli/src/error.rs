@@ -31,6 +31,24 @@ pub enum CliError {
     #[error("nothing in this timeline points at {0}")]
     NoClipUsesPath(String),
 
+    #[error("there is no clip under the playhead to replace")]
+    NothingToReplace,
+
+    #[error("an export to {output} is already running; wait for it or :cancel it")]
+    ExportBusy { output: String },
+
+    #[error("there is nothing to export: this timeline is empty")]
+    NothingToExport,
+
+    #[error("no export is running, so there is nothing to cancel")]
+    NoExportRunning,
+
+    #[error("the export could not start: {reason}")]
+    ExportFailed { reason: String },
+
+    #[error(transparent)]
+    Preset(#[from] davimci_backend::PresetError),
+
     #[error("could not {what} {path}: {reason}")]
     Io {
         what: &'static str,
@@ -70,7 +88,14 @@ impl Classify for CliError {
             | Self::NoFilename
             | Self::NoSuchBuffer(_)
             | Self::NothingToRelink
-            | Self::NoClipUsesPath(_) => ErrorClass::User,
+            | Self::NoClipUsesPath(_)
+            | Self::ExportBusy { .. }
+            | Self::NothingToReplace
+            | Self::NothingToExport
+            | Self::NoExportRunning
+            | Self::Preset(_) => ErrorClass::User,
+            // A failed export leaves the timeline untouched and editable.
+            Self::ExportFailed { .. } => ErrorClass::Recoverable,
             // A file we cannot read or write is recoverable: the session
             // keeps running and the user can pick another path.
             Self::Io { .. } => ErrorClass::Recoverable,

@@ -781,6 +781,69 @@ so the picture kept its startup size in the corner of the pane.
 `Editor::refresh_preview` now recomposes on a size change, with a regression
 test (`resizing_the_video_pane_recomposes_the_frame_at_the_new_size`).
 
+### Phase 8b - export
+
+Status: implemented, with one gap named below.
+
+The MLT side already existed; what was missing was everything around it.
+`davimci-backend::preset` holds the preset registry, and it is pure data - it
+maps a *codec* name to an ffmpeg encoder (spec §10.3) and refuses an
+impossible container/codec pairing when the preset is **defined**, not after
+a long render (spec §9.5). `davimci-cli::export` drives one, turning backend
+progress into job updates and a final status line.
+
+`:export <path> [--preset <name>]`, `:render <preset>`, `:presets` and
+`:cancel` are the commands. They never reach `Workspace`, which has no
+backend; `Editor` intercepts them, because it is the only thing holding one.
+For the same reason a `-c` script containing an export command now runs
+through a real editor rather than a bare workspace, which is what makes
+batch export from the command line work.
+
+Amendments made during implementation:
+
+- `:cancel` and `:presets` were added to spec §7's export list; neither was
+  named there and both are needed to use the feature.
+- An export is a background job, so the editor stays live while one runs.
+  Progress is polled on the tick, through a new `Host::jobs` seam, since a
+  host runs jobs and the app only displays them.
+- Progress never reports 100% before the backend says the render finished; a
+  status line that reads "100%" for thirty seconds is a lie about a file that
+  does not exist yet.
+
+**Known gap, and M3 is not met until it closes.** Exporting a multi-audio
+MKV currently mixes every audio track down to one stream. MLT's avformat
+consumer can write up to 8 audio streams via `meta.map.audio.{N}.channels` /
+`.start`, but the tractor mixes the tracks before the consumer sees them, so
+there are no per-track channels left to map. The fix is per-track channel
+routing when the graph is built (`davimci-mlt`), not an export setting. The
+test that proves it is written, asserts the real requirement, and is
+`#[ignore]`d with that explanation rather than weakened.
+
+### Phase 5 leftover - the media picker opener
+
+Status: complete. `i`/`a`/`r` no longer report `NotImplemented`.
+
+The chain is: `davimci-keys` returns `Outcome::PickMedia(MediaIntent)` (the
+grammar has no filesystem, so it only says what a file would be *for*), the
+app answers `Response::OpenPicker`, the frontend opens its picker and replies
+with `Event::MediaChosen` or `Event::PickerCancelled`, and the host - which
+has the prober - imports at the position the intent implies. Directory
+listing lives in `davimci-app::browse` rather than in a frontend, because the
+GUI and the TUI must show the same files in the same order or the parity test
+is meaningless.
+
+Amendments made during implementation:
+
+- `ImportOptions` gained `placement` (insert vs overwrite) and `target`.
+  Imported media ripples rather than overwriting, so picking a file never
+  destroys work; `target` puts it on the track the playhead is on, since
+  landing it on a fresh track would ignore where the user was looking.
+- `r` is refused *before* the picker opens when no clip is under the
+  playhead: opening a file browser for an edit that cannot land is a worse
+  error than the message.
+- All three intents are one command, so a single `u` undoes a whole import,
+  including the ripple delete that `r` needs.
+
 Defect found on first real use: opening a file whose name contains spaces
 failed with a `:e <path>` usage error. The binary stringified an argv path
 into a `:` line, and the parser split it on whitespace. Two fixes, since

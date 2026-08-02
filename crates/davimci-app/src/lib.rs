@@ -10,6 +10,7 @@
 //! the whole crate is unit-testable with no display present.
 
 pub mod app;
+pub mod browse;
 pub mod error;
 pub mod frontend;
 pub mod job;
@@ -21,9 +22,10 @@ pub mod viewport;
 pub mod fixtures;
 
 pub use app::{App, Host, NullHost};
+pub use browse::{BrowseEntry, is_media, list_dir};
 pub use error::AppError;
 pub use frontend::{Event, Frontend, Response, Surface};
-pub use job::{Job, JobList, JobState};
+pub use job::{Job, JobList, JobState, JobUpdate};
 pub use message::{Message, MessageQueue, Severity};
 pub use view::{ClipView, PlayheadView, SelectionView, Tick, TrackView, ViewInputs, ViewState};
 pub use viewport::Viewport;

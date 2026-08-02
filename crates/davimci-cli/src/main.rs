@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use davimci_app::{App, Event, Surface};
 use davimci_backend::RenderBackend;
-use davimci_cli::{Editor, ExOutcome, OnRecovery, Workspace};
+use davimci_cli::{Editor, ExCommand, ExOutcome, OnRecovery, Workspace};
 use davimci_core::{Classify, Fps, Resolution};
 use davimci_headless::HeadlessFrontend;
 use davimci_present::{Host as PresentHost, Presenter};
@@ -79,6 +79,14 @@ fn main() -> Result<()> {
         report(ws.run_command(&davimci_cli::ExCommand::Edit(path), choice));
     }
 
+    // Export needs a render backend, which a bare workspace has no business
+    // owning. When a `-c` line asks for one, run the whole list through a
+    // real editor instead - that is what makes batch export from a script
+    // possible.
+    if commands.iter().any(|l| needs_backend(l)) {
+        return run_commands_with_editor(ws, &commands);
+    }
+
     for line in &commands {
         report(ws.run(line, OnRecovery::Discard));
         if ws.should_quit() {
@@ -99,6 +107,61 @@ fn main() -> Result<()> {
 
     for line in ws.list() {
         println!("{line}");
+    }
+    Ok(())
+}
+
+/// True for `:` lines only the editor can answer.
+fn needs_backend(line: &str) -> bool {
+    matches!(
+        davimci_cli::excmd::parse(line),
+        Ok(ExCommand::Export { .. }
+            | ExCommand::Render { .. }
+            | ExCommand::Presets
+            | ExCommand::CancelRender)
+    )
+}
+
+/// Run `-c` lines through the assembled editor, so exporting works with no
+/// window. Ticks until any export finishes, because a script that returned
+/// before the file was written would be useless.
+fn run_commands_with_editor(ws: Workspace, commands: &[String]) -> Result<()> {
+    let session = ws.current_session();
+    let (backend, presenter) = engine_for(&session);
+    let mut editor = Editor::new(ws, backend, presenter);
+    let mut app = App::new(session);
+    editor.prime(app.session());
+
+    for line in commands {
+        app.event(Event::Command(line.clone()), &mut editor);
+        if let Some(m) = app.view().message {
+            println!("{}", m.text);
+        }
+        // An export is a background job; wait it out before the next line.
+        while editor.exporter().is_running() {
+            app.event(Event::Tick, &mut editor);
+            // Transport and export speak through notices; without draining
+            // them the final "exported ..." never reaches the terminal.
+            for notice in editor.take_notices() {
+                app.notify(notice);
+            }
+            if let Some(job) = app.view().job {
+                print!("\r{} {}%   ", job.label, job.percent());
+                let _ = std::io::Write::flush(&mut std::io::stdout());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        if davimci_app::Host::wants_quit(&editor) {
+            break;
+        }
+    }
+    // Drain the last notices, e.g. "exported /path".
+    app.event(Event::Tick, &mut editor);
+    for notice in editor.take_notices() {
+        app.notify(notice);
+    }
+    if let Some(m) = app.view().message {
+        println!("\r{}   ", m.text);
     }
     Ok(())
 }

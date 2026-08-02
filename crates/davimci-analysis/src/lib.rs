@@ -30,7 +30,9 @@ pub use analysis::{ANALYSIS_VERSION, Analysis, AnalysisParams, Hop, Span};
 pub use cache::{AnalysisCache, content_hash};
 pub use conform::{ConformOptions, Conformed, FitPolicy, FitRect};
 pub use error::AnalysisError;
-pub use import::{ImportOptions, Imported, StreamMapping, import};
+pub use import::{
+    ImportOptions, ImportPlan, Imported, Placement, StreamMapping, ids_needed, import, plan,
+};
 pub use index::AnalysisIndex;
 pub use jobs::{JobEvent, JobId, JobRunner};
 pub use probe::{FfprobeProber, MediaInfo, Prober, StreamInfo, StreamKind};

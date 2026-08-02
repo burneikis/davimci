@@ -14,6 +14,7 @@ pub mod error;
 pub mod frame;
 pub mod job;
 pub mod mock;
+pub mod preset;
 
 use std::path::Path;
 
@@ -23,6 +24,10 @@ pub use error::{BackendError, Result};
 pub use frame::{PreviewScale, VideoFrame};
 pub use job::{RenderJob, RenderProgress, RenderSettings, RenderState};
 pub use mock::MockBackend;
+pub use preset::{
+    AudioCodec, Container, Preset, PresetError, PresetRegistry, SubtitleMode, TrackSelection,
+    VideoCodec,
+};
 
 /// What the backend can tell us about a media file.
 #[derive(Debug, Clone, PartialEq, Eq)]

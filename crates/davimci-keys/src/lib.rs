@@ -34,7 +34,7 @@ pub mod parser;
 mod tests;
 
 pub use action::{Action, ArgKind, LeafAction, Operator, Target};
-pub use engine::{Engine, Outcome, TransportCmd};
+pub use engine::{Engine, MediaIntent, Outcome, TransportCmd};
 pub use error::KeysError;
 pub use key::{Key, Named};
 pub use keymap::{Keymap, Lookup};

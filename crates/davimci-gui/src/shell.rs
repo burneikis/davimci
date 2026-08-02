@@ -9,13 +9,14 @@
 //! The windowing layer (not yet written, see the crate docs) does exactly two
 //! things: push [`GuiEvent`]s in, and rasterise the [`DrawList`] out.
 
-use davimci_app::{AppError, Event, Frontend, Surface, ViewState};
+use davimci_app::{AppError, Event, Frontend, Response, Surface, ViewState};
+use davimci_keys::MediaIntent;
 
 use crate::cmdline::{CommandLine, CommandLineEvent, default_candidates};
 use crate::input::{Modifiers, RawKey, translate};
 use crate::layout::{Layout, Metrics, paint};
 use crate::paint::{Chrome, DrawList};
-use crate::picker::{MediaPicker, PickerEvent};
+use crate::picker::{Entry, MediaPicker, PickerEvent, PickerIntent};
 use crate::subtitle::{SubtitleEdit, SubtitleEvent};
 
 /// Something the windowing layer observed.
@@ -46,6 +47,9 @@ pub struct Gui {
     command: CommandLine,
     command_open: bool,
     picker: Option<MediaPicker>,
+    /// Where the picker is looking. Remembered between opens, so a second
+    /// `i` starts where the last one left off.
+    browse_dir: std::path::PathBuf,
     subtitle: Option<SubtitleEdit>,
     chrome: Chrome,
     last_draw: Option<DrawList>,
@@ -64,6 +68,7 @@ impl Gui {
             command: CommandLine::new(default_candidates()),
             command_open: false,
             picker: None,
+            browse_dir: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
             subtitle: None,
             chrome: Chrome::default(),
             last_draw: None,
@@ -105,6 +110,31 @@ impl Gui {
 
     pub fn open_picker(&mut self, picker: MediaPicker) {
         self.picker = Some(picker);
+    }
+
+    /// Open the picker on `dir` for `intent`. This is the production opener:
+    /// `i`/`a`/`r` reach it through [`Response::OpenPicker`].
+    pub fn open_picker_at(&mut self, intent: PickerIntent, dir: &std::path::Path) {
+        self.browse_dir = dir.to_path_buf();
+        self.picker = Some(MediaPicker::new(intent, entries_for(dir)));
+    }
+
+    /// Re-list the picker at `dir`, keeping the intent it was opened with.
+    fn browse_to(&mut self, dir: &std::path::Path) {
+        self.browse_dir = dir.to_path_buf();
+        let entries = entries_for(dir);
+        if let Some(p) = self.picker.as_mut() {
+            p.set_entries(entries);
+        }
+    }
+
+    /// React to what the app decided. A frontend that ignored this would
+    /// simply never show a picker.
+    pub fn apply_response(&mut self, response: &Response) {
+        if let Response::OpenPicker(intent) = response {
+            let dir = self.browse_dir.clone();
+            self.open_picker_at(intent_of(*intent), &dir);
+        }
     }
 
     pub fn open_subtitle(&mut self, edit: SubtitleEdit) {
@@ -162,8 +192,21 @@ impl Gui {
             };
             match ev {
                 PickerEvent::Browsing => {}
-                PickerEvent::Descend(_) => {}
-                PickerEvent::Cancelled | PickerEvent::Chosen { .. } => self.picker = None,
+                // Walking into a directory re-lists it in place; the app is
+                // not told, because nothing has been chosen yet.
+                PickerEvent::Descend(path) => {
+                    let dir = std::path::PathBuf::from(path);
+                    self.browse_to(&dir);
+                }
+                PickerEvent::Cancelled => {
+                    self.picker = None;
+                    self.out.push(Event::PickerCancelled);
+                }
+                PickerEvent::Chosen { path, .. } => {
+                    self.picker = None;
+                    self.out
+                        .push(Event::MediaChosen(std::path::PathBuf::from(path)));
+                }
             }
             return;
         }
@@ -273,6 +316,32 @@ impl Frontend for Gui {
         self.last_draw = Some(paint(view, &layout, &self.chrome));
         Ok(())
     }
+}
+
+/// The app's intent, in the picker's vocabulary. Two enums rather than one
+/// because `davimci-keys` may not depend on a frontend.
+fn intent_of(intent: MediaIntent) -> PickerIntent {
+    match intent {
+        MediaIntent::Insert => PickerIntent::Insert,
+        MediaIntent::Append => PickerIntent::Append,
+        MediaIntent::Replace => PickerIntent::Replace,
+    }
+}
+
+/// The picker's rows for a directory, from the app's shared listing so the
+/// GUI and the TUI show the same files in the same order.
+fn entries_for(dir: &std::path::Path) -> Vec<Entry> {
+    davimci_app::list_dir(dir)
+        .into_iter()
+        .map(|e| {
+            let path = e.path.to_string_lossy().to_string();
+            if e.is_dir {
+                Entry::dir(path)
+            } else {
+                Entry::file(path)
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]

@@ -27,9 +27,28 @@ pub struct ImportOptions {
     pub conform: ConformOptions,
     /// Where on the timeline the clips land.
     pub at: Frame,
+    /// Whether landing clips push later ones right (spec §4, `i`) or sit on
+    /// top of whatever is there (`gp`, and a plain import into empty space).
+    pub placement: Placement,
+    /// Put the first stream of a matching kind on this track instead of
+    /// finding one. `i`/`a`/`r` need it: the user pointed at a track with
+    /// the playhead, and landing the media on a fresh track instead would
+    /// ignore where they were looking.
+    pub target: Option<TrackId>,
     /// Cues per subtitle stream index, from [`crate::subtitle::extract`].
     /// Streams with no cues still get a track, so the mapping is complete.
     pub subtitles: BTreeMap<u32, Vec<Cue>>,
+}
+
+/// How imported clips meet the clips already on the track.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Placement {
+    /// Sit on top of whatever is there. The right default for an import into
+    /// a fresh timeline, where there is nothing to disturb.
+    #[default]
+    Overwrite,
+    /// Push later clips right by the imported length (spec §4, `i`).
+    Insert,
 }
 
 /// Which track a source stream ended up on (spec §7 mapping).
@@ -143,7 +162,13 @@ pub fn plan(
 
     for stream in &info.streams {
         let kind = track_kind(stream.kind);
-        let (track, track_name, add) = match reusable(tl, kind, &taken) {
+        // The requested track wins over any reusable one, but only for a
+        // stream it can actually hold.
+        let requested = opts
+            .target
+            .filter(|id| !taken.contains(id) && tl.track(*id).is_some_and(|t| t.kind == kind));
+        let requested = requested.and_then(|id| tl.track(id).map(|t| (id, t.name.clone())));
+        let (track, track_name, add) = match requested.or_else(|| reusable(tl, kind, &taken)) {
             Some(t) => (t.0, t.1, None),
             None => {
                 let id = TrackId(next()?);
@@ -190,11 +215,19 @@ pub fn plan(
             clips: clips.len(),
         });
         for clip in clips {
-            cmds.push(EditCommand::Overwrite {
-                track,
-                at: clip.start,
-                new_id: Some(clip.id),
-                clip,
+            cmds.push(match opts.placement {
+                Placement::Overwrite => EditCommand::Overwrite {
+                    track,
+                    at: clip.start,
+                    new_id: Some(clip.id),
+                    clip,
+                },
+                Placement::Insert => EditCommand::Insert {
+                    track,
+                    at: clip.start,
+                    new_id: Some(clip.id),
+                    clip,
+                },
             });
         }
     }

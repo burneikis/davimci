@@ -5,7 +5,7 @@
 //! [`ViewState`]. It contains no view logic, so anything a GUI and a TUI would
 //! both have to implement belongs above this line, not below it.
 
-use davimci_keys::Key;
+use davimci_keys::{Key, MediaIntent};
 
 use crate::error::AppError;
 use crate::view::ViewState;
@@ -38,6 +38,11 @@ pub enum Event {
     Command(String),
     /// The `:` line was abandoned.
     CommandCancelled,
+    /// A media file was chosen in the picker. The frontend owns browsing
+    /// (it has the list widget); the app owns what the choice means.
+    MediaChosen(std::path::PathBuf),
+    /// The picker was closed without choosing anything.
+    PickerCancelled,
     /// Time passed: repaint, poll jobs, pull a preview frame.
     Tick,
     Quit,
@@ -52,6 +57,9 @@ pub enum Response {
     /// `:` line until it sends [`Event::Command`] or
     /// [`Event::CommandCancelled`].
     OpenCommandLine,
+    /// `i`/`a`/`r`: the frontend should open the media picker and answer with
+    /// [`Event::MediaChosen`] or [`Event::PickerCancelled`].
+    OpenPicker(MediaIntent),
     Quit,
 }
 
