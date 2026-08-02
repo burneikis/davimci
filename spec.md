@@ -196,7 +196,7 @@ Within visual mode:
 ### 9.1 Location & structure
 
 ```
-~/.config/vimvid/
+~/.config/vimci/
 ├── init.lua              -- entrypoint, like nvim's init.lua
 ├── keymaps.lua           -- optional split-out keybindings
 ├── motions/              -- user-defined custom motions
@@ -211,13 +211,13 @@ Within visual mode:
 ### 9.2 Keymap API
 
 ```lua
-local map = require("vimvid.keymap").map
+local map = require("vimci.keymap").map
 
 -- mode, lhs, rhs (rhs can be a string command or a Lua function)
 map("normal", "s", "editor.split_at_playhead")
 map("normal", "x", "editor.ripple_delete")
 map("normal", "<leader>e", function()
-  require("vimvid.export").run("youtube_1080p")
+  require("vimci.export").run("youtube_1080p")
 end)
 
 -- rebind arrow keys' frame-step behavior
@@ -228,7 +228,7 @@ map("normal", "<Right>", "editor.step_frame(1)")
 ### 9.3 Custom motions (predicate-based)
 
 ```lua
-local motions = require("vimvid.motions")
+local motions = require("vimci.motions")
 
 motions.register("next_loud_audio", function(ctx, opts)
   return ctx.timeline:find_next({
@@ -248,7 +248,7 @@ This directly supports the requested "jump to next audio above -2dB in audio tra
 ### 9.4 Custom text objects
 
 ```lua
-local textobj = require("vimvid.textobject")
+local textobj = require("vimci.textobject")
 
 textobj.register("c", { -- clip
   inner = function(clip) return clip.core_range end,
@@ -261,7 +261,7 @@ Users can define new objects (e.g. `is` for silence-detected segment) the same w
 ### 9.5 Export presets
 
 ```lua
-require("vimvid.export").preset("youtube_1080p", {
+require("vimci.export").preset("youtube_1080p", {
   container = "mp4",
   video_codec = "h264",
   resolution = "1920x1080",
@@ -273,7 +273,7 @@ require("vimvid.export").preset("youtube_1080p", {
 ### 9.6 Zoom / jump-point config
 
 ```lua
-require("vimvid.timeline").configure({
+require("vimci.timeline").configure({
   jump_points = { "clip_bounds", "markers", "silence" },
   jump_point_density_per_zoom = {
     [1] = "clip_bounds_only",
@@ -286,16 +286,16 @@ require("vimvid.timeline").configure({
 
 ### 9.7 Project-local overrides
 
-- `.vimvid.lua` in a project directory, auto-loaded on open, for per-project export presets, track linkage defaults, etc. - same modelines/local-config pattern as nvim's project-local `.nvimrc`-style setups (loaded opt-in for safety).
+- `.vimci.lua` in a project directory, auto-loaded on open, for per-project export presets, track linkage defaults, etc. - same modelines/local-config pattern as nvim's project-local `.nvimrc`-style setups (loaded opt-in for safety).
 
 ### 9.8 Hooks / events
 
 ```lua
-require("vimvid.autocmd").on("SplitPerformed", function(event)
+require("vimci.autocmd").on("SplitPerformed", function(event)
   -- e.g. auto-tag both resulting clips
 end)
 
-require("vimvid.autocmd").on("BeforeExport", function(ctx)
+require("vimci.autocmd").on("BeforeExport", function(ctx)
   -- e.g. validate no muted tracks are accidentally included
 end)
 ```
@@ -304,12 +304,74 @@ Event list (v1): `PlayheadMoved`, `SplitPerformed`, `ClipDeleted`, `ClipInserted
 
 ---
 
-## 10. Open Questions / Follow-ups
+## 10. Decisions
 
-1. **Engine choice** - build on an existing NLE engine/library (e.g. an FFmpeg-based compositing pipeline, or embed something like MLT) vs. a custom renderer. Affects how fast ripple/split operations can preview live.
-2. **Silence/peak detection** - real-time (as you scrub) vs. precomputed on import (waveform + RMS analysis pass). Precompute is simpler and enables the `]a`-style predicate motions instantly.
-3. **Proxy/preview resolution** - for smooth scrubbing at high zoom on large MKV sources, will likely need proxy transcodes generated on import.
-4. **Undo model** - operational-transform-style command log (fits `.`-repeat and macros naturally) vs. full state snapshots.
+Resolutions for the previously-open architectural questions. Each records the choice, the reasoning, and the risk being accepted.
+
+### 10.1 Engine: embed MLT (`libmlt`) as the render/preview backend
+
+**Decision:** build v1 on MLT rather than a custom renderer or raw FFmpeg filter graphs.
+
+**Why:**
+- MLT's playlist/tractor model maps almost 1:1 onto our track/clip model, so split and ripple are cheap in-memory playlist mutations - no re-render.
+- Frame-accurate seeking, multi-track compositing, A/V sync, and a real-time preview consumer (SDL) all come for free.
+- Producers are FFmpeg-backed, so the MKV/multi-track import story in §7 is already covered.
+- Raw FFmpeg would mean hand-writing a compositor, sync layer, and preview clock before the first `s` keypress works.
+
+**Constraint:** the timeline model is **engine-agnostic**. We own the clip, track, grouping, and undo data structures; MLT sits behind a narrow `RenderBackend` interface (seek, preview, render, probe). A custom renderer can replace it later without touching the editor core.
+
+**Accepted risk:** MLT's documentation is thin and the API is C with manual refcounting; expect a hand-written safe wrapper layer and a test suite that exercises it.
+
+### 10.2 Detection: precompute on import, in a background job
+
+**Decision:** all silence/peak/scene analysis is precomputed. No real-time analysis during scrubbing.
+
+**How:**
+- One analysis pass per source on import: peak + RMS waveform at a fixed hop (default 10 ms), silence spans, and optional scene-change keyframes.
+- Results cached to a versioned sidecar at `.vimci/cache/<content_hash>.analysis`. Cache version bumps invalidate.
+- Predicate motions (§3.4) become an indexed lookup (O(log n)), so `]a` is instant and correct even when zoomed fully out.
+- The job runs in the background with progress in the status line. Editing is allowed immediately; predicate motions report `analysis pending` until the relevant range is ready.
+- Re-analysis is user-triggered (`:analyze`) after gain/filter changes.
+
+### 10.3 Proxies: automatic above a threshold, transparent at export
+
+**Decision:** proxy generation is on by default but conditional, and runs in the same background job as §10.2.
+
+**Rule:** generate a proxy when the source is above 1080p, or uses a long-GOP / expensive-to-seek codec (H.265, 10-bit, HEVC screen captures). Below that threshold, decode the original directly.
+
+**Format:** 540p (configurable) intra-only ProRes Proxy or DNxHR LB, matching the source framerate and timecode so frame numbers stay identical.
+
+**Controls:**
+
+```lua
+require("vimci.media").configure({
+  proxy = { auto = true, height = 540, codec = "prores_proxy" },
+})
+```
+
+plus `:set proxy on|off` at runtime.
+
+**Hard invariant:** export always relinks to original sources. A built-in `BeforeExport` check fails the render if any clip would resolve to a proxy.
+
+### 10.4 Undo: operational command log with an undo tree
+
+**Decision:** every edit is a serializable command object with `apply` and `invert`, recorded to a log. Not full-state snapshots.
+
+**Why one decision buys five features:** undo/redo, `.`-repeat, macros (`q`/`@`), the Lua scripting API surface, and the project file format all fall out of the same command representation. A snapshot model gives only undo.
+
+**Shape:**
+- Undo is a **tree**, not a stack - branching history is cheap here and fits the vim model (`u`, `Ctrl-r`, `g-`/`g+`, `:undolist`).
+- Project file = a compacted timeline state plus the command log since it.
+- **Drift guard:** a full state snapshot every N commands (default 100) and on every save, so undo cost is bounded and a buggy `invert` can never lose the project - only the commands since the last snapshot.
+
+### 10.5 Naming
+
+The project, config directory, Lua module namespace, and project-local file all use `vimci`: `~/.config/vimci/`, `require("vimci.*")`, `.vimci.lua`.
+
+### 10.6 Still open
+
+- GPU-accelerated preview path (MLT's OpenGL consumer vs. software) - defer until preview performance is measured on real footage.
+- Whether text/subtitle rendering uses MLT's built-in producers or a custom layout engine for richer styling.
 
 ---
 
