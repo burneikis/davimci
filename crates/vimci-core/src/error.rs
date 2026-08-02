@@ -53,6 +53,33 @@ pub enum CoreError {
     #[error("track {0} does not exist")]
     NoSuchTrack(String),
 
+    #[error("clip {0} does not exist")]
+    NoSuchClip(String),
+
+    #[error("there is nothing to split at frame {frame}: it is already a cut")]
+    NothingToSplit { frame: u64 },
+
+    #[error("there is no cut at frame {frame} to roll")]
+    NoCutAt { frame: u64 },
+
+    #[error("cannot slide this clip: {reason}")]
+    CannotSlide { reason: String },
+
+    #[error("cannot link these clips: {reason}")]
+    CannotLink { reason: String },
+
+    #[error("{start} to {end} is not a valid range")]
+    InvalidRange { start: u64, end: u64 },
+
+    #[error("a clip cannot be zero frames long")]
+    ZeroDuration,
+
+    #[error("the register is empty")]
+    EmptyRegister,
+
+    #[error("the timeline has no time before frame zero")]
+    NegativeTime,
+
     #[error("timeline has no framerate set")]
     NoFramerate,
 
@@ -75,6 +102,15 @@ impl Classify for CoreError {
             Self::NoClipAtPlayhead { .. }
             | Self::InsufficientHandles { .. }
             | Self::NoSuchTrack(_)
+            | Self::NoSuchClip(_)
+            | Self::NothingToSplit { .. }
+            | Self::NoCutAt { .. }
+            | Self::CannotSlide { .. }
+            | Self::CannotLink { .. }
+            | Self::InvalidRange { .. }
+            | Self::ZeroDuration
+            | Self::EmptyRegister
+            | Self::NegativeTime
             | Self::NoFramerate
             | Self::Unconformable { .. } => ErrorClass::User,
             Self::OfflineMedia { .. } => ErrorClass::OfflineMedia,
@@ -169,6 +205,19 @@ mod tests {
                 path: "/x.mkv".into(),
             },
             CoreError::InvariantViolation("x".into()),
+            CoreError::NoSuchClip("c1".into()),
+            CoreError::NothingToSplit { frame: 10 },
+            CoreError::NoCutAt { frame: 10 },
+            CoreError::CannotSlide {
+                reason: "no neighbour".into(),
+            },
+            CoreError::CannotLink {
+                reason: "misaligned".into(),
+            },
+            CoreError::InvalidRange { start: 5, end: 5 },
+            CoreError::ZeroDuration,
+            CoreError::EmptyRegister,
+            CoreError::NegativeTime,
         ];
         for e in &all {
             let msg = e.user_message();

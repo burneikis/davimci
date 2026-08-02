@@ -199,6 +199,7 @@ is track-scoped or group-scoped**, and grouping is a per-clip relationship
 - Track types: `video`, `audio`, `text/subtitle`, `overlay` (image/video composited above base video).
 - Tracks can be **linked** into a group (e.g. camera video + its own audio). Operations default to respecting group linkage unless a scope modifier (`ic`/`it`) overrides it.
 - Linkage is per-clip, not global - e.g. you can unlink one clip's audio from its video (`:unlink`) to trim just the talking without shifting video.
+- A group's clips must stay frame-aligned: linking clips whose starts or ends differ is rejected. Operations that can no longer preserve alignment drop linkage rather than break it - splitting a clip leaves the right-hand half unlinked, and pasted or moved clips are always unlinked. Re-link with `:link`.
 - Current-track focus (`j`/`k`) determines default operation scope in NORMAL mode.
 - `VISUAL-BLOCK` mode lets you select a time range across an arbitrary chosen subset of tracks: enter with `Ctrl-v` (block-visual, vim-familiar), then toggle tracks in/out of the selection with `j`/`k` + `Space` (or a dedicated toggle key), independent of grouping. This satisfies "select only Video1 or Video2 or Audio2 even in a grouped clip."
 

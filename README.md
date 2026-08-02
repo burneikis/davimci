@@ -12,14 +12,20 @@ remappable keys, and hookable events.
 
 <!-- Keep this current. It must never claim more than the code does. -->
 
-**Phase 1 - timeline model core.** Workspace builds; `just test` and
-`just lint` are green.
+**Phase 1 complete - timeline model core.** Phase 2 (command layer and undo
+tree) is next. Workspace builds; `just test` and `just lint` are green.
+
+Nothing is runnable yet: `vimci-cli` is still a placeholder, and the model has
+no backend, no keys, and no frontend (see plan.md milestone M1).
 
 | Area | State |
 |---|---|
 | Error model and recovery policy (Phase 0) | implemented, tested |
 | Frame-exact time, rational fps, conform math | implemented, tested |
-| Timeline model: clips, tracks, grouping, primitives | in progress |
+| Timeline model: clips, tracks, grouping, marks, registers | implemented, tested |
+| Edit primitives: split, lift, ripple delete, yank/paste, insert, overwrite, move | implemented, tested |
+| Trim family: ripple trim, roll, slip, slide | implemented, tested |
+| Command layer, undo tree (Phase 2) | not started |
 | Everything else | placeholder crates |
 
 See `plan.md` for the phase order and `plan.md` milestones for what counts as
