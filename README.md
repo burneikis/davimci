@@ -8,7 +8,9 @@ remappable keys, and hookable events.
 - [`spec.md`](spec.md) - what it is and how it behaves
 - [`plan.md`](plan.md) - how it gets built, and how it gets tested
 
-Status: **pre-implementation.** The spec and plan are complete; no code yet.
+Status: **early scaffolding.** Spec and plan are complete. The workspace
+builds, the error model and frame-time core are implemented and tested;
+everything else is a placeholder crate. See `plan.md` for phase order.
 
 ---
 
@@ -22,7 +24,7 @@ sudo pacman -S --needed mlt ffmpeg clang rust vulkan-swrast
 
 | Package | Why |
 |---|---|
-| `mlt` | Render/preview backend (LGPL-2.1). Headers ship in the main package - no `-dev` needed. |
+| `mlt` | Render/preview backend (LGPL-2.1). Headers ship in the main package - no `-dev` needed. Note its pkg-config name is version-suffixed: `mlt-framework-7`, not `mlt-framework`. |
 | `ffmpeg` | `ffmpeg` + `ffprobe` for generating test fixtures and verifying exports. |
 | `clang` | Required by `bindgen` for the MLT FFI. |
 | `rust` | Toolchain, including `clippy` and `rustfmt`. |

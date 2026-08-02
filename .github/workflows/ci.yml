@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # Fast gate: must stay quick, runs on every push (plan.md standing rule 3).
+  test:
+    name: test + lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Install libmlt
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libmlt-dev libmlt++-dev ffmpeg
+      - run: cargo fmt --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+
+  # Real decode/encode. Slower, so it is a separate job.
+  slow:
+    name: slow tests (render/export)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install libmlt + ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libmlt-dev libmlt++-dev ffmpeg
+      - name: Generate fixtures
+        run: ./scripts/gen-fixtures.sh
+      - run: cargo test --workspace --features slow-tests -- --include-ignored
+
+  # Presenter and GUI snapshot tests need a GPU; lavapipe provides a software one.
+  graphics:
+    name: graphics snapshots (lavapipe)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install lavapipe
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers vulkan-tools libmlt-dev
+      - name: Snapshot tests
+        env:
+          WGPU_BACKEND: vulkan
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: cargo test -p vimci-present -p vimci-gui
+
+  # Aimed at the MLT refcount wrapper (spec §10.1 accepted risk).
+  sanitize:
+    name: address sanitizer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+      - uses: Swatinem/rust-cache@v2
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y libmlt-dev libmlt++-dev
+      - name: ASan
+        env:
+          RUSTFLAGS: -Zsanitizer=address
+        run: cargo test -p vimci-mlt --target x86_64-unknown-linux-gnu
+
+  # Every example config in the docs must load (plan.md Phase 7).
+  lua-configs:
+    name: lua config compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y libmlt-dev
+      - run: cargo test -p vimci-lua -- --include-ignored
+
+  # Licence hygiene: MLT must never be static-linked, melt never vendored.
+  licence:
+    name: licence check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Forbid static MLT / vendored melt
+        run: |
+          if grep -rn "static.*mlt\|melt" --include=build.rs crates/ ; then
+            echo "::error::MLT must be dynamically linked and melt never vendored (spec §13)"
+            exit 1
+          fi
+          echo "ok"

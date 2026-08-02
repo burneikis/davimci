@@ -1,0 +1,55 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.90"
+license = "GPL-3.0-only"
+repository = "https://github.com/sponge/vimci"
+authors = ["vimci contributors"]
+
+[workspace.dependencies]
+# internal
+vimci-core      = { path = "crates/vimci-core" }
+vimci-cmd       = { path = "crates/vimci-cmd" }
+vimci-motion    = { path = "crates/vimci-motion" }
+vimci-analysis  = { path = "crates/vimci-analysis" }
+vimci-backend   = { path = "crates/vimci-backend" }
+vimci-mlt-sys   = { path = "crates/vimci-mlt-sys" }
+vimci-mlt       = { path = "crates/vimci-mlt" }
+vimci-lua       = { path = "crates/vimci-lua" }
+vimci-keys      = { path = "crates/vimci-keys" }
+vimci-app       = { path = "crates/vimci-app" }
+vimci-present   = { path = "crates/vimci-present" }
+vimci-gui       = { path = "crates/vimci-gui" }
+vimci-tui       = { path = "crates/vimci-tui" }
+vimci-headless  = { path = "crates/vimci-headless" }
+
+# external
+thiserror = "2"
+anyhow    = "1"
+serde     = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing   = "0.1"
+proptest  = "1"
+insta     = { version = "1", features = ["yaml"] }
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+# Phase 0: no panics in library code. Invariant assertions are the documented
+# exception and must use the assert_invariant! macro.
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "warn"
+
+[profile.dev]
+opt-level = 1          # debug builds still decode video at a usable speed
+
+[profile.dev.package."*"]
+opt-level = 3          # dependencies always optimized

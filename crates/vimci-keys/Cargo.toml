@@ -1,0 +1,16 @@
+[package]
+name = "vimci-keys"
+description = "Key sequence parser and mode state machine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+vimci-core.workspace = true
+vimci-cmd.workspace = true
+thiserror.workspace = true
