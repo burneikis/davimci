@@ -3,9 +3,10 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+use davimci_app::Frontend;
 use davimci_app::fixtures;
-use davimci_gui::paint::{Fill, summarise};
-use davimci_gui::{Chrome, Layout, Metrics, VideoQuad, paint_view};
+use davimci_gui::paint::{Fill, Paint, summarise};
+use davimci_gui::{Chrome, Gui, Layout, Metrics, PickerIntent, VideoQuad, paint_view};
 
 fn layout(width: u32, height: u32) -> Layout {
     Layout::compute(width, height, Metrics::default(), false)
@@ -58,6 +59,7 @@ fn the_video_quad_is_placed_inside_the_video_pane() {
     let view = fixtures::normal();
     let l = layout(800, 600);
     let chrome = Chrome {
+        picker: None,
         video: Some(VideoQuad {
             x: 10,
             y: 4,
@@ -117,4 +119,61 @@ fn an_open_command_line_is_painted_only_when_the_view_has_one() {
     let list = paint_view(&view, &l, &Chrome::default());
     assert_eq!(list.rects(Fill::CommandLine).len(), 1);
     assert!(list.texts().contains(&":wq"));
+}
+
+/// Regression: pressing `i` opened the picker but nothing painted it, so the
+/// modal swallowed every key while the window looked frozen. A modal that is
+/// open must be on screen.
+#[test]
+fn an_open_picker_is_painted() {
+    let view = fixtures::normal();
+    let mut gui = Gui::new(800, 600);
+
+    // Nothing modal yet: no picker in the draw list.
+    gui.render(&view).unwrap();
+    let before = summarise(gui.last_draw().expect("a draw list"));
+    assert!(
+        !before.contains("ModalBackground"),
+        "a picker was painted before one was opened:\n{before}"
+    );
+
+    gui.open_picker_at(PickerIntent::Insert, std::path::Path::new("."));
+    gui.render(&view).unwrap();
+    let after = summarise(gui.last_draw().expect("a draw list"));
+    assert!(
+        after.contains("ModalBackground"),
+        "the open picker was never painted:\n{after}"
+    );
+    assert!(
+        after.contains("ModalTitle"),
+        "the picker was painted with no title:\n{after}"
+    );
+}
+
+/// The title says what the chosen file will be used for, so `i`, `a` and `r`
+/// are told apart once the picker is open.
+#[test]
+fn the_picker_title_names_the_intent() {
+    let view = fixtures::normal();
+    for (intent, want) in [
+        (PickerIntent::Insert, "insert"),
+        (PickerIntent::Append, "append"),
+        (PickerIntent::Replace, "replace"),
+    ] {
+        let mut gui = Gui::new(800, 600);
+        gui.open_picker_at(intent, std::path::Path::new("."));
+        gui.render(&view).unwrap();
+        let text: String = gui
+            .last_draw()
+            .expect("a draw list")
+            .ops()
+            .iter()
+            .filter_map(|op| match op {
+                Paint::Text { text, .. } => Some(text.clone()),
+                Paint::Rect { .. } => None,
+            })
+            .collect::<Vec<_>>()
+            .join(" | ");
+        assert!(text.contains(want), "expected {want:?} in:\n{text}");
+    }
 }

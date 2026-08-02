@@ -832,6 +832,19 @@ listing lives in `davimci-app::browse` rather than in a frontend, because the
 GUI and the TUI must show the same files in the same order or the parity test
 is meaningless.
 
+Defect found on first real use: pressing `i` looked like a freeze. The picker
+opened and correctly took the keyboard, but nothing painted it - `paint` knew
+only about the view state, and the picker is the shell's own state. An
+invisible modal that swallows every key is indistinguishable from a hang.
+`Chrome` now carries a `PickerView`, `layout::paint` draws it, and a
+regression test asserts that an open picker reaches the draw list.
+
+The same fix exposed a second one: the video texture is uploaded separately
+and was drawn *after* the draw list, so the panel appeared behind the
+picture. Modal ops are now identified (`Paint::is_modal`) and drawn after the
+video, which is the only ordering that keeps an overlay on top of a texture
+the painter does not own.
+
 Amendments made during implementation:
 
 - `ImportOptions` gained `placement` (insert vs overwrite) and `target`.

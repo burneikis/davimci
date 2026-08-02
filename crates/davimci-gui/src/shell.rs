@@ -15,7 +15,7 @@ use davimci_keys::MediaIntent;
 use crate::cmdline::{CommandLine, CommandLineEvent, default_candidates};
 use crate::input::{Modifiers, RawKey, translate};
 use crate::layout::{Layout, Metrics, paint};
-use crate::paint::{Chrome, DrawList};
+use crate::paint::{Chrome, DrawList, PickerRow, PickerView};
 use crate::picker::{Entry, MediaPicker, PickerEvent, PickerIntent};
 use crate::subtitle::{SubtitleEdit, SubtitleEvent};
 
@@ -313,8 +313,34 @@ impl Frontend for Gui {
             self.open_command_line();
         }
         let layout = self.layout();
-        self.last_draw = Some(paint(view, &layout, &self.chrome));
+        // The picker is the shell's own state, not the app's, so it is
+        // folded into the chrome here rather than carried in the view.
+        let mut chrome = self.chrome.clone();
+        chrome.picker = self.picker.as_ref().map(picker_view);
+        self.last_draw = Some(paint(view, &layout, &chrome));
         Ok(())
+    }
+}
+
+/// What the painter needs to draw the picker.
+fn picker_view(picker: &MediaPicker) -> PickerView {
+    let visible = picker.visible();
+    PickerView {
+        title: match picker.intent() {
+            PickerIntent::Insert => "insert media at the playhead",
+            PickerIntent::Append => "append media after this clip",
+            PickerIntent::Replace => "replace this clip with",
+        }
+        .to_string(),
+        query: picker.query().to_string(),
+        entries: visible
+            .iter()
+            .map(|e| PickerRow {
+                label: e.label.clone(),
+                is_dir: e.is_dir,
+            })
+            .collect(),
+        selected: picker.selected(),
     }
 }
 
@@ -333,13 +359,12 @@ fn intent_of(intent: MediaIntent) -> PickerIntent {
 fn entries_for(dir: &std::path::Path) -> Vec<Entry> {
     davimci_app::list_dir(dir)
         .into_iter()
-        .map(|e| {
-            let path = e.path.to_string_lossy().to_string();
-            if e.is_dir {
-                Entry::dir(path)
-            } else {
-                Entry::file(path)
-            }
+        .map(|e| Entry {
+            path: e.path.to_string_lossy().to_string(),
+            // Keep the browser's label: deriving it from the path would
+            // turn `..` into the parent directory's name.
+            label: e.label,
+            is_dir: e.is_dir,
         })
         .collect()
 }

@@ -46,6 +46,10 @@ pub enum Fill {
     StatusLine,
     CommandLine,
     Video,
+    /// The media picker's panel, drawn over everything else.
+    ModalBackground,
+    /// The row under the picker's cursor.
+    ModalSelected,
 }
 
 /// Where text sits and what it is for.
@@ -57,6 +61,37 @@ pub enum TextRole {
     Command,
     Message(Severity),
     Timecode,
+    /// The picker's title, e.g. "insert media".
+    ModalTitle,
+    /// What the user has typed to filter the list.
+    ModalQuery,
+    ModalEntry,
+    ModalEntryDir,
+    ModalEntrySelected,
+}
+
+impl Paint {
+    /// True for anything belonging to a modal overlay.
+    ///
+    /// The video is a texture the shell draws between the world and the
+    /// overlays, so a modal has to be identifiable to stay on top of it -
+    /// otherwise the picker is painted and then covered by the video.
+    #[must_use]
+    pub fn is_modal(&self) -> bool {
+        match self {
+            Self::Rect { fill, .. } => {
+                matches!(fill, Fill::ModalBackground | Fill::ModalSelected)
+            }
+            Self::Text { role, .. } => matches!(
+                role,
+                TextRole::ModalTitle
+                    | TextRole::ModalQuery
+                    | TextRole::ModalEntry
+                    | TextRole::ModalEntryDir
+                    | TextRole::ModalEntrySelected
+            ),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -138,6 +173,28 @@ pub struct Chrome {
     pub video: Option<VideoQuad>,
     /// Byte offset of the caret in the command line.
     pub command_cursor: usize,
+    /// The open media picker, if there is one. A modal the shell forgot to
+    /// paint is a modal that silently eats every key, so this is not
+    /// optional decoration - it is how `i`/`a`/`r` are usable at all.
+    pub picker: Option<PickerView>,
+}
+
+/// Everything the painter needs to draw the media picker. Built by the
+/// shell from its `MediaPicker`, so `paint` stays free of modal state.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PickerView {
+    pub title: String,
+    pub query: String,
+    /// Visible rows, already filtered.
+    pub entries: Vec<PickerRow>,
+    /// Index into `entries` of the highlighted row.
+    pub selected: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PickerRow {
+    pub label: String,
+    pub is_dir: bool,
 }
 
 /// The video pane's contents, already letterboxed by `davimci-present`.

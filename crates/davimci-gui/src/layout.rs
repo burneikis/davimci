@@ -7,7 +7,7 @@
 
 use davimci_app::{Surface, ViewState};
 
-use crate::paint::{Chrome, DrawList, Fill, Rect, TextRole, status_text};
+use crate::paint::{Chrome, DrawList, Fill, PickerView, Rect, TextRole, status_text};
 
 /// Fixed metrics. A theme may change these; nothing else may.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -308,7 +308,75 @@ pub fn paint(view: &ViewState, layout: &Layout, chrome: &Chrome) -> DrawList {
         d.rect(rect, Fill::CommandLine);
         d.text(rect, TextRole::Command, format!(":{line}"));
     }
+
+    // The picker is modal: it owns the keyboard, so it is drawn over
+    // everything and drawn last.
+    if let Some(picker) = &chrome.picker {
+        paint_picker(&mut d, layout, picker);
+    }
     d
+}
+
+/// Draw the media picker centred over the window.
+fn paint_picker(d: &mut DrawList, layout: &Layout, picker: &PickerView) {
+    let row_h = layout.metrics.row_height.max(1);
+    let panel = centred(layout.window, row_h);
+    d.rect(panel, Fill::ModalBackground);
+
+    let mut y = panel.y;
+    let line = |y: i32| Rect {
+        x: panel.x,
+        y,
+        width: panel.width,
+        height: row_h,
+    };
+    d.text(line(y), TextRole::ModalTitle, picker.title.clone());
+    y += row_h as i32;
+    d.text(line(y), TextRole::ModalQuery, format!("/{}", picker.query));
+    y += row_h as i32;
+
+    // Only as many rows as fit; the list scrolls to keep the cursor visible,
+    // so a selection is never off-panel.
+    let rows = ((panel.height / row_h).saturating_sub(2)).max(1) as usize;
+    let first = picker.selected.saturating_sub(rows.saturating_sub(1));
+    for (i, entry) in picker.entries.iter().enumerate().skip(first).take(rows) {
+        let rect = line(y);
+        let selected = i == picker.selected;
+        if selected {
+            d.rect(rect, Fill::ModalSelected);
+        }
+        let role = if selected {
+            TextRole::ModalEntrySelected
+        } else if entry.is_dir {
+            TextRole::ModalEntryDir
+        } else {
+            TextRole::ModalEntry
+        };
+        let label = if entry.is_dir {
+            format!("{}/", entry.label)
+        } else {
+            entry.label.clone()
+        };
+        d.text(rect, role, label);
+        y += row_h as i32;
+    }
+
+    if picker.entries.is_empty() {
+        d.text(line(y), TextRole::ModalEntry, "no media here".to_string());
+    }
+}
+
+/// A panel covering the middle of the window, snapped to whole rows so text
+/// never straddles a row boundary.
+fn centred(window: Rect, row_h: u32) -> Rect {
+    let width = (window.width * 3 / 4).max(1);
+    let height = ((window.height * 3 / 5) / row_h).max(3) * row_h;
+    Rect {
+        x: window.x + (window.width.saturating_sub(width) / 2) as i32,
+        y: window.y + (window.height.saturating_sub(height) / 2) as i32,
+        width,
+        height,
+    }
 }
 
 #[cfg(test)]

@@ -160,6 +160,8 @@ impl eframe::App for Window {
         self.gui.set_chrome(Chrome {
             video: quad,
             command_cursor: 0,
+            // The shell owns the picker and folds it in when it paints.
+            picker: None,
         });
 
         self.quad = quad;
@@ -196,6 +198,11 @@ impl eframe::App for Window {
                 egui::Vec2::new(q.width as f32, q.height as f32),
             );
             egui_shell::draw_video(ui, rect, tex);
+        }
+        // Modals go over the video, or the picker is painted and then
+        // covered by the picture.
+        if let Some(list) = self.gui.last_draw() {
+            egui_shell::draw_modal(list, ui, screen.min);
         }
     }
 }

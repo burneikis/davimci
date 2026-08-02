@@ -36,6 +36,10 @@ pub fn fill_color(fill: Fill) -> Color32 {
         Fill::StatusLine => Color32::from_rgb(18, 18, 22),
         Fill::CommandLine => Color32::from_rgb(28, 28, 34),
         Fill::Video => Color32::BLACK,
+        // The picker sits over the timeline, so it is opaque rather than
+        // tinted: a half-transparent file list is unreadable over clips.
+        Fill::ModalBackground => Color32::from_rgb(38, 38, 46),
+        Fill::ModalSelected => Color32::from_rgb(70, 110, 160),
     }
 }
 
@@ -51,6 +55,11 @@ pub fn text_style(role: TextRole) -> (Color32, f32) {
         TextRole::Message(Severity::Info) => (Color32::from_rgb(180, 210, 180), 13.0),
         TextRole::Message(Severity::Warning) => (Color32::from_rgb(230, 200, 120), 13.0),
         TextRole::Message(Severity::Error) => (Color32::from_rgb(240, 140, 140), 13.0),
+        TextRole::ModalTitle => (Color32::from_rgb(240, 220, 90), 14.0),
+        TextRole::ModalQuery => (Color32::from_rgb(240, 240, 250), 13.0),
+        TextRole::ModalEntry => (Color32::from_rgb(210, 210, 220), 13.0),
+        TextRole::ModalEntryDir => (Color32::from_rgb(150, 190, 240), 13.0),
+        TextRole::ModalEntrySelected => (Color32::from_rgb(255, 255, 255), 13.0),
     }
 }
 
@@ -66,8 +75,18 @@ fn to_egui(rect: Rect) -> EguiRect {
 /// `Fill::Video` is skipped: the video pane is a texture, drawn by
 /// [`draw_video`], and painting a black rectangle over it would hide it.
 pub fn draw(list: &DrawList, ui: &Ui, origin: Pos2) {
+    draw_ops(list, ui, origin, false);
+}
+
+/// Draw only the modal overlay. The shell calls this *after* the video
+/// texture, so a picker is never hidden behind the picture.
+pub fn draw_modal(list: &DrawList, ui: &Ui, origin: Pos2) {
+    draw_ops(list, ui, origin, true);
+}
+
+fn draw_ops(list: &DrawList, ui: &Ui, origin: Pos2, modal: bool) {
     let painter = ui.painter();
-    for op in list.ops() {
+    for op in list.ops().iter().filter(|op| op.is_modal() == modal) {
         match op {
             Paint::Rect {
                 fill: Fill::Video, ..
