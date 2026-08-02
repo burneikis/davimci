@@ -65,9 +65,10 @@ impl MacroRecorder {
     /// `q`: stop recording and store the buffer. Returns the register used.
     pub fn stop(&mut self) -> Result<char, CmdError> {
         let (register, buf) = self.recording.take().ok_or(CmdError::NotRecording)?;
-        self.registers
-            .insert(register.to_ascii_lowercase(), buf.clone());
-        self.registers.insert(register, buf);
+        // Registers are canonically lowercase - uppercase only selects
+        // append-on-record. Storing under both left a second copy that
+        // `replay` never reads and that goes stale on the next recording.
+        self.registers.insert(register.to_ascii_lowercase(), buf);
         Ok(register)
     }
 

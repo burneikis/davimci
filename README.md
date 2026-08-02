@@ -72,6 +72,15 @@ enter the picture until Phase 6.
 See `plan.md` for the phase order and `plan.md` milestones for what counts as
 usable (M3).
 
+Recent audit fixes, each with a regression test: counts clamp instead of
+overflowing on a long digit run (spec §3.1); a backward predicate motion can
+no longer answer the frame it started on; new track names take the lowest free
+index, so a removed track cannot leave a duplicate name (spec §5); subtitle
+cues imported away from frame zero keep their spacing instead of being
+dropped; `slip` checks each source handle independently; `move_clip` restores
+the clip if the placement is rejected; jump-point stepping is a binary search
+rather than a scan per point.
+
 ---
 
 ## Dev setup

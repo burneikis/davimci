@@ -4,7 +4,7 @@
 //! construction, query, and verification.
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use crate::clip::Clip;
@@ -98,10 +98,18 @@ impl Timeline {
     }
 
     /// The name [`Timeline::add_track`] would give the next track of `kind`.
+    ///
+    /// The lowest free index, not the count: after removing `V1` from a
+    /// `V1`/`V2` stack, counting would propose `V2` again and mint a
+    /// duplicate name - a state [`Timeline::add_track_with_id`] rejects and
+    /// [`Timeline::track_by_name`] cannot resolve.
     #[must_use]
     pub fn next_track_name(&self, kind: TrackKind) -> String {
-        let n = self.tracks.iter().filter(|t| t.kind == kind).count() + 1;
-        format!("{}{n}", kind.prefix())
+        let prefix = kind.prefix();
+        (1..)
+            .map(|n| format!("{prefix}{n}"))
+            .find(|name| self.track_by_name(name).is_none())
+            .unwrap_or_else(|| format!("{prefix}1"))
     }
 
     /// Add a track with an id and name chosen by the caller.
@@ -431,6 +439,33 @@ impl Timeline {
                 "playhead focuses a track that does not exist".into(),
             ));
         }
+        // Identity is unique: two tracks with one name or one id, or two
+        // clips with one id, make every lookup in the model ambiguous.
+        let mut track_ids = BTreeSet::new();
+        let mut names = BTreeSet::new();
+        let mut clip_ids = BTreeSet::new();
+        for t in &self.tracks {
+            if !track_ids.insert(t.id) {
+                return Err(CoreError::InvariantViolation(format!(
+                    "track id {} is used twice",
+                    t.id
+                )));
+            }
+            if !names.insert(t.name.as_str()) {
+                return Err(CoreError::InvariantViolation(format!(
+                    "track name {} is used twice",
+                    t.name
+                )));
+            }
+            for c in t.clips() {
+                if !clip_ids.insert(c.id) {
+                    return Err(CoreError::InvariantViolation(format!(
+                        "clip id {} is used twice",
+                        c.id
+                    )));
+                }
+            }
+        }
         Ok(())
     }
 
@@ -514,6 +549,30 @@ mod tests {
         tl.add_track(TrackKind::Text);
         assert!(tl.track_by_name("A2").is_some());
         assert!(tl.track_by_name("T1").is_some());
+    }
+
+    /// Regression: naming counted tracks of the kind instead of taking the
+    /// lowest free index, so removing `V1` from a `V1`/`V2` stack made the
+    /// next added video track a second `V2`.
+    #[test]
+    fn a_removed_track_does_not_leave_the_next_name_colliding() {
+        let mut tl = Timeline::new(TimelineProps::default());
+        tl.add_track(TrackKind::Video); // V2
+        let (v1, a1) = (
+            tl.track_by_name("V1").map(|t| t.id),
+            tl.track_by_name("A1").map(|t| t.id),
+        );
+        let (Some(v1), Some(a1)) = (v1, a1) else {
+            unreachable!()
+        };
+        tl.focus_track(a1).unwrap();
+        tl.remove_track(v1).unwrap();
+
+        assert_eq!(tl.next_track_name(TrackKind::Video), "V1");
+        tl.add_track(TrackKind::Video);
+        let names: Vec<&str> = tl.tracks().iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(names, ["A1", "V2", "V1"]);
+        tl.assert_invariants();
     }
 
     #[test]

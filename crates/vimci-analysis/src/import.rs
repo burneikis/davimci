@@ -11,7 +11,7 @@
 //! sequence is built - a clip cannot reference a track whose id is only
 //! decided while the sequence runs.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use vimci_cmd::{EditCommand, Session};
 use vimci_core::{Clip, ClipId, Frame, MediaRef, Timeline, TrackId, TrackKind};
@@ -230,24 +230,31 @@ fn reusable(tl: &Timeline, kind: TrackKind, taken: &[TrackId]) -> Option<(TrackI
 
 /// Predicts the names `AddTrack` will generate, given tracks this plan is
 /// itself adding.
+///
+/// Like [`Timeline::next_track_name`], this takes the lowest free index
+/// rather than a count: a project that has had tracks removed would
+/// otherwise be handed a name that already exists, and `AddTrack` would
+/// reject the whole import.
 #[derive(Debug)]
 struct NameCursor {
-    counts: BTreeMap<&'static str, usize>,
+    used: BTreeSet<String>,
 }
 
 impl NameCursor {
     fn new(tl: &Timeline) -> Self {
-        let mut counts = BTreeMap::new();
-        for t in tl.tracks() {
-            *counts.entry(t.kind.prefix()).or_insert(0) += 1;
+        Self {
+            used: tl.tracks().iter().map(|t| t.name.clone()).collect(),
         }
-        Self { counts }
     }
 
     fn next(&mut self, kind: TrackKind) -> String {
-        let n = self.counts.entry(kind.prefix()).or_insert(0);
-        *n += 1;
-        format!("{}{n}", kind.prefix())
+        let prefix = kind.prefix();
+        let name = (1..)
+            .map(|n| format!("{prefix}{n}"))
+            .find(|name| !self.used.contains(name))
+            .unwrap_or_else(|| format!("{prefix}1"));
+        self.used.insert(name.clone());
+        name
     }
 }
 
@@ -270,8 +277,11 @@ fn subtitle_clips(
 ) -> Result<Vec<Clip>, AnalysisError> {
     let mut out: Vec<Clip> = Vec::new();
     for cue in cues {
-        let start = conform::frame_at_ms(cue.start_ms, fps);
-        let end = conform::frame_at_ms(cue.end_ms, fps);
+        // Everything below is in timeline space, `at` included: comparing a
+        // cue-relative start against a placed clip's end used to clamp every
+        // cue after the first past its own end and drop it.
+        let start = conform::frame_at_ms(cue.start_ms, fps).saturating_add(at);
+        let end = conform::frame_at_ms(cue.end_ms, fps).saturating_add(at);
         // A cue shorter than a frame still has to be visible for one.
         let end = end.max(Frame(start.get() + 1));
         // Overlapping cues cannot share a track; a later one starts where the
@@ -283,7 +293,7 @@ fn subtitle_clips(
         let mut clip = Clip::generated(
             ClipId(next()?),
             cue.text.lines().next().unwrap_or_default(),
-            start.saturating_add(at),
+            start,
             Frame(end.get() - start.get()),
         );
         clip.text = Some(cue.text.clone());
@@ -465,6 +475,28 @@ mod tests {
         let clips = subtitle_clips(&cues, Frame::ZERO, Fps::FPS_30, &mut next).unwrap();
         assert_eq!(clips.len(), 2);
         assert_eq!(clips[0].end(), clips[1].start);
+    }
+
+    /// Regression: the overlap check compared a cue-relative start against an
+    /// already-placed clip's end, so importing subtitles anywhere but frame
+    /// zero clamped every cue after the first past its own end and silently
+    /// dropped it.
+    #[test]
+    fn cues_keep_their_spacing_when_imported_away_from_frame_zero() {
+        let cues = parse_srt(
+            "1\n00:00:01,000 --> 00:00:02,000\none\n\n2\n00:00:03,000 --> 00:00:04,000\ntwo\n",
+        );
+        let mut n = 100;
+        let mut next = || {
+            n += 1;
+            Ok(n)
+        };
+        let at = Frame(600);
+        let clips = subtitle_clips(&cues, at, Fps::FPS_30, &mut next).unwrap();
+        assert_eq!(clips.len(), 2, "no cue may be dropped by the offset");
+        // 1-2s and 3-4s at 30fps, shifted by `at`.
+        assert_eq!((clips[0].start, clips[0].end()), (Frame(630), Frame(660)));
+        assert_eq!((clips[1].start, clips[1].end()), (Frame(690), Frame(720)));
     }
 
     #[test]

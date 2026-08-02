@@ -269,9 +269,16 @@ impl PredicateIndex for AnalysisIndex {
             Some(ms) => {
                 let frame = frame_at_ms(ms, fps);
                 // A hit must be strictly beyond the origin, or a repeated
-                // motion would stand still.
+                // motion would stand still. Milliseconds are coarser than
+                // frames at high rates, so rounding can put a hit back on
+                // the origin in either direction.
                 match dir {
                     Direction::Forward if frame <= from => Answer::Found(Frame(from.get() + 1)),
+                    Direction::Backward if frame >= from => match from.get().checked_sub(1) {
+                        Some(f) => Answer::Found(Frame(f)),
+                        // There is nothing before frame zero to land on.
+                        None => Answer::NoMatch,
+                    },
                     _ => Answer::Found(frame),
                 }
             }
@@ -356,6 +363,31 @@ mod tests {
         assert_eq!(
             idx.find(&impossible, Frame::ZERO, Direction::Forward),
             Answer::NoMatch
+        );
+    }
+
+    /// Regression: a hop is 10 ms but a frame is 41.6 ms at 24 fps, so a hit
+    /// one hop before the origin rounds back onto the origin frame. The
+    /// backward guard was missing, so `[a` from frame 1 answered frame 1 - a
+    /// motion that never moved. A backward hit is now always strictly
+    /// earlier, or no match at all.
+    #[test]
+    fn a_backward_hit_is_never_the_frame_we_started_on() {
+        let a = analyze_samples(&tone_gaps(48_000), 48_000, AnalysisParams::default());
+        let track = TrackId(2);
+        let mut idx = AnalysisIndex::new(Fps::FPS_24);
+        idx.insert(track, &a);
+        let p = peak(track, -120.0); // every hop matches
+        for from in 1..8u64 {
+            match idx.find(&p, Frame(from), Direction::Backward) {
+                Answer::Found(f) => assert!(f < Frame(from), "from {from} landed on {f}"),
+                other => panic!("from {from}: {other:?}"),
+            }
+        }
+        assert_eq!(
+            idx.find(&p, Frame::ZERO, Direction::Backward),
+            Answer::NoMatch,
+            "there is nothing before frame zero"
         );
     }
 

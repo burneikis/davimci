@@ -140,20 +140,10 @@ impl Timeline {
             .clip(clip)
             .ok_or_else(|| CoreError::NoSuchClip(clip.to_string()))?;
         // Slipping later consumes tail handle, earlier consumes head handle.
-        let needed_head = if delta < 0 { delta.unsigned_abs() } else { 0 };
-        let needed_tail = if delta > 0 { delta.unsigned_abs() } else { 0 };
-        if let (Some(head), Some(tail)) = (c.head_handle(), c.tail_handle()) {
-            if head < needed_head {
-                return Err(CoreError::InsufficientHandles {
-                    shortfall: needed_head - head,
-                });
-            }
-            if tail < needed_tail {
-                return Err(CoreError::InsufficientHandles {
-                    shortfall: needed_tail - tail,
-                });
-            }
-        }
+        // Each edge is checked against its own handle: an unbounded handle on
+        // one side must not excuse an overrun on the other.
+        check_handle(c, Edge::Head, delta)?;
+        check_handle(c, Edge::Tail, delta)?;
         let new_in = shift(c.source_in, delta)?;
 
         let t = self.require_track_mut(track)?;

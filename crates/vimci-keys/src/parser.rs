@@ -177,7 +177,7 @@ impl Parser {
             if let Some(d) = digit(key)
                 && (d != 0 || count1.is_some())
             {
-                let n = count1.unwrap_or(0) * 10 + d;
+                let n = push_digit(count1.unwrap_or(0), d);
                 self.state = St::Count1(n);
                 return Step::Pending;
             }
@@ -191,7 +191,7 @@ impl Parser {
 
     fn after_count1(&mut self, key: Key, keymap: &Keymap, mode: Mode, n: u32) -> Step {
         if let Some(d) = digit(key) {
-            self.state = St::Count1(n * 10 + d);
+            self.state = St::Count1(push_digit(n, d));
             return Step::Pending;
         }
         if key == Key::Char('"') {
@@ -374,7 +374,7 @@ impl Parser {
             && let Some(d) = digit(key)
             && (d != 0 || count2.is_some())
         {
-            let n = count2.unwrap_or(0) * 10 + d;
+            let n = push_digit(count2.unwrap_or(0), d);
             self.state = St::OperatorTarget {
                 op,
                 trigger,
@@ -472,8 +472,19 @@ impl Parser {
     }
 }
 
+/// Largest accepted count (spec §3.1). Vim clamps rather than rejecting a
+/// long digit run, and so do we: no count a user can type may overflow.
+pub const MAX_COUNT: u32 = 1_000_000;
+
+/// Append a digit to a count, clamping at [`MAX_COUNT`].
+fn push_digit(n: u32, d: u32) -> u32 {
+    n.saturating_mul(10).saturating_add(d).min(MAX_COUNT)
+}
+
 fn merge_count(a: Option<u32>, b: Option<u32>) -> u32 {
-    a.unwrap_or(1) * b.unwrap_or(1)
+    a.unwrap_or(1)
+        .saturating_mul(b.unwrap_or(1))
+        .clamp(1, MAX_COUNT)
 }
 
 fn digit(key: Key) -> Option<u32> {
@@ -531,6 +542,29 @@ mod tests {
             last = p.feed(key, &keymap, Mode::Normal);
         }
         last
+    }
+
+    /// Regression: `n * 10 + d` overflowed `u32` and panicked in a debug
+    /// build on a long digit run. Counts clamp, exactly as vim does.
+    #[test]
+    fn an_absurdly_long_count_clamps_instead_of_overflowing() {
+        assert_eq!(
+            run("99999999999l"),
+            Step::Complete(Action::Move {
+                motion: BuiltinMotion::JumpPoint(Direction::Forward),
+                count: MAX_COUNT,
+            })
+        );
+        // The operator/object count multiplies too, and clamps the same way.
+        assert_eq!(
+            run("99999999999d99999999999w"),
+            Step::Complete(Action::Verb {
+                op: Op::RippleDelete,
+                count: MAX_COUNT,
+                register: None,
+                target: Target::Motion(BuiltinMotion::ClipBoundary(Direction::Forward), MAX_COUNT),
+            })
+        );
     }
 
     #[test]

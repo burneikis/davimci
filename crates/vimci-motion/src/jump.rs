@@ -180,15 +180,20 @@ impl JumpPoints {
     }
 
     /// The nearest point strictly after `from`.
+    ///
+    /// The set is sorted and deduplicated, so this is a binary search: `l`
+    /// must stay O(log n) even with a dense subdivision set (spec §3.2).
     #[must_use]
     pub fn next(&self, from: Frame) -> Option<Frame> {
-        self.points.iter().copied().find(|p| *p > from)
+        let i = self.points.partition_point(|p| *p <= from);
+        self.points.get(i).copied()
     }
 
     /// The nearest point strictly before `from`.
     #[must_use]
     pub fn prev(&self, from: Frame) -> Option<Frame> {
-        self.points.iter().rev().copied().find(|p| *p < from)
+        let i = self.points.partition_point(|p| *p < from);
+        i.checked_sub(1).and_then(|i| self.points.get(i).copied())
     }
 
     /// `count` points away, saturating at the ends of the set.
@@ -197,22 +202,24 @@ impl JumpPoints {
     /// timeline lands on the last point, it does not refuse to move.
     #[must_use]
     pub fn step(&self, from: Frame, dir: Direction, count: u32) -> Option<Frame> {
-        let mut at = from;
-        let mut moved = None;
-        for _ in 0..count.max(1) {
-            let next = match dir {
-                Direction::Forward => self.next(at),
-                Direction::Backward => self.prev(at),
-            };
-            match next {
-                Some(f) => {
-                    at = f;
-                    moved = Some(f);
+        // Stepping n points is index arithmetic on a sorted set, not n
+        // searches: `1000l` costs the same as `l`.
+        let count = usize::try_from(count.max(1)).unwrap_or(usize::MAX);
+        match dir {
+            Direction::Forward => {
+                let first = self.points.partition_point(|p| *p <= from);
+                if first >= self.points.len() {
+                    return None;
                 }
-                None => break,
+                let i = first.saturating_add(count - 1).min(self.points.len() - 1);
+                self.points.get(i).copied()
+            }
+            Direction::Backward => {
+                let after = self.points.partition_point(|p| *p < from);
+                let first = after.checked_sub(1)?;
+                self.points.get(first.saturating_sub(count - 1)).copied()
             }
         }
-        moved
     }
 }
 
@@ -397,6 +404,43 @@ mod tests {
         assert_eq!(jp.step(Frame(0), Direction::Backward, 1), None);
         // A zero count behaves as one, as vim's counts do.
         assert_eq!(jp.step(Frame(0), Direction::Forward, 0), Some(Frame(100)));
+    }
+
+    /// `step` is index arithmetic rather than repeated `next`/`prev`; it must
+    /// still agree with the naive walk everywhere, including a huge count.
+    #[test]
+    fn stepping_agrees_with_walking_one_point_at_a_time() {
+        let tl = tl();
+        let cfg = JumpConfig::default();
+        let jp = JumpPoints::build(&tl, None, Zoom::new(4), &cfg, &[Frame(37), Frame(211)]);
+        let walk = |from: Frame, dir: Direction, count: u32| {
+            let mut at = from;
+            let mut moved = None;
+            for _ in 0..count.max(1) {
+                match match dir {
+                    Direction::Forward => jp.next(at),
+                    Direction::Backward => jp.prev(at),
+                } {
+                    Some(f) => {
+                        at = f;
+                        moved = Some(f);
+                    }
+                    None => break,
+                }
+            }
+            moved
+        };
+        for from in 0..=tl.duration().get() {
+            for count in [0, 1, 2, 3, 7, 1000, u32::MAX] {
+                for dir in [Direction::Forward, Direction::Backward] {
+                    assert_eq!(
+                        jp.step(Frame(from), dir, count),
+                        walk(Frame(from), dir, count),
+                        "from {from}, {dir:?} x{count}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

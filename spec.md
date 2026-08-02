@@ -43,6 +43,9 @@ Mode is shown in a status line near the playhead (e.g. `-- VISUAL (V1,A2) --`).
 - Arrow keys (`←`/`→`): **always** frame-by-frame, regardless of zoom. Not remapped by default - a fixed "precision" fallback. Configurable to disable.
 - `h` / `l`: move playhead by **N relative jump points**, where N depends on zoom level (see 3.2).
 - `5h` / `5l`: jump 5 points left/right (count-prefixed, standard vim numeric-prefix behavior).
+- Counts are clamped to 1,000,000, and an operator count multiplied by a
+  motion count clamps to the same ceiling. A long digit run is pinned like
+  vim's, never rejected and never wrapped.
 - `j` / `k`: move current-track focus down/up (between tracks in the track stack).
 
 ### 3.2 Relative jump points (zoom-aware scrubbing)
@@ -224,6 +227,9 @@ is track-scoped or group-scoped**, and grouping is a per-clip relationship
 ## 5. Track Model & Grouping
 
 - Track types: `video`, `audio`, `text/subtitle`, `overlay` (image/video composited above base video).
+- Tracks are named by kind and index (`V1`, `A2`, `T1`). Names are unique, and
+  a new track takes the **lowest free index** for its kind, so removing `V1`
+  from a `V1`/`V2` stack makes the next video track `V1` again.
 - Tracks can be **linked** into a group (e.g. camera video + its own audio). Operations default to respecting group linkage unless a scope modifier (`ic`/`it`) overrides it.
 - Linkage is per-clip, not global - e.g. you can unlink one clip's audio from its video (`:unlink`) to trim just the talking without shifting video.
 - A group's clips must stay frame-aligned: linking clips whose starts or ends differ is rejected. Operations that can no longer preserve alignment drop linkage rather than break it - splitting a clip leaves the right-hand half unlinked, and pasted or moved clips are always unlinked. Re-link with `:link`.

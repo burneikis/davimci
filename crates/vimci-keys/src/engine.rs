@@ -340,25 +340,24 @@ impl Engine {
             .tracks()
             .iter()
             .map(|&track| match op {
-                Operator::RippleDelete | Operator::Change => EditCommand::RippleDelete {
+                Operator::RippleDelete | Operator::Change => Ok(EditCommand::RippleDelete {
                     track,
                     start: range.start,
                     end: range.end,
-                },
-                Operator::Lift => EditCommand::Lift {
+                }),
+                Operator::Lift => Ok(EditCommand::Lift {
                     track,
                     start: range.start,
                     end: range.end,
-                },
-                _ => unreachable!("handled above"),
+                }),
+                // Every other operator returned above. A library crate
+                // reports this rather than panicking.
+                _ => Err(KeysError::Internal("that operator has no range form")),
             })
-            .collect();
-        let cmd = if cmds.len() == 1 {
-            cmds.into_iter()
-                .next()
-                .unwrap_or(EditCommand::Sequence(vec![]))
-        } else {
-            EditCommand::Sequence(cmds)
+            .collect::<Result<_, _>>()?;
+        let cmd = match <[EditCommand; 1]>::try_from(cmds) {
+            Ok([one]) => one,
+            Err(many) => EditCommand::Sequence(many),
         };
         let label = session.exec(&cmd)?;
         if op == Operator::Change {
@@ -529,7 +528,8 @@ impl Engine {
                     delta: delta_of(cut, target_frame),
                 }
             }
-            _ => unreachable!("only edge ops reach here"),
+            // Only the four edge operators are dispatched here.
+            _ => return Err(KeysError::Internal("that operator is not an edge trim")),
         };
         Ok(run(session.exec(&cmd)))
     }

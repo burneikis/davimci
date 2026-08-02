@@ -411,10 +411,18 @@ impl Timeline {
         let Some(idx) = t.index_of(clip) else {
             return Err(CoreError::NoSuchClip(clip.to_string()));
         };
-        t.clips_mut().remove(idx);
+        let original = t.clips_mut().remove(idx);
         let mut moved = c;
         moved.group = None;
-        self.overwrite_clip(track, moved, new_start)?;
+        if let Err(e) = self.overwrite_clip(track, moved, new_start) {
+            // The clip is already out of the track, so a late rejection has
+            // to put it back: a refused move must leave the timeline
+            // byte-identical (plan.md Phase 0 rule 1).
+            if let Ok(t) = self.require_track_mut(track) {
+                t.insert_sorted(original);
+            }
+            return Err(e);
+        }
         self.debug_assert_invariants();
         Ok(())
     }
