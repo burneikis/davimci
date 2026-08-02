@@ -179,3 +179,26 @@ fn resize_is_taken_from_the_frontend_before_the_first_render() {
     assert_eq!(app.viewport().columns(), 30);
     assert_eq!(app.viewport().rows(), 1);
 }
+
+#[test]
+fn zoom_keys_drive_the_viewport() {
+    let mut app = App::new(Session::new(timeline()));
+    let mut host = NullHost;
+    let start = app.viewport().zoom();
+
+    for k in Key::parse_str("zi") {
+        app.key(k, &mut host);
+    }
+    assert_eq!(app.viewport().zoom(), start.zoom_in());
+
+    for k in Key::parse_str("zozo") {
+        app.key(k, &mut host);
+    }
+    assert_eq!(app.viewport().zoom(), start.zoom_out());
+
+    // `z0` returns to the default level from wherever zooming left off.
+    for k in Key::parse_str("z0") {
+        app.key(k, &mut host);
+    }
+    assert_eq!(app.viewport().zoom(), davimci_motion::Zoom::default());
+}

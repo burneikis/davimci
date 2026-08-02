@@ -65,6 +65,19 @@ pub enum ArgKind {
     MacroReplay,
 }
 
+/// A zoom step (spec §11, §15.2). Zoom is view state, not an edit, so this
+/// never reaches the undo log; the engine hands it back to the host, which
+/// owns the viewport.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ZoomIntent {
+    /// `zi`: one level in.
+    In,
+    /// `zo`: one level out.
+    Out,
+    /// `z0`: back to the default level.
+    Reset,
+}
+
 /// A fully parsed key sequence, mode-agnostic. [`crate::engine::Engine`]
 /// gives it meaning against the current [`Mode`] and [`davimci_cmd::Session`].
 #[derive(Debug, Clone, PartialEq)]
@@ -138,6 +151,8 @@ pub enum Action {
     PreviewAndReturn,
     /// `<Space>l`.
     LoopSelection,
+    /// `zi` / `zo` / `z0`: change the zoom level (spec §11).
+    Zoom(ZoomIntent),
     /// A host-owned callback, bound by a Lua `map(mode, lhs, function)`
     /// (spec §9.2). The id is opaque here on purpose: `davimci-keys` must not
     /// depend on `davimci-lua`, so the engine reports it back and the host

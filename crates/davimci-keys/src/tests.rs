@@ -4,6 +4,7 @@
 use davimci_cmd::Session;
 use davimci_core::testing::fixture;
 
+use crate::action::ZoomIntent;
 use crate::engine::{Engine, Outcome};
 use crate::key::Key;
 
@@ -124,4 +125,37 @@ fn visual_mode_delete_acts_on_the_selection_and_exits_visual() {
     let out = feed(&mut e, &mut s, "d");
     assert!(matches!(out.last(), Some(Outcome::Applied(_))), "{out:?}");
     assert_eq!(e.mode(), crate::mode::Mode::Normal);
+}
+
+#[test]
+fn zoom_keys_report_intents_and_never_touch_the_timeline() {
+    let (mut e, mut s) = scene();
+    let before = s.timeline().dump();
+    let out = feed(&mut e, &mut s, "zizoz0");
+    let intents: Vec<_> = out
+        .iter()
+        .filter_map(|o| match o {
+            Outcome::Zoom(i) => Some(*i),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        intents,
+        vec![ZoomIntent::In, ZoomIntent::Out, ZoomIntent::Reset],
+        "{out:?}"
+    );
+    // Zoom is view state (spec §15.2): no edit, so no undo entry either.
+    assert_eq!(s.timeline().dump(), before);
+    assert!(s.undo().is_err());
+}
+
+#[test]
+fn z0_is_a_zoom_reset_not_a_count_then_timeline_start() {
+    let (mut e, mut s) = scene();
+    let out = feed(&mut e, &mut s, "50<Right>z0");
+    assert!(
+        matches!(out.last(), Some(Outcome::Zoom(ZoomIntent::Reset))),
+        "{out:?}"
+    );
+    assert_eq!(s.timeline().playhead().frame, davimci_core::Frame(50));
 }

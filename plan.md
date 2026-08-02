@@ -624,9 +624,10 @@ Amendments made during implementation:
   keyboard over on that. Owning the `:` line stays a frontend job; deciding
   what the line *means* stays the host's.
 - Spec §15 is new: the status-line format for every mode, the scroll-follow
-  and zoom-anchoring rules, and the fact that zoom has no default keybinding
-  (spec §11 defines none, so it is pointer/menu driven and `App::zoom_*` is
-  the entry point).
+  and zoom-anchoring rules, and the zoom keys `zi`/`zo`/`z0` (spec §11).
+  Zoom is view state, so `davimci-keys` only reports `Outcome::Zoom` and
+  `App::zoom_*` applies it - the same entry point a pointer wheel or a menu
+  uses, and nothing zoom-related reaches the undo log.
 - `Host` is the seam for the three things the editor core deliberately does
   not own - `:` commands (`davimci-cli`), transport (the backend clock), and
   Lua callbacks (`davimci-lua`) - so `davimci-app` depends on none of them.

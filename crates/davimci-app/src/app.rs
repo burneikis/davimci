@@ -7,7 +7,7 @@
 
 use davimci_cmd::Session;
 use davimci_keys::engine::{Outcome, TransportCmd};
-use davimci_keys::{Engine, Key, Keymap, MediaIntent, Mode};
+use davimci_keys::{Engine, Key, Keymap, MediaIntent, Mode, ZoomIntent};
 use davimci_motion::{JumpConfig, Zoom};
 
 use crate::error::AppError;
@@ -193,9 +193,10 @@ impl App {
         self.follow();
     }
 
-    /// Zoom is an app-level concern, not a keybinding: spec §11 defines no
-    /// zoom key, so frontends drive this from a wheel or a menu and the
-    /// anchoring rule stays in one place.
+    /// Zoom lives here rather than in the key engine because the viewport is
+    /// app state: `zi`/`zo`/`z0` (spec §11) come back as [`Outcome::Zoom`]
+    /// and land here, as does a wheel or a menu, so the anchoring rule has
+    /// exactly one implementation.
     pub fn zoom_in(&mut self) {
         let ph = self.session.timeline().playhead().frame;
         self.viewport
@@ -376,6 +377,11 @@ impl App {
                 }
             }
             Outcome::Transport(cmd) => host.transport(cmd),
+            Outcome::Zoom(intent) => match intent {
+                ZoomIntent::In => self.zoom_in(),
+                ZoomIntent::Out => self.zoom_out(),
+                ZoomIntent::Reset => self.set_zoom(Zoom::default()),
+            },
             Outcome::PickMedia(intent) => {
                 self.pending_pick = Some(intent);
                 self.follow();

@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use crate::action::{Action, ArgKind, LeafAction, Operator};
+use crate::action::{Action, ArgKind, LeafAction, Operator, ZoomIntent};
 use crate::key::Key;
 use crate::mode::Mode;
 use davimci_motion::{BuiltinMotion, Direction};
@@ -220,6 +220,10 @@ pub fn default_bindings() -> Vec<(Vec<Key>, LeafAction)> {
         (k("K"), standalone(Action::ShuttleStop)),
         (k("<Space>p"), standalone(Action::PreviewAndReturn)),
         (k("<Space>l"), standalone(Action::LoopSelection)),
+        // -- zoom (§11, §15.2) --
+        (k("zi"), standalone(Action::Zoom(ZoomIntent::In))),
+        (k("zo"), standalone(Action::Zoom(ZoomIntent::Out))),
+        (k("z0"), standalone(Action::Zoom(ZoomIntent::Reset))),
         // -- command mode / escape --
         (k(":"), standalone(Action::EnterCommandMode)),
         (k("<Esc>"), standalone(Action::Escape)),

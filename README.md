@@ -99,7 +99,7 @@ it is linked dynamically, since davimci is GPL-3.0 over LGPL-2.1 MLT.
 | Multiple open timelines with global registers and marks | implemented, tested |
 | Autosave of the command log to `.davimci/autosave/`, crash recovery on reopen | implemented, tested |
 | `:relink` for offline media, as one undoable command | implemented, tested |
-| View state: viewport, zoom anchoring, scroll-follow, ruler ticks, mode line | implemented, tested |
+| View state: viewport, zoom anchoring (`zi`/`zo`/`z0`), scroll-follow, ruler ticks, mode line | implemented, tested |
 | App loop: `Frontend` trait, key dispatch, messages, job progress, `Host` seam | implemented, tested |
 | Golden view-state fixtures, reused by every frontend's rendering tests | implemented, tested |
 | Headless frontend: scripted events in, view dumps out | implemented, tested |

@@ -636,6 +636,7 @@ The project, config directory, Lua module namespace, and project-local file all 
 | `f` + motion | audio fade |
 | `+`/`-` | gain adjust |
 | `gx` | create transition at nearest cut |
+| `zi`/`zo`/`z0` | zoom in / out / reset to default zoom (§15.2) |
 | `:export`, `:render` | export via command mode |
 | `:w`, `:q`, `:wq`, `:e` | project lifecycle (see §12) |
 | `]a`, `[a` (example) | scripted predicate motions (user-defined) |
@@ -741,7 +742,9 @@ order.
   the playhead may legally sit at the timeline's end.
 - **Zoom anchors on the playhead:** the playhead keeps its screen column
   across a zoom step.
-- Zoom has no default keybinding; it is driven by the pointer or a menu.
+- **Zoom keys:** `zi` in, `zo` out, `z0` back to the default level. Zoom is
+  view state, not an edit: it never enters the undo log, and a pointer wheel
+  or a menu drives the same path.
 
 ### 15.3 Command line
 

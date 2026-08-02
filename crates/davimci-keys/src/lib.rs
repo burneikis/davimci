@@ -33,7 +33,7 @@ pub mod parser;
 #[cfg(test)]
 mod tests;
 
-pub use action::{Action, ArgKind, LeafAction, Operator, Target};
+pub use action::{Action, ArgKind, LeafAction, Operator, Target, ZoomIntent};
 pub use engine::{Engine, MediaIntent, Outcome, TransportCmd};
 pub use error::KeysError;
 pub use key::{Key, Named};
