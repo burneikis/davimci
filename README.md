@@ -12,10 +12,11 @@ remappable keys, and hookable events.
 
 <!-- Keep this current. It must never claim more than the code does. -->
 
-**Phases 9a-9c landed: the view state, the video presenter, and the GUI's
-decision layer.** What is *not* there yet is a window: no `winit`/`wgpu`
-surface and no `egui` shell, so the editor still cannot be used
-interactively. Phase 8b (export presets and `:render`) and the windowed shell
+**Phases 9a-9c landed, and the editor is now assembled.** Keys drive the
+command layer, edits reproject the MLT graph, motions seek and present, and
+`<Space><Space>`/`J`/`K`/`L` play and shuttle. What is *not* there yet is a
+window: no `winit`/`wgpu` surface and no `egui` shell, so the only frontend
+that can run it is the headless one. Phase 8b (export presets and `:render`) and the windowed shell
 are next. Workspace builds; `just test` and `just lint` are green, and
 `just fixtures && just test-slow` passes against generated media, including
 real decode, preview, and export through MLT.
@@ -27,9 +28,17 @@ both hosts; `davimci-gui` owns layout, painting, key translation and the
 modals. A scripted session already runs through two frontends (GUI and
 headless) and produces identical view state.
 
-The binary still does not open a window: `davimci <project>` opens a project,
-offers crash recovery if an autosave survived, and runs `:` commands passed
-with `-c`. The backend can project a timeline, seek frame-exactly,
+The binary still does not open a window, but it does run the real editor:
+
+```sh
+davimci clip.mkv -k "ll<Right>s"        # import, move, split - through the key grammar
+davimci clip.mkv -k "  " --ticks 30     # play, pulling real frames through MLT
+davimci project.davimci -c ':w'         # spec §12 lifecycle, as before
+```
+
+`-k` drives the whole stack - key grammar, commands, MLT backend, presenter,
+transport - with `HeadlessFrontend` standing in for the window, and prints the
+resulting view state and preview status. The backend can project a timeline, seek frame-exactly,
 pull frames, play audio, and encode a file, and a config file can bind keys,
 define motions and export presets, and hook events - but only a test drives
 any of it.
@@ -100,6 +109,10 @@ it is linked dynamically, since davimci is GPL-3.0 over LGPL-2.1 MLT.
 | GUI input translation: window keys to `davimci-keys` tokens | implemented, tested |
 | `:` line: history, longest-common-prefix completion, cancel rules | implemented, tested |
 | Media picker and INSERT-mode subtitle editing (state, not widgets) | implemented, tested |
+| Editor assembly: workspace + backend + presenter + transport behind one `Host` | implemented, tested |
+| Transport: play/pause, shuttle with rate stepping, preview-and-return | implemented, tested |
+| Playback moves the playhead off the audio clock, never through the undo log | implemented, tested |
+| Edits reproject the render graph; motions seek and present | implemented, tested |
 | Windowed shell: `winit` + `wgpu` surface, `egui` chrome | not started |
 | Export presets, `:render` (Phase 8b), TUI frontend (9d) | not started |
 | Everything else | placeholder crates |
@@ -126,6 +139,12 @@ In `davimci-cli`: the lifecycle is complete but the binary is a driver, not an
 editor - it has no keymap and no display, so `-c` is the only input. `:analyze`
 is in spec §12 but belongs to Phase 9e and is not accepted yet, and a recovered
 autosave replays into a fresh undo tree, since history is still not persisted.
+
+In `davimci-cli`: shuttle is a stepped scrub rather than varispeed, because
+`RenderBackend` has no rate control - `J`/`L` stop audio and step the
+playhead. `<Space>l` (loop selection) is refused with a message, since the
+selection is not on the `Host` seam yet. Running a `:` command clones the
+session to hand it between the app and the workspace.
 
 In `davimci-present` and `davimci-gui`: composition is software and integral
 on purpose, so the parity and pacing tests are byte-exact rather than

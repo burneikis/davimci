@@ -124,6 +124,16 @@ impl Engine {
         self.zoom = zoom;
     }
 
+    /// Return to `NORMAL` with nothing pending, for a host that has switched
+    /// to a different timeline. Registers survive, because spec §12 makes
+    /// them global across open timelines; a selection and a half-typed
+    /// sequence do not, because they name positions in the timeline that is
+    /// being left.
+    pub fn reset(&mut self) {
+        self.parser.reset();
+        self.mode.escape();
+    }
+
     /// Feed one key through the grammar and, once a sequence completes, run
     /// it against `session`.
     pub fn feed(&mut self, key: Key, session: &mut Session) -> Outcome {

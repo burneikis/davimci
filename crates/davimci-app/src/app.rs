@@ -42,6 +42,30 @@ pub trait Host {
         Ok(None)
     }
 
+    /// One pass of whatever the host drives off the clock: pacing a preview
+    /// frame, stepping a shuttle, polling a job. Called on every
+    /// [`Event::Tick`].
+    ///
+    /// It takes the session because playback *moves the playhead*, and the
+    /// playhead is navigation rather than an edit - so this is the same
+    /// non-command escape hatch `set_playhead` already is, not a second
+    /// write path.
+    fn tick(&mut self, session: &mut Session) {
+        let _ = session;
+    }
+
+    /// An edit was committed: the render graph is now stale. Called after
+    /// anything that reaches the undo log, including undo and redo.
+    fn timeline_changed(&mut self, session: &Session) {
+        let _ = session;
+    }
+
+    /// The playhead or track focus moved, so the backend should seek and the
+    /// preview should show that frame.
+    fn playhead_moved(&mut self, session: &Session) {
+        let _ = session;
+    }
+
     /// True once the host wants the loop to stop (`:q` succeeded).
     fn wants_quit(&self) -> bool {
         false
@@ -97,6 +121,18 @@ impl App {
     /// goes through [`Session::exec`].
     pub fn session_mut(&mut self) -> &mut Session {
         &mut self.session
+    }
+
+    /// Adopt a different timeline - `:e`, `:bn`, `:b <n>`. The viewport and
+    /// the key engine are reset to the new timeline rather than carried
+    /// over, since a column, a selection and a pending sequence all mean
+    /// something only in the timeline they were made in.
+    pub fn replace_session(&mut self, session: Session) {
+        self.session = session;
+        self.engine.reset();
+        self.viewport = Viewport::new(self.viewport.columns(), self.viewport.rows());
+        self.engine.set_zoom(self.viewport.zoom());
+        self.follow();
     }
 
     #[must_use]
@@ -212,6 +248,11 @@ impl App {
                     Ok(None) => {}
                     Err(e) => self.messages.push(Message::error(e.to_string())),
                 }
+                // A `:` line can edit (`:relink`) or swap the whole timeline
+                // (`:e`, `:bn`), so the graph and the playhead are both
+                // assumed stale rather than diffed.
+                host.timeline_changed(&self.session);
+                host.playhead_moved(&self.session);
                 self.follow();
                 if host.wants_quit() {
                     self.quit = true;
@@ -223,7 +264,11 @@ impl App {
                 self.command_line = None;
                 Response::Continue
             }
-            Event::Tick => Response::Continue,
+            Event::Tick => {
+                host.tick(&mut self.session);
+                self.follow();
+                Response::Continue
+            }
             Event::Quit => {
                 self.quit = true;
                 Response::Quit
@@ -232,6 +277,11 @@ impl App {
     }
 
     fn apply_outcome(&mut self, outcome: Outcome, host: &mut dyn Host) -> Response {
+        // An edit invalidates the render graph; an edit or a motion moves the
+        // playhead. Both are reported once, here, so a host cannot miss one
+        // by handling only some outcomes.
+        let edited = matches!(outcome, Outcome::Applied(_));
+        let moved = edited || matches!(outcome, Outcome::Moved);
         match outcome {
             Outcome::Pending | Outcome::Cancelled => {}
             // `:` is a mode change in `davimci-keys`, not a distinct outcome:
@@ -281,6 +331,12 @@ impl App {
                 .messages
                 .push(Message::warning(format!("Not implemented yet: {what}."))),
             Outcome::Error(msg) => self.messages.push(Message::error(msg)),
+        }
+        if edited {
+            host.timeline_changed(&self.session);
+        }
+        if moved {
+            host.playhead_moved(&self.session);
         }
         self.follow();
         Response::Continue

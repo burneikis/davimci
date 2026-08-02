@@ -7,15 +7,24 @@
 //! and every edit it performs still goes through a `Command`, so `:relink`
 //! and an imported file are undo-tree entries like any other edit.
 
+//! It is also where the editor is *assembled*: [`editor::Editor`] is the
+//! only type that holds a workspace, a render backend, a presenter and the
+//! transport at once. That has to live here rather than in a frontend,
+//! because no frontend may reference MLT (spec §10.1).
+
 pub mod autosave;
+pub mod editor;
 pub mod error;
 pub mod excmd;
+pub mod transport;
 pub mod workspace;
 
 #[cfg(test)]
 mod tests;
 
 pub use autosave::{Autosave, OnRecovery, Recovery};
+pub use editor::Editor;
 pub use error::CliError;
 pub use excmd::{ExCommand, ExOutcome, parse};
+pub use transport::{Transport, TransportState};
 pub use workspace::{Buffer, Globals, Workspace};

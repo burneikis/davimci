@@ -750,6 +750,51 @@ presenter surface, clicks are translated to columns but not yet to a seek,
 and the picker/subtitle modals have no production opener - `i`/`a`/`r` still
 report `NotImplemented` from `davimci-keys`.
 
+### Wiring and transport (the glue)
+
+Status: complete. `davimci_cli::Editor` is the only type that holds a
+workspace, a `RenderBackend`, a `Presenter` and the transport at once, and it
+lives in the binary crate because no frontend may reference MLT (spec §10.1).
+It implements `davimci_app::Host`, so the app drives it without knowing any
+of that exists. `davimci_cli::Transport` implements `<Space><Space>`, `J`/`K`/
+`L` and `<Space>p`.
+
+`davimci <media> -k "<keys>" --ticks <n>` now runs the whole editor - key
+grammar, command layer, MLT backend, presenter, transport - with
+`HeadlessFrontend` in the window's place. This is verified against real media:
+importing a 1080p60 file, splitting it, and playing it pulls real frames
+through MLT into the presenter.
+
+Amendments made during implementation:
+
+- `Host` gained `tick`, `timeline_changed` and `playhead_moved`. Reporting
+  them from one place in `App::apply_outcome` is what stops a host from
+  missing an edit by handling only some outcomes; `tick` takes the session
+  because playback *moves the playhead*, which is navigation on the same
+  footing as a motion and still never an edit.
+- `App::replace_session` and `Engine::reset` were needed for `:e`/`:bn`: a
+  viewport column, a visual selection and a half-typed sequence all mean
+  something only in the timeline they were made in, so they are reset rather
+  than carried across. Registers survive, since spec §12 makes them global.
+- Session ownership had to be decided rather than duplicated. `App` owns the
+  live session; `Workspace` owns the buffers. The live one is pushed in
+  before a `:` command and pulled back after
+  (`set_current_session`/`current_session`), so `:w` writes what is on screen
+  and `:bn` hands back a different timeline.
+- Shuttle is a stepped scrub, not varispeed: `RenderBackend` has no rate
+  control, so `J`/`L` stop audio and step the playhead, doubling to a capped
+  rate and slowing through 1x before reversing. Real varispeed needs a trait
+  method and is deferred rather than faked.
+- `TransportCmd::LoopSelection` is refused with a sentence rather than
+  silently ignored: looping needs the visual selection, which lives in the
+  key engine and is not on the `Host` seam yet.
+
+Defect found and fixed by running it: `Transport::tick` composed a frame and
+`Editor::tick` composed another, so every tick pulled twice and the pacing
+counters read roughly double. The presentation is now returned from the tick
+that made it, with a regression test (`a_tick_presents_exactly_once`) naming
+the bug.
+
 ---
 
 ## Phase 9d - TUI Frontend (`davimci-tui`) - optional, `--features tui`

@@ -23,6 +23,11 @@ davimci-core.workspace = true
 davimci-cmd.workspace = true
 anyhow.workspace = true
 davimci-analysis.workspace = true
+davimci-app.workspace = true
+davimci-backend.workspace = true
+davimci-keys.workspace = true
+davimci-present.workspace = true
+davimci-headless.workspace = true
 davimci-mlt.workspace = true
 serde = { workspace = true }
 serde_json.workspace = true

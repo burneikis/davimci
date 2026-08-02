@@ -176,6 +176,24 @@ impl Workspace {
         out
     }
 
+    /// Hand the app's live session back to the current buffer.
+    ///
+    /// The editor's `App` owns the session that is actually being edited, so
+    /// the workspace's copy is stale between `:` commands. Pushing before a
+    /// command and pulling after ([`Workspace::current_session`]) keeps one
+    /// authoritative session rather than two that can drift - which matters
+    /// because `:w` writes whatever the workspace holds.
+    pub fn set_current_session(&mut self, session: Session) {
+        self.current_mut().session = session;
+    }
+
+    /// The current buffer's session, for the app to adopt after a command
+    /// that may have switched buffers (`:e`, `:bn`, `:b <n>`).
+    #[must_use]
+    pub fn current_session(&self) -> Session {
+        self.current().session.clone()
+    }
+
     /// Bring the current buffer's autosave file up to date.
     pub fn sync_autosave(&mut self) -> Result<(), CliError> {
         let b = self.current_mut();

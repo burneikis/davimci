@@ -95,7 +95,10 @@ impl Parser {
         !matches!(self.state, St::Idle)
     }
 
-    fn reset(&mut self) {
+    /// Drop any half-typed sequence. Used on `Esc` and when the editor
+    /// switches to a different timeline, where a pending count or operator
+    /// would otherwise apply to the wrong one.
+    pub fn reset(&mut self) {
         self.state = St::Idle;
     }
 
