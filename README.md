@@ -8,9 +8,22 @@ remappable keys, and hookable events.
 - [`spec.md`](spec.md) - what it is and how it behaves
 - [`plan.md`](plan.md) - how it gets built, and how it gets tested
 
-Status: **early scaffolding.** Spec and plan are complete. The workspace
-builds, the error model and frame-time core are implemented and tested;
-everything else is a placeholder crate. See `plan.md` for phase order.
+## Status
+
+<!-- Keep this current. It must never claim more than the code does. -->
+
+**Phase 1 - timeline model core.** Workspace builds; `just test` and
+`just lint` are green.
+
+| Area | State |
+|---|---|
+| Error model and recovery policy (Phase 0) | implemented, tested |
+| Frame-exact time, rational fps, conform math | implemented, tested |
+| Timeline model: clips, tracks, grouping, primitives | in progress |
+| Everything else | placeholder crates |
+
+See `plan.md` for the phase order and `plan.md` milestones for what counts as
+usable (M3).
 
 ---
 
