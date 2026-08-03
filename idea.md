@@ -1,8 +1,9 @@
+- fix laggy playback (is it perf or is the playback at wrong fps?)
+- prevent holding a key from lagging/freezing (when I hold h or l, it works for a bit, then starts freezing, it should instead move at a constant speed)
 - thumbnails in timeline
 - relative jump numbers
 - audio while shuttling
 - clip labels over the top of waveform/thumbnail
-- fix laggy playback
 - allow plugins that render smth / a window. e.g. something like which-key
 - render typing command
 - show autocomplete suggestions (unless that should be a plugin)
