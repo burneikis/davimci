@@ -1,0 +1,1 @@
+- allow plugins that render smth / a window. e.g. something like which-key
