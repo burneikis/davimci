@@ -137,7 +137,12 @@ impl Transport {
         // A backend with rate control shuttles by *playing faster*, audio
         // and all; one without it steps the playhead and stops the audio,
         // because a scrub with the wrong sound is worse than a silent one.
-        if backend.supports_varispeed() {
+        //
+        // Backwards is always stepped (spec §3.2.1): audio consumers do not
+        // run in reverse, and a negative producer speed stalls the clock -
+        // the preview froze and the playhead was then committed to the end
+        // of the timeline.
+        if rate > 0 && backend.supports_varispeed() {
             if !backend.is_previewing() {
                 self.start(backend, session, scale)?;
             }
@@ -146,7 +151,7 @@ impl Transport {
                 .map_err(|e| e.to_string())?;
             self.varispeed = true;
             self.clock_locked = rate > 0;
-        } else if self.is_playing() {
+        } else if backend.is_previewing() || self.varispeed {
             self.stop(backend, session)?;
         }
         self.state = TransportState::Shuttling(rate);
@@ -295,13 +300,17 @@ impl Transport {
             TransportState::Shuttling(_) if self.varispeed => {
                 let presentation = presenter.present(backend).ok();
                 let at = backend.audio_clock_position();
+                let reverse = self.state_is_reverse();
                 let ended = presentation.is_none()
                     || at.is_some_and(|f| f >= duration)
-                    || at == Some(Frame::ZERO) && self.state_is_reverse();
+                    || at == Some(Frame::ZERO) && reverse;
                 if ended {
+                    // A shuttle that ran out of timeline commits where it
+                    // ran out: backwards that is frame 0, not the end.
+                    let landed = if reverse { Frame::ZERO } else { duration };
                     let back = self.stop(backend, session).unwrap_or(None);
                     return TickResult {
-                        playhead: Some(back.unwrap_or(duration).min(duration)),
+                        playhead: Some(back.unwrap_or(landed).min(duration)),
                         stopped: true,
                         presentation,
                     };
@@ -482,7 +491,37 @@ mod tests {
         t.shuttle(false, &mut b, &s, PreviewScale::Full).unwrap();
         assert_eq!(b.rate, 1.0, "H decelerates through 1x before reversing");
         t.shuttle(false, &mut b, &s, PreviewScale::Full).unwrap();
-        assert_eq!(b.rate, -1.0, "and then plays backwards");
+        assert_eq!(t.state(), TransportState::Shuttling(-1));
+        assert!(
+            !b.is_previewing(),
+            "backwards shuttle must not run the audio consumer"
+        );
+        assert_eq!(b.rate, 1.0, "the graph is left at normal speed");
+    }
+
+    /// Regression: a backwards varispeed shuttle stalled the consumer (audio
+    /// does not run in reverse), the preview froze, and the tick then
+    /// committed the playhead to the *end* of the timeline. Backwards is a
+    /// stepped scrub, and it walks the playhead back.
+    #[test]
+    fn backwards_shuttle_steps_back_instead_of_freezing() {
+        let mut b = RateBackend::new();
+        let mut p = Presenter::new(
+            Host::Embedded,
+            Resolution {
+                width: 8,
+                height: 4,
+            },
+            Fps::FPS_60,
+        );
+        let mut s = session();
+        s.set_playhead(Frame(20), s.timeline().playhead().track)
+            .unwrap();
+        let mut t = Transport::new();
+        t.shuttle(false, &mut b, &s, PreviewScale::Full).unwrap();
+        let r = t.tick(&mut b, &mut p, &s, PreviewScale::Full);
+        assert_eq!(r.playhead, Some(Frame(19)));
+        assert!(!r.stopped);
     }
 
     /// Stopping must leave the graph at normal speed, or the next `<Space>`

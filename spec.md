@@ -97,6 +97,16 @@ clock keeps running and the rate steps, so a shuttle sounds like a shuttle. A
 backend without rate control degrades to a silent stepped scrub at the same
 speeds and on the same keys, rather than refusing.
 
+**Backwards shuttle is always a stepped scrub**, silent, even on a backend with
+rate control: audio consumers do not run backwards, and a negative producer
+speed stalls the clock instead of playing in reverse. Reversing therefore stops
+the audio and walks the playhead back at the same speeds; accelerating forward
+again resumes varispeed playback. A backwards shuttle that reaches frame 0
+stops there, and never commits the playhead to the end of the timeline.
+
+Shuttle is available whenever the transport is idle: `H` or `L` from a paused
+NORMAL mode starts one, rather than requiring playback first.
+
 Shuttle is `H`/`L` rather than the JKL of other NLEs: the fingers are already
 on `h`/`l` for frame motion, so the shifted pair is the same gesture at speed.
 Lowercase `h`/`j`/`k`/`l` keep their vim meanings (frame/jump motion, track

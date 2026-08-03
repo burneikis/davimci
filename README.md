@@ -14,8 +14,8 @@ remappable keys, and hookable events.
 
 **M3 is met: davimci opens a window, edits video, and exports a multi-audio
 MKV.** Keys drive the command layer, edits reproject the MLT graph, motions
-seek and present, `<Space><Space>`/`H`/`L` play and shuttle (varispeed, with
-audio, through MLT), clicks seek, and the timeline is painted from the shared
+seek and present, `<Space><Space>`/`H`/`L` play and shuttle (varispeed forward
+with audio through MLT, stepped and silent backwards), clicks seek, and the timeline is painted from the shared
 view state with waveforms on analysed audio lanes. Export keeps every audio
 track as its own stream, verified by decoding the result and checking each
 stream carries its own tone. Phase 9e (audio operations) landed with it, and
@@ -147,7 +147,7 @@ it is linked dynamically, since davimci is GPL-3.0 over LGPL-2.1 MLT.
 | Background analysis with a live caller; waveforms on audio lanes | implemented, tested |
 | Analysis invalidated when gain or fades change | implemented, tested |
 | Click-to-seek, and `i` opening the subtitle editor on a text clip | implemented, tested |
-| Varispeed shuttle (`H`/`L`) through backend rate control | implemented, tested |
+| Varispeed shuttle (`H`/`L`) through backend rate control (forward only; backwards is a stepped scrub) | implemented, tested |
 | Undo history persisted across save and reopen (format v2) | implemented, tested |
 | Transitions: `gx`, `dax`, `:transition`, handle validation, MLT projection | implemented, tested |
 | Lua-registered transition types (9f), TUI frontend (9d) | not started |
