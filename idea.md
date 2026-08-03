@@ -1,6 +1,10 @@
 - allow plugins that render smth / a window. e.g. something like which-key
 - figure out how davinci can cleanly step framewise backwards, and shuttle backwards, we cant currently
 - figure out whats causing playback to break after doing a few seeks, or shuttles to the end or fast backwards etc
+- clean readme and mds
+- remove shit docblocks and comments
+- refactor all for clean code
+- write docs, guide for the codebase and how to learn it
 
 Done:
 - ~~prevent holding a key from lagging/freezing~~ input is drained one batch
