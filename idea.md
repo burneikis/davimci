@@ -1,4 +1,8 @@
-- allow plugins that render smth / a window. e.g. something like which-key
 - thumbnails in timeline
 - relative jump numbers
 - audio while shuttling
+- clip labels over the top of waveform/thumbnail
+- fix laggy playback
+- allow plugins that render smth / a window. e.g. something like which-key
+- render typing command
+- show autocomplete suggestions (unless that should be a plugin)
