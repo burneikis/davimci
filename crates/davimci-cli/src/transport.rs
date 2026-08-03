@@ -33,6 +33,12 @@ pub struct Transport {
     state: TransportState,
     /// Where `<Space>p` must come back to when playback stops.
     return_to: Option<Frame>,
+    /// Where the current playback was started from, and whether the audio
+    /// clock has caught up with it yet. A consumer reports position 0 until
+    /// its first frame is shown, so following it blindly makes the playhead
+    /// flash to the start of the timeline before jumping back.
+    origin: Frame,
+    clock_locked: bool,
 }
 
 impl Default for Transport {
@@ -47,6 +53,8 @@ impl Transport {
         Self {
             state: TransportState::Stopped,
             return_to: None,
+            origin: Frame::ZERO,
+            clock_locked: false,
         }
     }
 
@@ -153,6 +161,8 @@ impl Transport {
             .map_err(|e| e.to_string())?;
         self.state = TransportState::Playing;
         self.return_to = None;
+        self.origin = from;
+        self.clock_locked = false;
         Ok(())
     }
 
@@ -192,7 +202,16 @@ impl Transport {
                 // the presentation is handed back rather than left for the
                 // caller to fetch with a second `present`.
                 let presentation = presenter.present(backend).ok();
-                let at = backend.audio_clock_position();
+                // Ignore the clock until it has reached where playback was
+                // started from: before that it is still reporting its
+                // pre-roll position, not ours.
+                let mut at = backend.audio_clock_position();
+                if !self.clock_locked {
+                    match at {
+                        Some(f) if f >= self.origin => self.clock_locked = true,
+                        _ => at = None,
+                    }
+                }
                 // Running off the end stops playback rather than wedging at
                 // the last frame.
                 if presentation.is_none() || at.is_some_and(|f| f >= duration) {
@@ -331,6 +350,35 @@ mod tests {
             stats.presented + stats.repeated,
             10,
             "a tick presented more than once: {stats:?}"
+        );
+    }
+
+    /// Regression: the playhead followed the audio clock from the first
+    /// tick, but a consumer reports position 0 until its first frame is
+    /// shown, so starting playback mid-timeline flashed the playhead to the
+    /// start of the track and back.
+    #[test]
+    fn a_warming_up_clock_does_not_yank_the_playhead_to_zero() {
+        let (mut b, mut p) = parts();
+        let mut s = session();
+        s.set_playhead(Frame(20), s.timeline().playhead().track)
+            .unwrap();
+        b.clock_warmup = 30;
+        let mut t = Transport::new();
+        t.play_pause(&mut b, &s, PreviewScale::Full).unwrap();
+        let mut seen = Vec::new();
+        for _ in 0..20 {
+            let r = t.tick(&mut b, &mut p, &s, PreviewScale::Full);
+            if let Some(f) = r.playhead {
+                seen.push(f);
+            }
+            if r.stopped {
+                break;
+            }
+        }
+        assert!(
+            seen.iter().all(|f| *f >= Frame(20)),
+            "the playhead jumped behind where playback started: {seen:?}"
         );
     }
 

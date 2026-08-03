@@ -41,6 +41,10 @@ pub struct MockBackend {
     /// Frames the preview may still hand out before it starves. `None` is
     /// "never starves"; tests set it to exercise repeat-on-starve pacing.
     pub preview_budget: Option<u64>,
+    /// Preview frames to serve before the audio clock locks. While this is
+    /// non-zero, `audio_clock_position` reports [`Frame::ZERO`], the way a
+    /// real consumer reports position 0 until its first frame is shown.
+    pub clock_warmup: u64,
     /// When set, [`RenderBackend::render`] stays `Running` until
     /// [`MockBackend::advance_render`] is called - for cancellation tests.
     pub manual_render: bool,
@@ -71,6 +75,7 @@ impl MockBackend {
             position: Frame::ZERO,
             previewing: false,
             preview_budget: None,
+            clock_warmup: 0,
             manual_render: false,
             progress: RenderProgress::idle(),
             seeks: Vec::new(),
@@ -176,12 +181,22 @@ impl RenderBackend for MockBackend {
             *budget -= 1;
         }
         let frame = self.make_frame(self.position, PreviewScale::Full);
-        self.position = Frame(self.position.get() + 1);
+        if self.clock_warmup > 0 {
+            self.clock_warmup -= 1;
+        } else {
+            self.position = Frame(self.position.get() + 1);
+        }
         Ok(Some(frame))
     }
 
     fn audio_clock_position(&self) -> Option<Frame> {
-        self.previewing.then_some(self.position)
+        if !self.previewing {
+            return None;
+        }
+        if self.clock_warmup > 0 {
+            return Some(Frame::ZERO);
+        }
+        Some(self.position)
     }
 
     fn render(&mut self, job: RenderJob) -> Result<()> {

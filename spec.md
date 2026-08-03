@@ -788,6 +788,10 @@ order.
 - Audio is the master clock. Video is fitted to it: a decoded frame older than
   the clock is **dropped**, and a tick with nothing ready **repeats** the last
   frame rather than going black.
+- The playhead follows the audio clock only once that clock has reached the
+  frame playback started from. An audio consumer reports its pre-roll
+  position until its first frame is shown, so before the clock locks the
+  playhead stays put rather than flashing to the start of the timeline.
 - The image is letterboxed - never stretched, never cropped - and centred on
   integral pixel boundaries.
 - Overlays (timecode, safe areas) exist only in the embedded host. The
