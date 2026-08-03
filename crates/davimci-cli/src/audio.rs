@@ -10,7 +10,7 @@
 
 use davimci_analysis::{Analysis, Span};
 use davimci_cmd::EditCommand;
-use davimci_core::{Clip, ClipId, ClipProps, Fps, Frame, Timeline, TrackId};
+use davimci_core::{Clip, ClipId, ClipProps, Fps, Frame, Selection, Timeline, TrackId};
 
 use crate::error::CliError;
 
@@ -40,6 +40,53 @@ pub fn clip_under_playhead(tl: &Timeline, what: &'static str) -> Result<(TrackId
         .and_then(|t| t.clip_at(head.frame))
         .ok_or(CliError::NoClipUnderPlayhead(what))?;
     Ok((head.track, clip.clone()))
+}
+
+/// What a clip-property command acts on: every clip in the selection, or the
+/// clip under the playhead when nothing is selected (spec §6.1).
+///
+/// A selection that covers no clip is an error rather than a silent no-op:
+/// the user asked for something the timeline cannot give.
+pub fn targets(
+    tl: &Timeline,
+    selection: Option<&Selection>,
+    what: &'static str,
+) -> Result<Vec<(TrackId, Clip)>, CliError> {
+    match selection {
+        Some(sel) => {
+            let clips: Vec<(TrackId, Clip)> = sel
+                .clips(tl)
+                .into_iter()
+                .map(|(t, c)| (t, c.clone()))
+                .collect();
+            if clips.is_empty() {
+                return Err(CliError::NoClipUnderPlayhead(what));
+            }
+            Ok(clips)
+        }
+        None => Ok(vec![clip_under_playhead(tl, what)?]),
+    }
+}
+
+/// The tracks a track-level command acts on: the selection's tracks, or the
+/// playhead's track when nothing is selected.
+#[must_use]
+pub fn target_tracks(tl: &Timeline, selection: Option<&Selection>) -> Vec<TrackId> {
+    match selection {
+        Some(sel) if !sel.tracks.is_empty() => sel.tracks.clone(),
+        _ => vec![tl.playhead().track],
+    }
+}
+
+/// One label for a message about `clips`: the clip's own when there is one,
+/// otherwise a count, since listing twenty labels in the status line helps
+/// nobody.
+#[must_use]
+pub fn describe(clips: &[(TrackId, Clip)]) -> String {
+    match clips {
+        [(_, c)] => c.label.clone(),
+        other => format!("{} clips", other.len()),
+    }
 }
 
 /// `:gain <db>` - absolute gain, not a step (spec §6.1).

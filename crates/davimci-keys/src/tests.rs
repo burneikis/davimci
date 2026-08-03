@@ -129,6 +129,35 @@ fn visual_mode_delete_acts_on_the_selection_and_exits_visual() {
     assert_eq!(e.mode(), crate::mode::Mode::Normal);
 }
 
+/// `+` in VISUAL adjusts every clip in the selection, as one undoable
+/// command (spec §6.1).
+#[test]
+fn gain_adjust_acts_on_the_visual_selection_not_only_the_playhead_clip() {
+    let (mut e, mut s) = (
+        Engine::new(),
+        Session::new(fixture(&[(
+            "V1",
+            &[(0, 100, "a"), (100, 100, "b"), (200, 100, "c")],
+        )])),
+    );
+    // `l` lands on the head of "b", so the selection overlaps "a" and "b".
+    feed(&mut e, &mut s, "vl+");
+    let gains: Vec<f32> = s.timeline().tracks()[0]
+        .clips()
+        .iter()
+        .map(|c| c.props.gain_db)
+        .collect();
+    assert_eq!(gains, vec![1.0, 1.0, 0.0]);
+
+    feed(&mut e, &mut s, "u");
+    let gains: Vec<f32> = s.timeline().tracks()[0]
+        .clips()
+        .iter()
+        .map(|c| c.props.gain_db)
+        .collect();
+    assert_eq!(gains, vec![0.0, 0.0, 0.0], "one u undoes the whole set");
+}
+
 #[test]
 fn zoom_keys_report_intents_and_never_touch_the_timeline() {
     let (mut e, mut s) = scene();

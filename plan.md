@@ -1057,9 +1057,17 @@ Amendments made during implementation:
   editor commands, because they need a measurement. Ducking is expressed as
   splits plus gain in one `Sequence`, since gain is one value per clip.
 
-Gap: these act on the clip under the playhead, not on a visual selection.
-The selection lives in the key engine and is not on the `Host` seam yet -
-the same missing seam that `<Space>l` waits on.
+- The selection reached the host seam here. `davimci_core::Selection` (a
+  time range plus tracks, resolved to clips against a timeline at the moment
+  the command runs) is the model type both sides can name; `Host::command`
+  takes one, `App` remembers the selection that was live when `:` was
+  pressed (entering COMMAND clears it in the key engine), and `:gain`,
+  `:fade`, `:normalize`, `:duck` and `+`/`-` all act on it. A multi-clip
+  change is one `Sequence`, so one `u` undoes it.
+
+Gap: `<Space>l` still reports that it is not wired up. The selection it needs
+now exists on the seam; what is missing is loop support in the transport,
+which belongs with the rest of playback rather than here.
 
 ---
 

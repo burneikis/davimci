@@ -331,11 +331,19 @@ track: the envelope is dropped and analysis re-runs in the background, so
 predicate motions report `Pending` rather than a measurement of the pre-gain
 signal (§10.2). `:analyze` forces the same thing by hand.
 
-`:gain`, `:normalize` and `:fade` act on the clip under the playhead; acting
-on a whole visual selection waits on the selection reaching the host seam.
-`:duck` lowers every part of the current track that overlaps a region where
-the named track is above the silence threshold, splitting the clip around
-those regions - one command, so one `u` undoes the whole duck.
+`:gain`, `:normalize`, `:fade` and `+`/`-` act on every clip the visual
+selection overlaps, or on the clip under the playhead when nothing is
+selected. A selection reaches a `:` line through the host seam: `:` leaves
+visual mode, so the selection is the one that was live when `:` was pressed.
+Whatever the scope, the whole set is one command, so one `u` undoes it. A
+selection that overlaps no clip is refused rather than silently doing
+nothing.
+
+`:duck` lowers every part of the selected tracks - the playhead's track when
+nothing is selected - that overlaps a region where the named track is above
+the silence threshold, splitting the clips around those regions. It is one
+command, so one `u` undoes the whole duck, and ducking a track against itself
+is refused.
 
 ## 6.2 Transitions
 

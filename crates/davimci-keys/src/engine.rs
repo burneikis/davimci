@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 
 use davimci_cmd::{EditCommand, Session};
-use davimci_core::{ClipId, Frame, Register, Timeline, TrackId};
+use davimci_core::{ClipId, ClipProps, Frame, Register, Selection, Timeline, TrackId};
 use davimci_motion::{
     BuiltinMotion, JumpConfig, Motion as MotionTrait, MotionCtx, Object as ObjectTrait, Resolved,
     Scope, TextObject, TimeRange, Zoom,
@@ -167,6 +167,17 @@ impl Engine {
     #[must_use]
     pub fn mode_state(&self) -> &ModeState {
         &self.mode
+    }
+
+    /// What the user has selected, as a model-level [`Selection`] the host
+    /// can act on (spec §6.1). `None` outside visual mode: a command with no
+    /// selection falls back to the playhead, and "no selection" must not be
+    /// confused with "an empty selection".
+    #[must_use]
+    pub fn selection(&self) -> Option<Selection> {
+        let sel = self.mode.visual()?;
+        let range = sel.range();
+        Some(Selection::new(range.start, range.end, sel.tracks.clone()))
     }
 
     pub fn set_zoom(&mut self, zoom: Zoom) {
@@ -670,21 +681,48 @@ impl Engine {
         })))
     }
 
+    /// `+` / `-`: adjust gain on the selection, or on the clip under the
+    /// playhead when nothing is selected (spec §6.1).
+    ///
+    /// A selection spanning several clips is one `Sequence`, so one `u`
+    /// undoes the whole adjustment rather than one clip of it.
     fn do_gain(&mut self, step_db: i32, session: &mut Session) -> Outcome {
-        let p = session.timeline().playhead();
-        let Some(clip) = clip_under(session.timeline(), p.track, p.frame) else {
-            return Outcome::Error("no clip under the playhead".to_string());
+        let step = step_db as f32;
+        let cmds: Vec<EditCommand> = match self.selection() {
+            Some(sel) => sel
+                .clips(session.timeline())
+                .into_iter()
+                .map(|(track, c)| EditCommand::SetProps {
+                    track,
+                    clip: c.id,
+                    props: ClipProps {
+                        gain_db: c.props.gain_db + step,
+                        ..c.props
+                    },
+                })
+                .collect(),
+            None => {
+                let p = session.timeline().playhead();
+                let Some(clip) = clip_under(session.timeline(), p.track, p.frame) else {
+                    return Outcome::Error("no clip under the playhead".to_string());
+                };
+                let Some((_, c)) = session.timeline().find_clip(clip) else {
+                    return Outcome::Error("no such clip".to_string());
+                };
+                vec![EditCommand::SetProps {
+                    track: p.track,
+                    clip,
+                    props: ClipProps {
+                        gain_db: c.props.gain_db + step,
+                        ..c.props
+                    },
+                }]
+            }
         };
-        let Some((_, c)) = session.timeline().find_clip(clip) else {
-            return Outcome::Error("no such clip".to_string());
-        };
-        let mut props = c.props;
-        props.gain_db += step_db as f32;
-        run(session.exec(&EditCommand::SetProps {
-            track: p.track,
-            clip,
-            props,
-        }))
+        if cmds.is_empty() {
+            return Outcome::Error("no clip in the selection".to_string());
+        }
+        run(session.exec(&EditCommand::Sequence(cmds)))
     }
 
     /// Toggle mute or solo on the track the playhead is on (spec §6.1).

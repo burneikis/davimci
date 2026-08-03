@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use davimci_analysis::{FfprobeProber, ImportOptions, Prober};
 use davimci_cmd::EditCommand;
-use davimci_core::TimelineProps;
+use davimci_core::{Selection, TimelineProps};
 
 use crate::autosave::OnRecovery;
 use crate::error::CliError;
@@ -240,16 +240,37 @@ pub fn parse(line: &str) -> Result<ExCommand, CliError> {
 
 impl Workspace {
     /// Parse and run a `:` line, answering any recovery prompt with
-    /// `on_recovery`.
+    /// `on_recovery`, against no selection.
     pub fn run(&mut self, line: &str, on_recovery: OnRecovery) -> Result<ExOutcome, CliError> {
-        self.run_command(&parse(line)?, on_recovery)
+        self.run_selected(line, on_recovery, None)
     }
 
-    /// Run an already-parsed command.
+    /// Parse and run a `:` line against the user's selection (spec §6.1).
+    /// `None` means the clip-property commands fall back to the playhead.
+    pub fn run_selected(
+        &mut self,
+        line: &str,
+        on_recovery: OnRecovery,
+        selection: Option<&Selection>,
+    ) -> Result<ExOutcome, CliError> {
+        self.run_command_selected(&parse(line)?, on_recovery, selection)
+    }
+
+    /// Run an already-parsed command against no selection.
     pub fn run_command(
         &mut self,
         cmd: &ExCommand,
         on_recovery: OnRecovery,
+    ) -> Result<ExOutcome, CliError> {
+        self.run_command_selected(cmd, on_recovery, None)
+    }
+
+    /// Run an already-parsed command against the user's selection.
+    pub fn run_command_selected(
+        &mut self,
+        cmd: &ExCommand,
+        on_recovery: OnRecovery,
+        selection: Option<&Selection>,
     ) -> Result<ExOutcome, CliError> {
         match cmd {
             ExCommand::Write(path) => {
@@ -304,19 +325,30 @@ impl Workspace {
             // Gain and fades are clip properties, so the workspace can run
             // them: no backend, no analysis, just an undoable edit (§6.1).
             ExCommand::Gain(db) => {
-                let (track, clip) =
-                    crate::audio::clip_under_playhead(self.current().timeline(), "set gain on")?;
-                self.exec(&crate::audio::gain(track, &clip, *db))?;
-                Ok(ExOutcome::msg(format!("{} gain {db:+} dB", clip.label)))
+                let clips =
+                    crate::audio::targets(self.current().timeline(), selection, "set gain on")?;
+                // One `Sequence`, so a selection-wide change is one `u`.
+                let cmds = clips
+                    .iter()
+                    .map(|(track, clip)| crate::audio::gain(*track, clip, *db))
+                    .collect();
+                self.exec(&EditCommand::Sequence(cmds))?;
+                Ok(ExOutcome::msg(format!(
+                    "{} gain {db:+} dB",
+                    crate::audio::describe(&clips)
+                )))
             }
             ExCommand::Fade { end, ms } => {
                 let fps = self.current().timeline().props.fps;
-                let (track, clip) =
-                    crate::audio::clip_under_playhead(self.current().timeline(), "fade")?;
-                self.exec(&crate::audio::fade(track, &clip, *end, *ms, fps))?;
+                let clips = crate::audio::targets(self.current().timeline(), selection, "fade")?;
+                let cmds = clips
+                    .iter()
+                    .map(|(track, clip)| crate::audio::fade(*track, clip, *end, *ms, fps))
+                    .collect();
+                self.exec(&EditCommand::Sequence(cmds))?;
                 Ok(ExOutcome::msg(format!(
                     "{} fade {} {ms} ms",
-                    clip.label,
+                    crate::audio::describe(&clips),
                     match end {
                         crate::audio::FadeEnd::In => "in",
                         crate::audio::FadeEnd::Out => "out",

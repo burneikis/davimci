@@ -18,7 +18,10 @@ seek and present, `<Space><Space>`/`H`/`L` play and shuttle (varispeed, with
 audio, through MLT), clicks seek, and the timeline is painted from the shared
 view state with waveforms on analysed audio lanes. Export keeps every audio
 track as its own stream, verified by decoding the result and checking each
-stream carries its own tone. Phase 9e (audio operations) landed with it:
+stream carries its own tone. Phase 9e (audio operations) landed with it, and
+its one gap is now closed: the visual selection reaches the host, so the
+audio commands act on what is selected rather than on the playhead's clip.
+Phase 9e:
 `<Space>m`/`<Space>s`, `+`/`-`, `f`, `:gain`, `:fade`, `:normalize`,
 `:duck`. Phase 9f (transitions) and 9d (TUI) are what remain of the plan.
 Workspace builds; `just test` and `just lint` are green, and
@@ -148,9 +151,10 @@ transitions land in Phase 9f, and `gx`/`dax` wait on the same phase. `<`/`>`
 jump-point edge trims are parsed but not yet wired to a command; visual-mode
 track-object narrowing (typing `it`/`at` while a selection is live) is not
 implemented - operators in a `VISUAL*` mode act on the whole selection. The
-audio commands act on the clip under the playhead rather than on a visual
-selection, because the selection is not on the `Host` seam yet - the same
-missing seam `<Space>l` waits on.
+audio commands now act on the visual selection: `davimci_core::Selection`
+rides the `Host` seam, so `:gain`, `:fade`, `:normalize`, `:duck` and `+`/`-`
+apply to every clip the selection overlaps, as one undoable command, and fall
+back to the clip under the playhead when nothing is selected.
 
 In `davimci-analysis`: the editor now drives it. Every audio track is queued
 after an import, results arrive as waveforms on the next tick, and a change
@@ -168,7 +172,8 @@ into a fresh undo tree: the autosave log is a flat list of commands rather
 than a tree, so only a saved *project* carries its history.
 
 In `davimci-cli`: `<Space>l` (loop selection) is refused with a message,
-since the selection is not on the `Host` seam yet. Running a `:` command
+since the transport has no loop yet - the selection it needs is on the seam,
+but playback still runs to the end and stops. Running a `:` command
 clones the session to hand it between the app and the workspace.
 
 In `davimci-present` and `davimci-gui`: composition is software and integral

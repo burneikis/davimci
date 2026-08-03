@@ -6,7 +6,7 @@
 //! frontend that skipped this would be a second editor.
 
 use davimci_cmd::Session;
-use davimci_core::{ClipId, Frame, TrackId};
+use davimci_core::{ClipId, Frame, Selection, TrackId};
 use davimci_keys::engine::{Outcome, TransportCmd};
 use davimci_keys::{Engine, Key, Keymap, MediaIntent, Mode, ZoomIntent};
 use davimci_motion::{JumpConfig, Zoom};
@@ -27,8 +27,19 @@ use crate::waveform::{Waveform, Waveforms};
 pub trait Host {
     /// Run a submitted `:` line. Returning `Ok(None)` means "handled, nothing
     /// to say".
-    fn command(&mut self, line: &str, session: &mut Session) -> Result<Option<String>, AppError> {
-        let _ = session;
+    ///
+    /// `selection` is what the user had selected when the line was submitted
+    /// (spec §6.1), or `None` in `NORMAL` - the visual selection lives in
+    /// the key engine, and this is the seam that carries it to a host that
+    /// has the vocabulary but not the modes. Commands that act on "the clip"
+    /// fall back to the playhead when it is `None`.
+    fn command(
+        &mut self,
+        line: &str,
+        session: &mut Session,
+        selection: Option<&Selection>,
+    ) -> Result<Option<String>, AppError> {
+        let _ = (session, selection);
         Err(AppError::UnhandledCommand(line.to_string()))
     }
 
@@ -143,6 +154,9 @@ pub struct App {
     pending_pick: Option<MediaIntent>,
     /// The subtitle clip a frontend is editing the text of, if any.
     editing_text: Option<ClipId>,
+    /// The selection at the moment `:` was pressed, for the `:` line that
+    /// follows (spec §6.1).
+    pending_selection: Option<Selection>,
     quit: bool,
 }
 
@@ -165,6 +179,7 @@ impl App {
             command_line: None,
             pending_pick: None,
             editing_text: None,
+            pending_selection: None,
             quit: false,
         }
     }
@@ -188,9 +203,16 @@ impl App {
     pub fn replace_session(&mut self, session: Session) {
         self.session = session;
         self.engine.reset();
+        self.pending_selection = None;
         self.viewport = Viewport::new(self.viewport.columns(), self.viewport.rows());
         self.engine.set_zoom(self.viewport.zoom());
         self.follow();
+    }
+
+    /// The live visual selection, if any (spec §6.1). `None` in `NORMAL`.
+    #[must_use]
+    pub fn selection(&self) -> Option<Selection> {
+        self.engine.selection()
     }
 
     #[must_use]
@@ -321,7 +343,15 @@ impl App {
 
     /// Feed one key. The single entry point for every frontend's input path.
     pub fn key(&mut self, key: Key, host: &mut dyn Host) -> Response {
+        // Entering COMMAND clears the visual selection in the key engine
+        // (`:` is a mode change like any other), so what the user had
+        // selected is remembered here, before the key is fed, and handed to
+        // the host when the line is submitted.
+        let before = self.engine.selection();
         let fed = self.engine.feed(key, &mut self.session);
+        if self.engine.mode() == Mode::Command {
+            self.pending_selection = before;
+        }
         // Playback owns the playhead while it runs, so an interrupting bind
         // takes it back before anything is reported: otherwise the pacer
         // overwrites the motion on the next tick and the preview never moves
@@ -347,7 +377,16 @@ impl App {
                 // the host - so the clock is dropped unconditionally rather
                 // than parsed for (spec §3.2.1).
                 host.interrupt_transport(&self.session);
-                match host.command(&line, &mut self.session) {
+                // Read before the command runs: `:` mode has already left
+                // visual mode behind, so the selection is the one the user
+                // was looking at when they typed the line.
+                // Falling back to the live selection covers a frontend that
+                // submits a line without the `:` key ever being fed.
+                let selection = self
+                    .pending_selection
+                    .take()
+                    .or_else(|| self.engine.selection());
+                match host.command(&line, &mut self.session, selection.as_ref()) {
                     Ok(Some(msg)) => self.messages.push(Message::info(msg)),
                     Ok(None) => {}
                     Err(e) => self.messages.push(Message::error(e.to_string())),
@@ -366,6 +405,7 @@ impl App {
             }
             Event::CommandCancelled => {
                 self.command_line = None;
+                self.pending_selection = None;
                 Response::Continue
             }
             Event::MediaChosen(path) => {

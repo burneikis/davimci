@@ -576,6 +576,36 @@ fn gain_is_a_command_like_any_other() {
     );
 }
 
+/// A `:` command typed in VISUAL acts on every clip in the selection, and the
+/// whole set is one undoable command (spec §6.1).
+#[test]
+fn gain_applies_to_the_whole_visual_selection_as_one_command() {
+    let (mut app, mut editor) = editor();
+    // `l` lands on the next jump point, so the selection runs from frame 0
+    // to the head of clip "b": it overlaps "a" and "b" and never reaches
+    // "c".
+    feed(&mut app, &mut editor, "vl:");
+    app.event(Event::Command(":gain -6".into()), &mut editor);
+    let gains: Vec<f32> = app.session().timeline().tracks()[0]
+        .clips()
+        .iter()
+        .map(|c| c.props.gain_db)
+        .collect();
+    assert_eq!(gains, vec![-6.0, -6.0, 0.0]);
+
+    feed(&mut app, &mut editor, "u");
+    let gains: Vec<f32> = app.session().timeline().tracks()[0]
+        .clips()
+        .iter()
+        .map(|c| c.props.gain_db)
+        .collect();
+    assert_eq!(
+        gains,
+        vec![0.0, 0.0, 0.0],
+        "one u must undo the whole selection's gain"
+    );
+}
+
 /// `:fade out 100` at 60 fps is six frames, clamped to the clip.
 #[test]
 fn fade_takes_a_duration_in_milliseconds() {

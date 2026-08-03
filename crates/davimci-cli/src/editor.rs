@@ -15,7 +15,7 @@ use davimci_analysis::{FfprobeProber, ImportOptions, Placement, Prober};
 use davimci_app::{AppError, Host, JobState, JobUpdate, Message, Waveform};
 use davimci_backend::{PreviewScale, RenderBackend};
 use davimci_cmd::{EditCommand, Session};
-use davimci_core::{Frame, TrackId};
+use davimci_core::{Frame, Selection, TrackId};
 use davimci_keys::MediaIntent;
 use davimci_keys::engine::TransportCmd;
 use davimci_present::{Presentation, Presenter};
@@ -177,38 +177,63 @@ impl Editor {
         &mut self,
         cmd: &ExCommand,
         session: &mut Session,
+        selection: Option<&Selection>,
     ) -> Option<Result<String, CliError>> {
         match cmd {
-            ExCommand::Normalize { target_db } => Some(self.normalize(*target_db, session)),
-            ExCommand::Duck { track, db } => Some(self.duck(track, *db, session)),
+            ExCommand::Normalize { target_db } => {
+                Some(self.normalize(*target_db, session, selection))
+            }
+            ExCommand::Duck { track, db } => Some(self.duck(track, *db, session, selection)),
             _ => None,
         }
     }
 
-    fn normalize(&mut self, target_db: f32, session: &mut Session) -> Result<String, CliError> {
+    /// `:normalize` - each clip in the selection is measured and gained on
+    /// its own, since "the same loudness" is a per-clip statement; the whole
+    /// set is still one command, so one `u` undoes it.
+    fn normalize(
+        &mut self,
+        target_db: f32,
+        session: &mut Session,
+        selection: Option<&Selection>,
+    ) -> Result<String, CliError> {
         let fps = session.timeline().props.fps;
-        let (track, clip) = crate::audio::clip_under_playhead(session.timeline(), "normalize")?;
-        let analysis = self
-            .analyser
-            .analysis(track)
-            .ok_or(CliError::AnalysisNotReady(":normalize"))?;
-        let gain = crate::audio::normalize_gain(&clip, analysis, fps, target_db)
-            .ok_or(CliError::AnalysisNotReady(":normalize"))?;
-        session.exec(&crate::audio::gain(track, &clip, gain))?;
-        Ok(format!(
-            "{} normalised to {target_db} dB ({gain:+.1} dB)",
-            clip.label
-        ))
+        let clips = crate::audio::targets(session.timeline(), selection, "normalize")?;
+        let mut cmds = Vec::with_capacity(clips.len());
+        let mut last_gain = 0.0;
+        for (track, clip) in &clips {
+            let analysis = self
+                .analyser
+                .analysis(*track)
+                .ok_or(CliError::AnalysisNotReady(":normalize"))?;
+            let gain = crate::audio::normalize_gain(clip, analysis, fps, target_db)
+                .ok_or(CliError::AnalysisNotReady(":normalize"))?;
+            last_gain = gain;
+            cmds.push(crate::audio::gain(*track, clip, gain));
+        }
+        session.exec(&davimci_cmd::EditCommand::Sequence(cmds))?;
+        let what = crate::audio::describe(&clips);
+        Ok(if clips.len() == 1 {
+            format!("{what} normalised to {target_db} dB ({last_gain:+.1} dB)")
+        } else {
+            format!("{what} normalised to {target_db} dB")
+        })
     }
 
-    fn duck(&mut self, name: &str, db: f32, session: &mut Session) -> Result<String, CliError> {
+    fn duck(
+        &mut self,
+        name: &str,
+        db: f32,
+        session: &mut Session,
+        selection: Option<&Selection>,
+    ) -> Result<String, CliError> {
         let reference = session
             .timeline()
             .track_by_name(name)
             .map(|t| t.id)
             .ok_or_else(|| CliError::NoSuchTrack(name.to_string()))?;
-        let target = session.timeline().playhead().track;
-        if target == reference {
+        let targets = crate::audio::target_tracks(session.timeline(), selection);
+        if targets.contains(&reference) {
             return Err(CliError::NoSuchTrack(format!(
                 "{name}; a track cannot duck against itself"
             )));
@@ -218,13 +243,25 @@ impl Editor {
             .analysis(reference)
             .ok_or(CliError::AnalysisNotReady(":duck"))?;
         let spans = crate::audio::loud_spans(session.timeline(), reference, analysis);
-        let needed = crate::audio::duck_ids_needed(session.timeline(), target, &spans);
+        let needed: usize = targets
+            .iter()
+            .map(|t| crate::audio::duck_ids_needed(session.timeline(), *t, &spans))
+            .sum();
         let ids = session.reserve_ids(needed);
         let mut ids = ids.into_iter();
         // Built before anything is applied, so a duck that cannot land
         // leaves the timeline untouched (Phase 0 user-error policy).
-        let plan = crate::audio::duck_plan(session.timeline(), target, &spans, db, &mut ids)?;
-        session.exec(&plan)?;
+        let mut plans = Vec::with_capacity(targets.len());
+        for track in &targets {
+            plans.push(crate::audio::duck_plan(
+                session.timeline(),
+                *track,
+                &spans,
+                db,
+                &mut ids,
+            )?);
+        }
+        session.exec(&davimci_cmd::EditCommand::Sequence(plans))?;
         Ok(format!(
             "ducked by {db} dB under {} region(s) of {name}",
             spans.len()
@@ -443,13 +480,18 @@ impl Host for Editor {
         self.analyser.take_stale()
     }
 
-    fn command(&mut self, line: &str, session: &mut Session) -> Result<Option<String>, AppError> {
+    fn command(
+        &mut self,
+        line: &str,
+        session: &mut Session,
+        selection: Option<&Selection>,
+    ) -> Result<Option<String>, AppError> {
         // Export and audio commands never reach the workspace: it has
         // neither a backend nor the analysis.
         if let Ok(cmd) = crate::excmd::parse(line)
             && let Some(result) = self
                 .export_command(&cmd, session)
-                .or_else(|| self.audio_command(&cmd, session))
+                .or_else(|| self.audio_command(&cmd, session, selection))
         {
             return match result {
                 Ok(msg) => Ok(Some(msg)),
@@ -459,7 +501,9 @@ impl Host for Editor {
         // The app holds the live session; give it to the workspace so the
         // command acts on what the user can see.
         self.workspace.set_current_session(session.clone());
-        let outcome = self.workspace.run(line, OnRecovery::Discard);
+        let outcome = self
+            .workspace
+            .run_selected(line, OnRecovery::Discard, selection);
         // Take back whatever buffer is now current - possibly a different
         // timeline entirely.
         let after = self.workspace.current_session();
@@ -513,9 +557,9 @@ impl Host for Editor {
                 self.interrupt_transport(&session);
                 return;
             }
-            // Looping needs the visual selection, which lives in the key
-            // engine rather than the session; wiring it needs a selection on
-            // the `Host` seam (tracked, not silently ignored).
+            // The selection now reaches the host, but the transport has no
+            // loop: playback runs to the end and stops. Reported rather than
+            // silently ignored.
             TransportCmd::LoopSelection => Err("looping a selection is not wired up yet".into()),
         };
         match result {

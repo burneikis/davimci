@@ -5,7 +5,7 @@
 use davimci_app::{App, AppError, Event, Frontend, Host, NullHost, Response, Severity, Surface};
 use davimci_cmd::Session;
 use davimci_core::testing::fixture;
-use davimci_core::{Frame, Timeline};
+use davimci_core::{Frame, Selection, Timeline};
 use davimci_keys::Key;
 
 fn timeline() -> Timeline {
@@ -46,12 +46,20 @@ impl Frontend for Recorder {
 #[derive(Debug, Default)]
 struct TestHost {
     commands: Vec<String>,
+    /// The selection each `:` line arrived with (spec §6.1).
+    selections: Vec<Option<Selection>>,
     quit: bool,
 }
 
 impl Host for TestHost {
-    fn command(&mut self, line: &str, _s: &mut Session) -> Result<Option<String>, AppError> {
+    fn command(
+        &mut self,
+        line: &str,
+        _s: &mut Session,
+        selection: Option<&Selection>,
+    ) -> Result<Option<String>, AppError> {
         self.commands.push(line.to_string());
+        self.selections.push(selection.cloned());
         if line == "q" {
             self.quit = true;
         }
@@ -135,6 +143,40 @@ fn colon_opens_the_command_line_and_the_host_runs_the_line() {
         app.messages().current().map(|m| m.text.as_str()),
         Some("ran :w")
     );
+}
+
+#[test]
+fn a_colon_line_carries_the_visual_selection_to_the_host() {
+    let mut app = App::new(Session::new(timeline()));
+    let mut host = TestHost::default();
+    // `v` then `l` selects a range on V1; `:` clears the selection in the
+    // key engine, so the app must have remembered it (spec §6.1).
+    for k in Key::parse_str("vl") {
+        app.key(k, &mut host);
+    }
+    let live = app.selection().expect("visual mode has a selection");
+    app.key(Key::Char(':'), &mut host);
+    assert!(app.selection().is_none(), ": leaves visual mode");
+    app.event(Event::Command("gain 3".into()), &mut host);
+    assert_eq!(host.selections, [Some(live)]);
+
+    // A second line, typed with nothing selected, must not inherit it.
+    app.key(Key::Char(':'), &mut host);
+    app.event(Event::Command("gain 3".into()), &mut host);
+    assert_eq!(host.selections[1], None);
+}
+
+#[test]
+fn a_cancelled_colon_line_does_not_leak_its_selection_into_the_next_one() {
+    let mut app = App::new(Session::new(timeline()));
+    let mut host = TestHost::default();
+    for k in Key::parse_str("vl:") {
+        app.key(k, &mut host);
+    }
+    app.event(Event::CommandCancelled, &mut host);
+    app.key(Key::Char(':'), &mut host);
+    app.event(Event::Command("gain 3".into()), &mut host);
+    assert_eq!(host.selections, [None]);
 }
 
 #[test]
@@ -287,7 +329,12 @@ impl Host for TransportHost {
         self.calls.push("changed");
     }
 
-    fn command(&mut self, _line: &str, _s: &mut Session) -> Result<Option<String>, AppError> {
+    fn command(
+        &mut self,
+        _line: &str,
+        _s: &mut Session,
+        _selection: Option<&Selection>,
+    ) -> Result<Option<String>, AppError> {
         self.calls.push("command");
         Ok(None)
     }
