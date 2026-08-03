@@ -1,6 +1,6 @@
 - allow plugins that render smth / a window. e.g. something like which-key
-- backwards shuttle freezes
-- figure out how davinci can cleanly step framewise backwards, and shuttle backwards, we cant currently
+- backwards shuttle audio?
+- figure out how davinci resolve can cleanly step framewise backwards
 - figure out whats causing playback to break after doing a few seeks, or shuttles to the end or fast backwards etc
 - clean readme and mds
 - remove shit docblocks and comments
