@@ -201,8 +201,10 @@ fn jump_points_get_denser_as_zoom_increases() {
             .and_then(|r| r.frame())
     };
     assert_eq!(land_at(Zoom::OUT), Some(Frame(100)));
-    assert_eq!(land_at(Zoom::new(2)), Some(Frame(100))); // 256-frame spacing
-    assert_eq!(land_at(Zoom::new(4)), Some(Frame(64)));
+    // Spacing is 8 columns wide at every level, so it only gets finer than a
+    // 250-frame timeline well into the zoom range.
+    assert_eq!(land_at(Zoom::new(2)), Some(Frame(100)));
+    assert_eq!(land_at(Zoom::new(10)), Some(Frame(32)));
     assert_eq!(land_at(Zoom::MAX), Some(Frame(1)));
 }
 

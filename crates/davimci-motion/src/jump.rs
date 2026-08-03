@@ -52,6 +52,23 @@ impl Default for Zoom {
     }
 }
 
+/// Frames per column at [`Zoom::OUT`]. Each zoom level in halves it, so
+/// [`Zoom::MAX`] is one frame per column and cannot go finer.
+///
+/// This lives beside [`Zoom`] rather than in the viewport because the
+/// jump-point set is defined in terms of on-screen density (spec §3.2): a
+/// subdivision every N columns, whatever the zoom.
+pub const BASE_FRAMES_PER_COLUMN: u64 = 4096;
+
+/// Frames per column at `zoom`. Never zero, so a division by it is total.
+#[must_use]
+pub fn frames_per_column(zoom: Zoom) -> u64 {
+    BASE_FRAMES_PER_COLUMN
+        .checked_shr(u32::from(zoom.level()))
+        .unwrap_or(0)
+        .max(1)
+}
+
 /// Which sources contribute jump points (spec §3.2, `jump_point_density`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct JumpSources {
@@ -80,8 +97,14 @@ pub struct JumpConfig {
     pub sources: JumpSources,
     /// Zoom level at which evenly spaced subdivisions start appearing.
     pub subdivide_from: u8,
-    /// Subdivision spacing in frames at `subdivide_from`. Halves per level in.
-    pub base_spacing: u64,
+    /// Subdivision spacing measured in *screen columns*, not frames.
+    ///
+    /// Frames per column halves per zoom level, so a spacing fixed in frames
+    /// would explode in on-screen density as the user zooms in: at the level
+    /// subdivisions begin, the old 256-frame default was a quarter of a
+    /// column, i.e. hundreds of points inside one screen. Anchoring to
+    /// columns keeps the tick marks evenly spaced on the ruler at every zoom.
+    pub columns_per_subdivision: u32,
 }
 
 impl Default for JumpConfig {
@@ -89,7 +112,7 @@ impl Default for JumpConfig {
         Self {
             sources: JumpSources::default(),
             subdivide_from: 2,
-            base_spacing: 256,
+            columns_per_subdivision: 8,
         }
     }
 }
@@ -102,8 +125,14 @@ impl JumpConfig {
         if zoom.level() < self.subdivide_from {
             return None;
         }
-        let steps = u32::from(zoom.level() - self.subdivide_from);
-        let spacing = self.base_spacing.checked_shr(steps).unwrap_or(0).max(1);
+        // `fpc(zoom) * columns` for as long as a column is wider than a
+        // frame, then keeps halving so the finest levels reach one frame per
+        // point as spec §3.2 requires.
+        let spacing = BASE_FRAMES_PER_COLUMN
+            .saturating_mul(u64::from(self.columns_per_subdivision))
+            .checked_shr(u32::from(zoom.level()))
+            .unwrap_or(0)
+            .max(1);
         Some(Frame(spacing))
     }
 }
@@ -376,6 +405,27 @@ mod tests {
         assert_eq!(last as u64, tl.duration().get() + 1);
     }
 
+    /// Regression: subdivision spacing used to be fixed in frames, so two
+    /// `zi` presses on a long clip produced hundreds of points inside one
+    /// screen. Spacing is anchored to columns, so the on-screen density is
+    /// constant until a column is one frame wide.
+    #[test]
+    fn subdivision_density_per_screen_is_constant_while_a_column_spans_frames() {
+        let cfg = JumpConfig::default();
+        let columns = 200u64;
+        for level in cfg.subdivide_from..12 {
+            let zoom = Zoom::new(level);
+            let spacing = cfg.spacing(zoom).map_or(0, Frame::get);
+            assert!(spacing > 0, "no spacing at zoom {level}");
+            let per_screen = frames_per_column(zoom) * columns / spacing;
+            assert_eq!(
+                per_screen,
+                columns / u64::from(cfg.columns_per_subdivision),
+                "zoom {level} changed the on-screen subdivision density"
+            );
+        }
+    }
+
     #[test]
     fn the_point_set_is_deterministic() {
         let tl = tl();
@@ -451,7 +501,7 @@ mod tests {
         let first = cache.get(&tl, None, Zoom::OUT, &cfg, &[]).clone();
         assert_eq!(*cache.get(&tl, None, Zoom::OUT, &cfg, &[]), first);
 
-        let zoomed = cache.get(&tl, None, Zoom::new(4), &cfg, &[]).clone();
+        let zoomed = cache.get(&tl, None, Zoom::new(12), &cfg, &[]).clone();
         assert_ne!(zoomed, first);
 
         tl.markers.push(Marker {

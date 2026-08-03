@@ -19,7 +19,7 @@ fn the_normal_view_paints_a_stable_draw_list() {
     assert_eq!(
         summarise(&list),
         "Background=2 Clip=5 ClipLabel=5 Playhead=1 Ruler=1 Status=1 StatusLine=1 \
-TickMajor=5 TickMinor=27 TrackHeader=3 TrackLane=2 TrackLaneFocused=1 TrackName=3"
+TickMajor=5 TickMinor=3 TrackHeader=3 TrackLane=2 TrackLaneFocused=1 TrackName=3"
     );
 }
 

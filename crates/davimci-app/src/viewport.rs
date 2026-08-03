@@ -7,26 +7,16 @@
 //! the cross-frontend parity test relies on.
 
 use davimci_core::Frame;
+// Frames-per-column lives in `davimci-motion` beside `Zoom`, because the
+// jump-point set is defined in on-screen density (spec §3.2); the viewport
+// re-exports it as the frontends' entry point.
 use davimci_motion::Zoom;
-
-/// Frames per column at [`Zoom::OUT`]. Each zoom level in halves it, so
-/// [`Zoom::MAX`] is one frame per column and cannot go finer - there is
-/// nothing between two frames to show.
-pub const BASE_FRAMES_PER_COLUMN: u64 = 4096;
+pub use davimci_motion::{BASE_FRAMES_PER_COLUMN, frames_per_column};
 
 /// Columns of slack kept between the playhead and the viewport edge when
 /// scroll-follow kicks in, so `l` near the edge does not re-scroll on every
 /// press.
 pub const FOLLOW_MARGIN_COLUMNS: u32 = 4;
-
-/// Frames per column at `zoom`. Never zero, so a division by it is total.
-#[must_use]
-pub fn frames_per_column(zoom: Zoom) -> u64 {
-    BASE_FRAMES_PER_COLUMN
-        .checked_shr(u32::from(zoom.level()))
-        .unwrap_or(0)
-        .max(1)
-}
 
 /// Horizontal and vertical scroll state over a timeline.
 ///

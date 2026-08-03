@@ -19,7 +19,10 @@ mod props;
 mod tests;
 
 pub use error::MotionError;
-pub use jump::{JumpConfig, JumpPointCache, JumpPoints, JumpSources, Zoom};
+pub use jump::{
+    BASE_FRAMES_PER_COLUMN, JumpConfig, JumpPointCache, JumpPoints, JumpSources, Zoom,
+    frames_per_column,
+};
 pub use motion::{BuiltinMotion, Motion, MotionCtx};
 pub use object::{Object, TextObject};
 pub use predicate::{Answer, NoAnalysis, Predicate, PredicateIndex};

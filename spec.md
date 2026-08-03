@@ -65,6 +65,11 @@ Mode is shown in a status line near the playhead (e.g. `-- VISUAL (V1,A2) --`).
   configurable zoom level there are no subdivisions at all and `h`/`l` are
   purely clip- and marker-level; above it, subdivision spacing halves per level
   down to one frame.
+- Subdivision spacing is defined in **screen columns**, not frames: a
+  subdivision every `columns_per_subdivision` columns (default 8). Since frames
+  per column also halves per zoom level, the spacing halves per level as above
+  while the *on-screen* tick density stays constant, so zooming in twice never
+  turns a screen into hundreds of jump points.
 - Frame zero and the end of the timeline are always jump points.
 
 ### 3.2.1 Transport / playback
