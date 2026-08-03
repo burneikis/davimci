@@ -6,7 +6,8 @@ Configured like Neovim: `~/.config/davimci/init.lua`, a Lua scripting API,
 remappable keys, and hookable events.
 
 - [`spec.md`](spec.md) - what it is and how it behaves
-- [`plan.md`](plan.md) - how it gets built, and how it gets tested
+- [`plan.md`](plan.md) - what is left to build, and how it gets tested
+- [`changes.md`](changes.md) - what was built, and where it departed from the plan
 
 ## Status
 
@@ -15,10 +16,12 @@ the command layer, edits reproject the MLT graph, motions seek and present,
 playback and shuttle run off the audio clock, and the timeline is painted from
 shared view state with waveforms and filmstrips.
 
-Not yet done: the TUI frontend, Lua-registered transition types, `:set`,
-`<Space>l` (loop selection), `:analyze`, and edge trims with `<`/`>`. Built-in
-transitions are the only ones available. `plan.md` tracks the remaining phases;
-`todo.md` tracks the smaller gaps.
+Not yet done: the Lua config is written and tested but not yet loaded by the
+binary, so no user config takes effect. Also missing are the `:set` family,
+`<Space>l` (loop selection), `:analyze`, edge trims with `<`/`>`, sidecar and
+embedded subtitle export, Lua-registered transition types, and the TUI
+frontend. `plan.md` has the remaining work in dependency order; `todo.md` has
+the smaller gaps.
 
 ## Usage
 

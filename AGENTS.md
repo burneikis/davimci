@@ -3,13 +3,31 @@
 ## Source of truth
 
 `spec.md` defines behaviour: keybindings, modes, semantics, formats, the Lua
-config API. `plan.md` defines construction: crate boundaries, phase order, test
+config API. `plan.md` defines the construction still ahead: what is left to
+build, in dependency order, and how each piece is proved. Code implements both
+and defines neither.
 
-strategy. Code implements both and defines neither.
 If a task needs behaviour the spec does not cover, amend `spec.md` first, in
-the same change, and say so. If it needs work out of phase order, say why -
-usually it means a dependency was missed. When behaviour changes, `spec.md`
-and `plan.md` change alongside the code.
+the same change, and say so. If it needs work out of order, say why - usually
+it means a dependency was missed.
+
+Four documents, four jobs. Do not let them bleed into each other:
+
+| File | Holds | Never holds |
+|---|---|---|
+| `spec.md` | Behaviour and the config API | Progress, history |
+| `plan.md` | Work not yet done | Finished phases, retrospectives |
+| `changes.md` | What was built, and where it departed from the plan | Anything still outstanding |
+| `todo.md` | Loose ends too small to plan | Anything with a plan entry |
+
+When an item in `plan.md` is finished, strike it and write what it taught into
+`changes.md`, under the phase that produced it. `changes.md` is history:
+entries stay in the tense of the phase that wrote them and are not revised
+afterwards.
+
+The README describes the project, not its build log. Its status section is a
+short paragraph on what works plus a short list of what does not; it never
+grows into a per-feature table or a changelog.
 
 ## Architectural rules
 
