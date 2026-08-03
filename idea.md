@@ -1,4 +1,3 @@
-- fix laggy playback (is it perf or is the playback at wrong fps?)
 - prevent holding a key from lagging/freezing (when I hold h or l, it works for a bit, then starts freezing, it should instead move at a constant speed)
 - thumbnails in timeline
 - relative jump numbers
