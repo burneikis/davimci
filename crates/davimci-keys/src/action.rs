@@ -78,6 +78,40 @@ pub enum ZoomIntent {
     Reset,
 }
 
+/// What an action does to a running preview (spec §3.2.1).
+///
+/// Playback owns the playhead while it runs, so an action that reads or
+/// writes the playhead cannot share the clock with it: the pacer would
+/// overwrite a motion on the next tick and an edit would re-project a graph
+/// out from under a live consumer. Rather than hard-coding "seek keys pause",
+/// every action declares which it is, so a remapped or Lua-defined binding
+/// gets the same treatment as a built-in one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransportPolicy {
+    /// Stop the clock, commit the playhead where playback reached, then run.
+    Interrupt,
+    /// Run without touching the clock.
+    Keep,
+}
+
+impl TransportPolicy {
+    #[must_use]
+    pub fn interrupts(self) -> bool {
+        matches!(self, Self::Interrupt)
+    }
+
+    /// The stronger of two policies, for a compound action (a macro replay is
+    /// as interrupting as the most interrupting key in it).
+    #[must_use]
+    pub fn max(self, other: Self) -> Self {
+        if self.interrupts() || other.interrupts() {
+            Self::Interrupt
+        } else {
+            Self::Keep
+        }
+    }
+}
+
 /// A fully parsed key sequence, mode-agnostic. [`crate::engine::Engine`]
 /// gives it meaning against the current [`Mode`] and [`davimci_cmd::Session`].
 #[derive(Debug, Clone, PartialEq)]
@@ -157,11 +191,73 @@ pub enum Action {
     /// (spec §9.2). The id is opaque here on purpose: `davimci-keys` must not
     /// depend on `davimci-lua`, so the engine reports it back and the host
     /// invokes it.
-    Plugin(u32),
+    ///
+    /// `interrupt` is the binding's `{ interrupt = true }` option: a callback
+    /// is `Keep` by default because the grammar cannot know whether it edits.
+    Plugin {
+        id: u32,
+        interrupt: bool,
+    },
+    /// Stop playback and commit the playhead (spec §3.2.1). Unbound by
+    /// default; exists for user binds and `editor.interrupt_transport`.
+    InterruptTransport,
     /// `:`.
     EnterCommandMode,
     /// `Esc`.
     Escape,
+}
+
+impl Action {
+    /// What this action does to a running preview (spec §3.2.1).
+    #[must_use]
+    pub fn transport_policy(&self) -> TransportPolicy {
+        use TransportPolicy::{Interrupt, Keep};
+        match self {
+            // Everything that reads or writes the playhead, and every edit.
+            Self::Move { .. }
+            | Self::Verb { .. }
+            | Self::SplitCurrent
+            | Self::SplitAll
+            | Self::RippleDeleteClip
+            | Self::Paste { .. }
+            | Self::Replace
+            | Self::InsertMedia
+            | Self::AppendMedia
+            | Self::Undo
+            | Self::Redo
+            | Self::Repeat
+            | Self::MacroReplay(..)
+            | Self::JumpMark(_)
+            | Self::SwapVisualEnds
+            | Self::ToggleVisualTrack
+            | Self::TrimEdgeStep { .. }
+            | Self::GainAdjust(_)
+            | Self::CreateTransition
+            | Self::DeleteTransition
+            | Self::InterruptTransport => Interrupt,
+            // The transport family owns the clock itself; the rest is view
+            // state, mode state, or a bookmark, none of which fight the pacer.
+            Self::PlayPause
+            | Self::Shuttle { .. }
+            | Self::ShuttleStop
+            | Self::PreviewAndReturn
+            | Self::LoopSelection
+            | Self::Zoom(_)
+            | Self::SetMark(_)
+            | Self::MacroStart(_)
+            | Self::MacroStop
+            | Self::EnterVisual(_)
+            | Self::EnterCommandMode
+            | Self::Escape => Keep,
+            Self::Plugin { interrupt, .. } => {
+                if *interrupt {
+                    Interrupt
+                } else {
+                    Keep
+                }
+            }
+        }
+    }
 }
 
 /// What a bound key sequence resolves to before counts/registers/targets are

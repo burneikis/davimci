@@ -67,7 +67,7 @@ fn spec_9_2_keymaps_load_and_produce_bindings() {
         }))
     );
     // A function right-hand side becomes an opaque plugin id.
-    let Some(LeafAction::Standalone(Action::Plugin(id))) = find("<leader>e") else {
+    let Some(LeafAction::Standalone(Action::Plugin { id, .. })) = find("<leader>e") else {
         panic!("leader mapping must be a plugin callback");
     };
 
@@ -211,7 +211,7 @@ fn the_keymap_from_spec_9_3_queues_the_motion_it_names() {
         .iter()
         .find(|(k, _)| *k == Key::parse_str("]a"))
         .expect("]a bound");
-    let LeafAction::Standalone(Action::Plugin(id)) = leaf else {
+    let LeafAction::Standalone(Action::Plugin { id, .. }) = leaf else {
         panic!("]a must be a plugin callback");
     };
     let requests = rt.invoke(*id).unwrap();
@@ -645,7 +645,7 @@ fn a_throwing_keymap_callback_is_disabled_and_queues_nothing() {
         "#,
     );
     let overrides = rt.keymap_overrides();
-    let LeafAction::Standalone(Action::Plugin(id)) = overrides[0].1.clone() else {
+    let LeafAction::Standalone(Action::Plugin { id, .. }) = overrides[0].1.clone() else {
         panic!("expected a plugin binding");
     };
     let e = rt.invoke(id).expect_err("callback throws");
@@ -834,4 +834,57 @@ fn the_runtime_is_debug_printable_for_diagnostics() {
     exec(&rt, SPEC_9_5);
     let s = format!("{rt:?}");
     assert!(s.contains("youtube_1080p"), "{s}");
+}
+
+/// spec §9.2: a callback binding opts into interrupting playback; without
+/// the option it keeps the clock, because the grammar cannot know whether
+/// the Lua function edits.
+#[test]
+fn spec_section_9_2_a_keymap_opts_into_interrupting_playback() {
+    let rt = rt();
+    exec(
+        &rt,
+        r#"
+        local map = require("davimci.keymap").map
+        map("normal", "gh", function() end, { interrupt = true })
+        map("normal", "gk", function() end)
+        "#,
+    );
+    let overrides = rt.keymap_overrides();
+    let policy = |lhs: &str| {
+        let (_, leaf) = overrides
+            .iter()
+            .find(|(k, _)| *k == Key::parse_str(lhs))
+            .expect("bound");
+        let LeafAction::Standalone(action) = leaf else {
+            panic!("{lhs} must be a standalone action");
+        };
+        action.transport_policy()
+    };
+    assert!(policy("gh").interrupts());
+    assert!(!policy("gk").interrupts());
+}
+
+/// spec §9.9: plugins and string bindings can pause playback explicitly.
+#[test]
+fn spec_section_9_9_interrupt_transport_is_callable_and_bindable() {
+    assert_eq!(
+        crate::request::parse_editor_command("editor.interrupt_transport"),
+        Some(Action::InterruptTransport)
+    );
+    let rt = rt();
+    exec(
+        &rt,
+        r#"
+        require("davimci.keymap").map("normal", "<C-c>", "editor.interrupt_transport")
+        require("davimci.editor").interrupt_transport()
+        "#,
+    );
+    assert_eq!(
+        rt.take_requests(),
+        vec![Request::Edit(Action::InterruptTransport)]
+    );
+    let overrides = rt.keymap_overrides();
+    assert!(overrides.iter().any(|(k, l)| *k == Key::parse_str("<C-c>")
+        && *l == LeafAction::Standalone(Action::InterruptTransport)));
 }

@@ -98,7 +98,8 @@ pub(crate) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
 fn keymap_module(lua: &Lua, state: &Shared) -> mlua::Result<Table> {
     let t = lua.create_table()?;
     let st = Rc::clone(state);
-    let map = lua.create_function(move |_, (mode, lhs, rhs): (String, String, Value)| {
+    let map = lua.create_function(
+        move |_, (mode, lhs, rhs, opts): (String, String, Value, Option<Table>)| {
         let Some(mode) = parse_mode(&mode) else {
             return Err(err(LuaError::Config(format!(
                 "'{mode}' is not a mode (known: normal, visual, visual-line, visual-block, insert, command)"
@@ -133,10 +134,20 @@ fn keymap_module(lua: &Lua, state: &Shared) -> mlua::Result<Table> {
                 ))));
             }
         };
+        let interrupt = match &opts {
+            Some(t) => t.get::<Option<bool>>("interrupt")?.unwrap_or(false),
+            None => false,
+        };
         st.keymaps.retain(|b| !(b.mode == mode && b.keys == keys));
-        st.keymaps.push(KeyBinding { mode, keys, rhs });
+        st.keymaps.push(KeyBinding {
+            mode,
+            keys,
+            rhs,
+            interrupt,
+        });
         Ok(())
-    })?;
+        },
+    )?;
     t.set("map", map)?;
     Ok(t)
 }
@@ -409,6 +420,7 @@ fn editor_module(lua: &Lua, state: &Shared) -> mlua::Result<Table> {
         "paste",
         "paste_before",
         "play_pause",
+        "interrupt_transport",
     ] {
         let st = Rc::clone(state);
         let f = lua.create_function(move |_, _: Variadic<Value>| {

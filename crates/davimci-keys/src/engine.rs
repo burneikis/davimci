@@ -16,7 +16,7 @@ use davimci_motion::{
     Scope, TextObject, TimeRange, Zoom,
 };
 
-use crate::action::{Action, Operator, Target, ZoomIntent};
+use crate::action::{Action, Operator, Target, TransportPolicy, ZoomIntent};
 use crate::error::KeysError;
 use crate::key::Key;
 use crate::keymap::Keymap;
@@ -32,6 +32,10 @@ pub enum TransportCmd {
     ShuttleStop,
     PreviewAndReturn,
     LoopSelection,
+    /// Stop playback and commit the playhead (spec §3.2.1). Unlike
+    /// [`TransportCmd::PlayPause`] this never toggles: interrupting a stopped
+    /// transport does nothing.
+    Interrupt,
 }
 
 /// What a chosen media file is for (spec §3.2, `i`/`a`/`r`).
@@ -85,6 +89,27 @@ pub enum Outcome {
     NotImplemented(&'static str),
     /// Rejected: the message is user-facing text, never `Debug` output.
     Error(String),
+}
+
+/// One key's worth of result: what happened, and what it means for a running
+/// preview (spec §3.2.1).
+///
+/// The policy travels with the outcome rather than being looked up later
+/// because the host never sees the [`Action`]: only the engine knows which
+/// binding the keys resolved to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Feed {
+    pub outcome: Outcome,
+    pub transport: TransportPolicy,
+}
+
+impl Feed {
+    fn keep(outcome: Outcome) -> Self {
+        Self {
+            outcome,
+            transport: TransportPolicy::Keep,
+        }
+    }
 }
 
 /// Ties the key grammar to a live session. One `Engine` per open timeline.
@@ -153,26 +178,33 @@ impl Engine {
 
     /// Feed one key through the grammar and, once a sequence completes, run
     /// it against `session`.
-    pub fn feed(&mut self, key: Key, session: &mut Session) -> Outcome {
+    pub fn feed(&mut self, key: Key, session: &mut Session) -> Feed {
         // Vim always lets a bare `q` stop an active recording, regardless of
         // what the grammar would otherwise make of it.
         if key == Key::Char('q')
             && !self.parser.is_pending()
             && session.macros().recording().is_some()
         {
-            return match session.macros_mut().stop() {
+            return Feed::keep(match session.macros_mut().stop() {
                 Ok(r) => Outcome::MacroStopped(r),
                 Err(e) => Outcome::Error(e.to_string()),
-            };
+            });
         }
         if session.macros().recording().is_some() {
             session.macros_mut().push(key.to_token());
         }
         match self.parser.feed(key, &self.keymap, self.mode.mode()) {
-            Step::Pending => Outcome::Pending,
-            Step::Cancelled => Outcome::Mode(self.mode.escape()),
-            Step::Invalid => Outcome::Invalid,
-            Step::Complete(action) => self.execute(action, session),
+            Step::Pending => Feed::keep(Outcome::Pending),
+            Step::Cancelled => Feed::keep(Outcome::Mode(self.mode.escape())),
+            Step::Invalid => Feed::keep(Outcome::Invalid),
+            Step::Complete(action) => {
+                // Read the policy before running: `execute` consumes the
+                // action. A macro replay is `Interrupt` as a whole, so the
+                // keys it replays need no separate accounting.
+                let transport = action.transport_policy();
+                let outcome = self.execute(action, session);
+                Feed { outcome, transport }
+            }
         }
     }
 
@@ -287,7 +319,8 @@ impl Engine {
             Action::PreviewAndReturn => Outcome::Transport(TransportCmd::PreviewAndReturn),
             Action::LoopSelection => Outcome::Transport(TransportCmd::LoopSelection),
             Action::Zoom(intent) => Outcome::Zoom(intent),
-            Action::Plugin(id) => Outcome::Plugin(id),
+            Action::Plugin { id, .. } => Outcome::Plugin(id),
+            Action::InterruptTransport => Outcome::Transport(TransportCmd::Interrupt),
             Action::EnterCommandMode => {
                 let c = self.mode.enter(Mode::Command);
                 Outcome::Mode(c)
@@ -661,7 +694,7 @@ impl Engine {
         for _ in 0..count.max(1) {
             for tok in &tokens {
                 for key in Key::parse_str(tok) {
-                    out.push(self.feed(key, session));
+                    out.push(self.feed(key, session).outcome);
                 }
             }
         }

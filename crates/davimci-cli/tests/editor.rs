@@ -499,3 +499,58 @@ fn a_cancelled_picker_changes_nothing() {
     app.event(Event::MediaChosen("/m/new.mkv".into()), &mut editor);
     assert_eq!(app.session().timeline(), &before, "a stray file imported");
 }
+
+/// spec §3.2.1: a motion typed during playback pauses first, then lands, and
+/// the frame it lands on is the one shown. Regression: before the transport
+/// policy existed the motion applied and the next tick overwrote it, so `h`
+/// looked like it did nothing.
+#[test]
+fn a_motion_during_playback_pauses_and_then_lands() {
+    let (mut app, mut editor) = editor();
+    feed(&mut app, &mut editor, "  ");
+    for _ in 0..5 {
+        app.event(Event::Tick, &mut editor);
+    }
+    let during = app.session().timeline().playhead().frame;
+    assert!(during > davimci_core::Frame::ZERO);
+
+    // `<Left>` is the fixed one-frame motion (spec §11); `h` is a jump point.
+    feed(&mut app, &mut editor, "<Left>");
+    assert_eq!(editor.transport_state(), TransportState::Stopped);
+    let landed = app.session().timeline().playhead().frame;
+    assert_eq!(landed, davimci_core::Frame(during.0 - 1));
+
+    // The pacer has let go, so the preview shows where the motion landed...
+    assert_eq!(editor.presentation().and_then(|p| p.position), Some(landed));
+    // ...and no further tick moves it.
+    app.event(Event::Tick, &mut editor);
+    assert_eq!(app.session().timeline().playhead().frame, landed);
+}
+
+/// Zoom is view state, so watching a playing timeline while zooming is
+/// allowed (spec §3.2.1).
+#[test]
+fn zooming_during_playback_keeps_playing() {
+    let (mut app, mut editor) = editor();
+    feed(&mut app, &mut editor, "  ");
+    app.event(Event::Tick, &mut editor);
+    feed(&mut app, &mut editor, "zi");
+    assert_eq!(editor.transport_state(), TransportState::Playing);
+}
+
+/// An edit during playback stops the clock before the graph is re-projected
+/// under a live consumer (spec §3.2.1).
+#[test]
+fn an_edit_during_playback_pauses_before_reprojecting() {
+    let (mut app, mut editor) = editor();
+    feed(&mut app, &mut editor, "  ");
+    for _ in 0..5 {
+        app.event(Event::Tick, &mut editor);
+    }
+    feed(&mut app, &mut editor, "s");
+    assert_eq!(editor.transport_state(), TransportState::Stopped);
+    assert!(
+        app.session().timeline().tracks()[0].clips().len() > 3,
+        "the split did not apply"
+    );
+}

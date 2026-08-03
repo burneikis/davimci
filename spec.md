@@ -113,6 +113,33 @@ require("davimci.transport").configure({
 All transport keys are remappable like any other binding. A user who wants
 `<Space>` bare as play/pause simply loses it as leader and remaps.
 
+#### Interrupting playback
+
+A bind pressed during playback is **not** swallowed. Every action carries a
+transport policy:
+
+| Policy | Actions | Meaning |
+|---|---|---|
+| `interrupt` | motions, marks jumps, every edit, `u` / `Ctrl-r` / `.`, macro replay, media insert/append/replace | stop the clock first, then run |
+| `keep` | the transport family itself, `zi`/`zo`/`z0`, mark set, macro record start/stop, mode changes (`v`, `:`, `Esc`), Lua callbacks | run without touching the clock |
+
+An interrupt **commits** the playhead at the frame playback had reached, then
+runs the action from there; it discards a pending `<Space>p` return-to-origin,
+because the point of interrupting with a motion is to land where the motion
+says. Interrupting is idempotent and silent when nothing is playing.
+
+A `:` command line that edits interrupts unconditionally, before the command
+runs.
+
+The `interrupt_transport` action stops playback without running anything else.
+It has no default binding; it exists so a user bind, a `:` mapping, or a Lua
+callback can pause explicitly (`editor.interrupt_transport`, §9.9). A Lua
+keymap callback defaults to `keep` and opts in per binding:
+
+```lua
+map("normal", "gh", my_handler, { interrupt = true })
+```
+
 ### 3.3 Clip/edit-point motions
 
 | Key | Action |
@@ -411,6 +438,17 @@ Modes are named `normal`, `visual`, `visual-line`, `visual-block`, `insert`,
 in §9.9; an unknown name is rejected when the config loads, not when the key
 is first pressed.
 
+`map` takes an optional fourth argument, an options table. `interrupt = true`
+gives the binding the `interrupt` transport policy (§3.2.1), which is the way
+a Lua callback that edits stops playback before it runs:
+
+```lua
+map("normal", "gh", function() ... end, { interrupt = true })
+```
+
+A string right-hand side takes the policy of the `editor.*` command it names,
+so `{ interrupt = ... }` is only meaningful for a function.
+
 ### 9.3 Custom motions (predicate-based)
 
 ```lua
@@ -532,6 +570,7 @@ The `editor.*` commands bindable from a keymap or callable from a callback:
 | `editor.step_frame(n)` | `n` frames, sign gives direction |
 | `editor.step_jump_point(n)` | `n` jump points, sign gives direction |
 | `editor.play_pause` | `<Space><Space>` |
+| `editor.interrupt_transport` | stop playback, commit the playhead (§3.2.1) |
 | `editor.message(text)` | status-line message |
 
 A registered motion (§9.3) is a pure query: it receives a snapshot - the

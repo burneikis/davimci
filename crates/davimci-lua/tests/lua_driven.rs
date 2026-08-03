@@ -46,7 +46,7 @@ end)
 fn feed(engine: &mut Engine, session: &mut Session, rt: &Runtime, keys: &str) -> Vec<Outcome> {
     let mut out = Vec::new();
     for k in Key::parse_str(keys) {
-        let o = engine.feed(k, session);
+        let o = engine.feed(k, session).outcome;
         if let Outcome::Plugin(id) = o {
             for req in rt.invoke(id).unwrap_or_default() {
                 if let Request::Edit(action) = req {

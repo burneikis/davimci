@@ -431,6 +431,12 @@ impl Host for Editor {
             TransportCmd::ShuttleStop => {
                 self.transport.shuttle_stop(self.backend.as_mut(), &session)
             }
+            // An explicit `interrupt_transport` bind is the same code path
+            // the implicit interrupt takes, so the two cannot drift.
+            TransportCmd::Interrupt => {
+                self.interrupt_transport(&session);
+                return;
+            }
             // Looping needs the visual selection, which lives in the key
             // engine rather than the session; wiring it needs a selection on
             // the `Host` seam (tracked, not silently ignored).
@@ -439,6 +445,21 @@ impl Host for Editor {
         match result {
             Ok(msg) => self.notices.push(Message::info(msg)),
             Err(msg) => self.notices.push(Message::error(msg)),
+        }
+    }
+
+    fn interrupt_transport(&mut self, session: &Session) {
+        match self.transport.interrupt(self.backend.as_mut()) {
+            // Only repaint when something was actually running: the guard in
+            // `show_playhead` has just been released, and the app's own
+            // `playhead_moved` may not follow (an interrupt bind is not a
+            // motion).
+            Ok(true) => {
+                self.notices.push(Message::info("paused".to_string()));
+                self.show_playhead(session);
+            }
+            Ok(false) => {}
+            Err(e) => self.notices.push(Message::error(e)),
         }
     }
 

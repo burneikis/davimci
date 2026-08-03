@@ -266,3 +266,60 @@ fn a_later_import_leaves_the_viewport_alone() {
     app.event(Event::MediaChosen("clip.mp4".into()), &mut host);
     assert_eq!(app.viewport().zoom(), before.zoom());
 }
+
+/// spec §3.2.1: the host is told to drop the clock *before* it is asked to
+/// repaint, or the repaint is swallowed by the still-running pacer.
+#[derive(Debug, Default)]
+struct TransportHost {
+    calls: Vec<&'static str>,
+}
+
+impl Host for TransportHost {
+    fn interrupt_transport(&mut self, _s: &Session) {
+        self.calls.push("interrupt");
+    }
+
+    fn playhead_moved(&mut self, _s: &Session) {
+        self.calls.push("moved");
+    }
+
+    fn timeline_changed(&mut self, _s: &Session) {
+        self.calls.push("changed");
+    }
+
+    fn command(&mut self, _line: &str, _s: &mut Session) -> Result<Option<String>, AppError> {
+        self.calls.push("command");
+        Ok(None)
+    }
+}
+
+#[test]
+fn spec_section_3_2_1_a_motion_interrupts_playback_before_repainting() {
+    let mut app = App::new(Session::new(timeline()));
+    let mut host = TransportHost::default();
+    app.key(Key::Char('l'), &mut host);
+    assert_eq!(host.calls, vec!["interrupt", "moved"]);
+}
+
+#[test]
+fn spec_section_3_2_1_zoom_and_mode_changes_leave_playback_running() {
+    let mut app = App::new(Session::new(timeline()));
+    let mut host = TransportHost::default();
+    for k in Key::parse_str("ziv") {
+        app.key(k, &mut host);
+    }
+    assert!(
+        !host.calls.contains(&"interrupt"),
+        "zoom/visual took the clock: {:?}",
+        host.calls
+    );
+}
+
+#[test]
+fn spec_section_3_2_1_an_ex_command_interrupts_before_it_runs() {
+    let mut app = App::new(Session::new(timeline()));
+    let mut host = TransportHost::default();
+    app.event(Event::Command("w".to_string()), &mut host);
+    assert_eq!(host.calls.first(), Some(&"interrupt"));
+    assert!(host.calls.contains(&"command"));
+}

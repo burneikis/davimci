@@ -135,6 +135,7 @@ pub fn parse_editor_command(rhs: &str) -> Option<Action> {
             register: None,
         },
         "play_pause" => Action::PlayPause,
+        "interrupt_transport" => Action::InterruptTransport,
         "step_frame" | "step_jump_point" => {
             let n = count(arg)?;
             if n == 0 {

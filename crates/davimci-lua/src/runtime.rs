@@ -174,7 +174,12 @@ impl Runtime {
             .filter_map(|b| {
                 let action = match &b.rhs {
                     Rhs::Command(c) => parse_editor_command(c)?,
-                    Rhs::Callback(id) => Action::Plugin(*id),
+                    // A callback keeps the clock unless the binding opted in:
+                    // the grammar cannot tell whether Lua will edit.
+                    Rhs::Callback(id) => Action::Plugin {
+                        id: *id,
+                        interrupt: b.interrupt,
+                    },
                 };
                 Some((b.keys.clone(), LeafAction::Standalone(action)))
             })

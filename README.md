@@ -114,6 +114,7 @@ it is linked dynamically, since davimci is GPL-3.0 over LGPL-2.1 MLT.
 | Editor assembly: workspace + backend + presenter + transport behind one `Host` | implemented, tested |
 | Transport: play/pause, shuttle with rate stepping, preview-and-return | implemented, tested |
 | Playback moves the playhead off the audio clock, never through the undo log | implemented, tested |
+| Binds during playback: motions and edits interrupt and commit, zoom keeps playing | implemented, tested |
 | Edits reproject the render graph; motions seek and present | implemented, tested |
 | Windowed shell: `eframe` window, `DrawList` rasteriser, video texture | implemented, runs |
 | egui key translation, including `Space` and Control chords | implemented, tested |

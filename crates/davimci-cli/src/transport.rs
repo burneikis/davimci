@@ -138,6 +138,27 @@ impl Transport {
         Ok(format!("shuttle {rate:+}x"))
     }
 
+    /// Stop playback because something else wants the playhead (spec §3.2.1).
+    ///
+    /// Unlike [`Transport::play_pause`] this never toggles, and unlike
+    /// [`Transport::preview_and_return`] it *commits*: a motion typed during
+    /// `<Space>p` means "go here", so the pending return-to-origin is dropped
+    /// rather than fighting the motion for the playhead.
+    ///
+    /// Returns whether anything was actually running, so the caller can stay
+    /// silent when it was not.
+    pub fn interrupt(&mut self, backend: &mut dyn RenderBackend) -> Result<bool, String> {
+        if self.state == TransportState::Stopped {
+            return Ok(false);
+        }
+        if backend.is_previewing() {
+            backend.preview_stop().map_err(|e| e.to_string())?;
+        }
+        self.state = TransportState::Stopped;
+        self.return_to = None;
+        Ok(true)
+    }
+
     /// Stop everything, leaving the playhead where it is. Unbound by
     /// default; available for users who map a dedicated stop key.
     pub fn shuttle_stop(
@@ -301,6 +322,37 @@ mod tests {
                 Fps::FPS_60,
             ),
         )
+    }
+
+    #[test]
+    fn interrupt_stops_playback_and_reports_whether_anything_was_running() {
+        let (mut b, _) = parts();
+        let s = session();
+        let mut t = Transport::new();
+        // Nothing playing: silent no-op, so a bind never announces a pause
+        // that did not happen (spec §3.2.1).
+        assert!(!t.interrupt(&mut b).unwrap());
+        t.play_pause(&mut b, &s, PreviewScale::Full).unwrap();
+        assert!(t.interrupt(&mut b).unwrap());
+        assert!(!b.is_previewing());
+        assert_eq!(t.state(), TransportState::Stopped);
+        // A shuttle is motion too, so it is interrupted the same way.
+        t.shuttle(true, &mut b, &s).unwrap();
+        assert!(t.interrupt(&mut b).unwrap());
+        assert_eq!(t.state(), TransportState::Stopped);
+    }
+
+    /// spec §3.2.1: interrupting commits where playback reached, so a
+    /// `<Space>p` preview interrupted by a motion does not snap back.
+    #[test]
+    fn interrupt_discards_a_pending_preview_return() {
+        let (mut b, _) = parts();
+        let s = session();
+        let mut t = Transport::new();
+        t.preview_and_return(&mut b, &s, PreviewScale::Full)
+            .unwrap();
+        assert!(t.interrupt(&mut b).unwrap());
+        assert_eq!(t.stop(&mut b, &s).unwrap(), None);
     }
 
     #[test]

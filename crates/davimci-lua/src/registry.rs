@@ -29,6 +29,10 @@ pub struct KeyBinding {
     pub mode: Mode,
     pub keys: Vec<Key>,
     pub rhs: Rhs,
+    /// `{ interrupt = true }`: give this binding the `Interrupt` transport
+    /// policy (spec §3.2.1, §9.2). Only meaningful for a callback; a command
+    /// string takes the policy of the action it names.
+    pub interrupt: bool,
 }
 
 /// A `davimci.textobject.register` definition (spec §9.4).

@@ -1,6 +1,8 @@
 //! End-to-end headless tests: feed keys, assert the resulting timeline
 //! (plan.md Phase 4 testing).
 
+#![allow(clippy::expect_used)]
+
 use davimci_cmd::Session;
 use davimci_core::testing::fixture;
 
@@ -18,7 +20,7 @@ fn scene() -> (Engine, Session) {
 fn feed(engine: &mut Engine, session: &mut Session, s: &str) -> Vec<Outcome> {
     Key::parse_str(s)
         .into_iter()
-        .map(|k| engine.feed(k, session))
+        .map(|k| engine.feed(k, session).outcome)
         .collect()
 }
 
@@ -158,4 +160,85 @@ fn z0_is_a_zoom_reset_not_a_count_then_timeline_start() {
         "{out:?}"
     );
     assert_eq!(s.timeline().playhead().frame, davimci_core::Frame(50));
+}
+
+/// spec §3.2.1: a bind pressed during playback either takes the clock or
+/// deliberately leaves it alone. Table-driven so a new action cannot quietly
+/// inherit the wrong default - `transport_policy` is exhaustive, so adding
+/// one without a decision fails to compile, and this pins the decisions.
+#[test]
+fn spec_section_3_2_1_transport_policy_per_key() {
+    use crate::engine::TransportCmd;
+    let interrupt = [
+        "h", "l", "w", "b", "G", "x", "s", "dd", "yyp", "u", "<C-r>", ".", "'a", "+", "@a",
+    ];
+    let keep = [
+        "<Space><Space>",
+        "H",
+        "L",
+        "<Space>p",
+        "<Space>l",
+        "zi",
+        "z0",
+        "ma",
+        "v",
+        ":",
+        "<Esc>",
+    ];
+    for keys in interrupt {
+        let (mut e, mut s) = scene();
+        let last = Key::parse_str(keys)
+            .into_iter()
+            .map(|k| e.feed(k, &mut s))
+            .last()
+            .expect("a key");
+        assert!(
+            last.transport.interrupts(),
+            "'{keys}' should stop playback: {last:?}"
+        );
+    }
+    for keys in keep {
+        let (mut e, mut s) = scene();
+        let last = Key::parse_str(keys)
+            .into_iter()
+            .map(|k| e.feed(k, &mut s))
+            .last()
+            .expect("a key");
+        assert!(
+            !last.transport.interrupts(),
+            "'{keys}' should leave playback running: {last:?}"
+        );
+    }
+    // The explicit action exists but is unbound by default, like
+    // `shuttle_stop` (spec §3.2.1).
+    let (mut e, mut s) = scene();
+    let fed = e.execute_action(crate::action::Action::InterruptTransport, &mut s);
+    assert_eq!(fed, Outcome::Transport(TransportCmd::Interrupt));
+    assert!(
+        crate::action::Action::InterruptTransport
+            .transport_policy()
+            .interrupts()
+    );
+}
+
+/// A Lua callback keeps the clock unless its binding opted in (spec §9.2).
+#[test]
+fn a_plugin_binding_interrupts_only_when_it_opted_in() {
+    use crate::action::Action;
+    assert!(
+        !Action::Plugin {
+            id: 1,
+            interrupt: false
+        }
+        .transport_policy()
+        .interrupts()
+    );
+    assert!(
+        Action::Plugin {
+            id: 1,
+            interrupt: true
+        }
+        .transport_policy()
+        .interrupts()
+    );
 }

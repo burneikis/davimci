@@ -37,6 +37,16 @@ pub trait Host {
         let _ = cmd;
     }
 
+    /// Stop playback and commit the playhead where it reached (spec §3.2.1).
+    ///
+    /// Called before an action whose [`davimci_keys::TransportPolicy`] is
+    /// `Interrupt` reports its effects, so the host has already let go of the
+    /// clock by the time `playhead_moved` asks it to repaint. Idempotent: an
+    /// interrupt with nothing playing does nothing.
+    fn interrupt_transport(&mut self, session: &Session) {
+        let _ = session;
+    }
+
     /// Invoke Lua callback `id` and execute whatever it asks for.
     fn plugin(&mut self, id: u32, session: &mut Session) -> Result<Option<String>, AppError> {
         let _ = (id, session);
@@ -257,8 +267,15 @@ impl App {
 
     /// Feed one key. The single entry point for every frontend's input path.
     pub fn key(&mut self, key: Key, host: &mut dyn Host) -> Response {
-        let outcome = self.engine.feed(key, &mut self.session);
-        self.apply_outcome(outcome, host)
+        let fed = self.engine.feed(key, &mut self.session);
+        // Playback owns the playhead while it runs, so an interrupting bind
+        // takes it back before anything is reported: otherwise the pacer
+        // overwrites the motion on the next tick and the preview never moves
+        // (spec §3.2.1).
+        if fed.transport.interrupts() {
+            host.interrupt_transport(&self.session);
+        }
+        self.apply_outcome(fed.outcome, host)
     }
 
     /// Handle one frontend event.
@@ -271,6 +288,11 @@ impl App {
             }
             Event::Command(line) => {
                 self.command_line = None;
+                // A `:` line may edit or swap the timeline, neither of which
+                // is survivable mid-playback, and the ex vocabulary lives in
+                // the host - so the clock is dropped unconditionally rather
+                // than parsed for (spec §3.2.1).
+                host.interrupt_transport(&self.session);
                 match host.command(&line, &mut self.session) {
                     Ok(Some(msg)) => self.messages.push(Message::info(msg)),
                     Ok(None) => {}
