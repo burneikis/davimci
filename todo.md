@@ -2,7 +2,6 @@
 - backwards shuttle audio?
 - figure out how davinci resolve can cleanly step framewise backwards
 - figure out whats causing playback to break after doing a few seeks, or shuttles to the end or fast backwards etc
-- clean readme and mds
-- remove shit docblocks and comments
 - refactor all for clean code
 - write docs, guide for the codebase and how to learn it
+- plugin support for gui windows
