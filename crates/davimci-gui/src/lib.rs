@@ -14,7 +14,6 @@
 //! lists rather than reinterpret them, and the layout, painting and input
 //! tests keep passing with no display present.
 
-pub mod cmdline;
 #[cfg(feature = "window")]
 pub mod egui_shell;
 pub mod input;
@@ -24,7 +23,6 @@ pub mod picker;
 pub mod shell;
 pub mod subtitle;
 
-pub use cmdline::{CommandLine, CommandLineEvent};
 pub use input::{Modifiers, RawKey, translate};
 pub use layout::{Layout, Metrics, paint as paint_view};
 pub use paint::{Chrome, DrawList, Fill, Paint, Rect, TextRole, VideoQuad};

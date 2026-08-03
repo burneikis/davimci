@@ -145,6 +145,55 @@ fn colon_opens_the_command_line_and_the_host_runs_the_line() {
     );
 }
 
+/// The line is drawn from the view as it is typed, with a caret and with the
+/// candidates for the word under it (idea.md). A frontend that had to keep
+/// its own buffer would be a second `:` line.
+#[test]
+fn the_colon_line_is_visible_as_it_is_typed_and_suggests_completions() {
+    let mut app = App::new(Session::new(timeline()));
+    let mut host = TestHost::default();
+    app.set_command_candidates(
+        ["b", "bn", "bp", "w"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect(),
+    );
+    for k in Key::parse_str(":b") {
+        app.key(k, &mut host);
+    }
+    let line = app.view().command_line.expect("an open line");
+    assert_eq!(line.buffer, "b");
+    assert_eq!(line.cursor, 1);
+    assert_eq!(line.completions, ["b", "bn", "bp"]);
+
+    // Tab completes to the longest common prefix, and the view follows.
+    app.key(Key::parse_str("n")[0], &mut host);
+    let line = app.view().command_line.expect("an open line");
+    assert_eq!(line.buffer, "bn");
+    assert!(
+        line.completions.is_empty(),
+        "a suggestion identical to the line is noise: {:?}",
+        line.completions
+    );
+
+    // Enter submits what was typed, and the line closes.
+    app.key(Key::parse_str("<Enter>")[0], &mut host);
+    assert_eq!(host.commands, ["bn"]);
+    assert!(app.view().command_line.is_none());
+}
+
+/// Esc abandons the line without running it.
+#[test]
+fn escape_abandons_the_colon_line() {
+    let mut app = App::new(Session::new(timeline()));
+    let mut host = TestHost::default();
+    for k in Key::parse_str(":wq<Esc>") {
+        app.key(k, &mut host);
+    }
+    assert!(host.commands.is_empty(), "an abandoned line must not run");
+    assert!(app.view().command_line.is_none());
+}
+
 #[test]
 fn a_colon_line_carries_the_visual_selection_to_the_host() {
     let mut app = App::new(Session::new(timeline()));
@@ -177,6 +226,111 @@ fn a_cancelled_colon_line_does_not_leak_its_selection_into_the_next_one() {
     app.key(Key::Char(':'), &mut host);
     app.event(Event::Command("gain 3".into()), &mut host);
     assert_eq!(host.selections, [None]);
+}
+
+/// A held `h`/`l` arrives as a burst of repeats in one poll. Every repeat
+/// must move the playhead, but the host - which seeks and decodes - is asked
+/// once, or the editor spends the whole burst decoding frames nobody sees
+/// and appears to freeze (idea.md, spec §14).
+#[test]
+fn a_burst_of_repeated_keys_seeks_once_and_still_moves_every_step() {
+    let mut app = App::new(Session::new(timeline()));
+    app.resize(Surface {
+        columns: 300,
+        rows: 4,
+    });
+    let mut fe = Recorder {
+        // 8 repeats of `l` in one poll, then quit.
+        events: Key::parse_str("llllllll")
+            .into_iter()
+            .map(Event::Key)
+            .collect(),
+        ..Recorder::default()
+    };
+    let mut host = TransportHost::default();
+    app.run(&mut fe, &mut host).expect("loop runs");
+    assert_eq!(
+        host.calls.iter().filter(|c| **c == "moved").count(),
+        1,
+        "one seek per batch, not one per repeat: {:?}",
+        host.calls
+    );
+    assert!(
+        app.session().timeline().playhead().frame > Frame::ZERO,
+        "the burst still moved the playhead"
+    );
+}
+
+/// The app asks for pictures of the video clips on screen, nearest the
+/// playhead first, and publishes what the host decodes (idea.md).
+#[derive(Debug, Default)]
+struct ThumbHost {
+    asked: Vec<davimci_app::ThumbnailRequest>,
+    publish: Vec<(davimci_core::ClipId, davimci_app::Thumbnail)>,
+}
+
+impl Host for ThumbHost {
+    fn request_thumbnails(&mut self, wanted: &[davimci_app::ThumbnailRequest]) {
+        self.asked = wanted.to_vec();
+    }
+
+    fn thumbnails(&mut self) -> Vec<(davimci_core::ClipId, davimci_app::Thumbnail)> {
+        std::mem::take(&mut self.publish)
+    }
+}
+
+#[test]
+fn thumbnails_are_asked_for_per_visible_video_clip_and_drawn_when_they_arrive() {
+    let mut app = App::new(Session::new(timeline()));
+    app.resize(Surface {
+        columns: 300,
+        rows: 4,
+    });
+    let mut host = ThumbHost::default();
+    app.event(Event::Tick, &mut host);
+
+    assert!(!host.asked.is_empty(), "no clip was asked about");
+    assert!(
+        host.asked
+            .iter()
+            .all(|r| app.session().timeline().find_clip(r.clip).is_some()),
+        "asked about a clip that is not in the timeline"
+    );
+    // Nearest the playhead first: the host may only afford one per tick.
+    let first = host.asked[0];
+    assert!(
+        host.asked
+            .iter()
+            .all(|r| r.at.get().abs_diff(0) >= first.at.get()),
+        "requests are not ordered outwards from the playhead"
+    );
+    // Audio lanes are never asked about - there is nothing to picture.
+    let audio = davimci_core::testing::track_id(app.session().timeline(), "A1");
+    let audio_clips = davimci_core::testing::clip_ids(app.session().timeline(), "A1");
+    let _ = audio;
+    assert!(
+        host.asked.iter().all(|r| !audio_clips.contains(&r.clip)),
+        "an audio clip was asked for a picture"
+    );
+
+    // Publish one, and it reaches the view.
+    let clip = first.clip;
+    host.publish = vec![(
+        clip,
+        davimci_app::Thumbnail::new(2, 2, vec![255u8; 16], first.source_in),
+    )];
+    app.event(Event::Tick, &mut host);
+    let drawn = app
+        .view()
+        .tracks
+        .iter()
+        .flat_map(|t| t.clips.clone())
+        .find(|c| c.id == clip)
+        .expect("the clip is on screen");
+    assert!(
+        drawn.thumbnail.is_some(),
+        "a decoded thumbnail is not drawn"
+    );
 }
 
 #[test]

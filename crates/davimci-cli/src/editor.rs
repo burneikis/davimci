@@ -12,7 +12,9 @@
 //! writes what is on screen, and `:bn` hands back a different timeline.
 
 use davimci_analysis::{FfprobeProber, ImportOptions, Placement, Prober};
-use davimci_app::{AppError, Host, JobState, JobUpdate, Message, Waveform};
+use davimci_app::{
+    AppError, Host, JobState, JobUpdate, Message, Thumbnail, ThumbnailRequest, Waveform,
+};
 use davimci_backend::{PreviewScale, RenderBackend};
 use davimci_cmd::{EditCommand, Session};
 use davimci_core::{Frame, Selection, TrackId};
@@ -27,6 +29,11 @@ use crate::excmd::{ExCommand, ExOutcome};
 use crate::export::{ExportEvent, Exporter};
 use crate::transport::{Transport, TransportState};
 use crate::workspace::Workspace;
+
+/// How tall a timeline thumbnail is decoded, in pixels. A lane is 40 px in
+/// the default metrics; a picture taller than its lane is pixels thrown away
+/// at draw time.
+const THUMBNAIL_HEIGHT: u32 = 40;
 
 /// Everything the editor needs that is not the frontend.
 pub struct Editor {
@@ -50,6 +57,12 @@ pub struct Editor {
     job_updates: Vec<JobUpdate>,
     /// Envelopes finished since the app last collected them.
     pending_waveforms: Vec<(TrackId, Waveform)>,
+    /// Thumbnails decoded since the app last collected them.
+    pending_thumbnails: Vec<(davimci_core::ClipId, Thumbnail)>,
+    /// The next clip to decode a thumbnail for, if the app asked for any.
+    /// One per tick: a thumbnail is a decode, and the preview needs the
+    /// decoder more than the timeline does.
+    thumbnail_queue: Option<ThumbnailRequest>,
     /// Job ids the app has already been told about.
     started_jobs: Vec<u64>,
     /// How picked media is inspected. Injected so the picker path is
@@ -88,6 +101,8 @@ impl Editor {
             exporter: Exporter::new(),
             job_updates: Vec::new(),
             pending_waveforms: Vec::new(),
+            pending_thumbnails: Vec::new(),
+            thumbnail_queue: None,
             started_jobs: Vec::new(),
             prober: Box::new(FfprobeProber),
             quit: false,
@@ -435,6 +450,36 @@ impl Editor {
         }
     }
 
+    /// Decode at most one queued thumbnail, and only while the transport is
+    /// idle.
+    ///
+    /// The backend has one playhead: pulling a thumbnail seeks it, so doing
+    /// this during playback would fight the pacer for the decoder and stutter
+    /// the picture. When it does run, the playhead is put back where it was.
+    fn decode_one_thumbnail(&mut self, session: &Session) {
+        let Some(req) = self.thumbnail_queue.take() else {
+            return;
+        };
+        if self.transport.state() != TransportState::Stopped {
+            return;
+        }
+        // Quarter-res is already small; the thumbnail is scaled down again to
+        // a lane's height, so a decode never carries a full frame around.
+        let decoded = self
+            .backend
+            .seek(req.at)
+            .and_then(|()| self.backend.frame_at(req.at, PreviewScale::Quarter));
+        // A thumbnail that cannot be decoded leaves the clip drawn plain
+        // rather than putting an error in the status line: the media may be
+        // offline, which the clip's own colour already says.
+        if let Ok(frame) = decoded {
+            let thumb = crate::thumbnail::downscale(&frame, THUMBNAIL_HEIGHT, req.source_in);
+            self.pending_thumbnails.push((req.clip, thumb));
+        }
+        // Put the decoder back where the user left it.
+        self.show_playhead(session);
+    }
+
     /// Pull and compose the frame at the playhead. Only meaningful when the
     /// transport is idle: during playback the pacer owns the picture.
     fn show_playhead(&mut self, session: &Session) {
@@ -616,6 +661,19 @@ impl Host for Editor {
             let snapshot = session.clone();
             self.show_playhead(&snapshot);
         }
+        let snapshot = session.clone();
+        self.decode_one_thumbnail(&snapshot);
+    }
+
+    fn request_thumbnails(&mut self, wanted: &[ThumbnailRequest]) {
+        // Only the first is kept: the app orders them by distance from the
+        // playhead and asks again every tick, so the queue re-forms around
+        // wherever the user has since looked.
+        self.thumbnail_queue = wanted.first().copied();
+    }
+
+    fn thumbnails(&mut self) -> Vec<(davimci_core::ClipId, Thumbnail)> {
+        std::mem::take(&mut self.pending_thumbnails)
     }
 
     fn timeline_changed(&mut self, session: &Session) {

@@ -58,6 +58,12 @@ Mode is shown in a status line near the playhead (e.g. `-- VISUAL (V1,A2) --`).
   Zoomed in → jump points are dense (near frame-level).
 - Jump points are rendered as small tick marks on the timeline ruler so the
   user can see where `h`/`l` will land before pressing it.
+- Ticks at clip boundaries carry a **relative number**: the count of jump
+  points between them and the playhead, so `3l` visibly lands on the tick
+  labelled `3`, exactly as vim's `relativenumber` shows how far `3j` goes.
+  The point at or before the playhead is `0`, and direction is read from the
+  side of the playhead a tick is on rather than from a sign. Numbers are
+  dropped where two would overlap, so a zoomed-out ruler stays legible.
 - Configurable: `jump_point_density`, and whether jump points snap to
   (clip bounds | markers | beat-detected audio peaks | silence boundaries).
 - Density is **monotonic in zoom**: zooming in only ever adds points, never
@@ -802,6 +808,11 @@ Deliberately coarse; the only hard requirement:
   proxies) permitted to hit it on expensive sources.
 - Editing operations (split, ripple delete, undo) should feel instant on a
   timeline of a few hundred clips.
+- **A held key moves at a constant speed.** Key repeats arrive faster than a
+  frame can be decoded, so one batch of input costs one seek and one
+  reprojection however many repeats it contains: every repeat moves the
+  playhead, and only the frame the user ends on is decoded. Holding `h` or
+  `l` must never lag behind the keyboard and must never stall.
 - Predicate motions are indexed lookups and must not scan (§10.2).
 
 Anything beyond this is measured before it is optimized.
@@ -845,14 +856,34 @@ order.
   decided above the frontends - a frontend reports where the click landed and
   nothing else.
 
+- **Clip labels are readable.** A clip's label is drawn over whatever fills
+  its lane - envelope, thumbnail or plain colour - never under it.
+
+- **Thumbnails:** a video clip shows a picture of its first visible frame,
+  at the head of the clip and clipped to it. Thumbnails are decoded by the
+  host, not the frontend: the app asks for the visible clips that have none,
+  nearest the playhead first, and the host decodes what it can afford -
+  never while the transport is running, since the preview needs the decoder
+  more. A thumbnail belongs to a clip's in-point, so trimming or slipping a
+  clip drops the picture until a new one arrives, and a clip with no picture
+  is drawn plain rather than black.
+
 ### 15.3 Command line
 
-- `:` opens it and the frontend owns the keyboard until it is submitted or
+- `:` opens it and it owns the keyboard until the line is submitted or
   cancelled. Esc cancels; backspacing over the leading `:` also cancels.
+- The buffer, the caret position and the history live in the view state, not
+  in a frontend: the line is **drawn as it is typed**, with a caret at the
+  cursor, and two frontends cannot show two different lines.
 - History is per session, deduplicated only against the immediately previous
   entry, browsed with Up/Down.
 - Tab completes the word under the cursor to the *longest common prefix* of
   the matches, and never guesses between two commands.
+- The candidates for the word under the cursor are **shown** while typing, on
+  their own row above the line. A single candidate identical to what is
+  already typed is not shown, and a list too long for the row is truncated
+  with a count of what was left out. The vocabulary comes from the host, so
+  completion covers exactly the commands that exist.
 
 ### 15.4 Media picker and text editing
 

@@ -5,7 +5,7 @@
 //! the part a rendering regression actually lives in. The shell that uploads
 //! these to `egui`/`wgpu` adds nothing that could change *what* is drawn.
 
-use davimci_app::{Severity, ViewState};
+use davimci_app::{Severity, Thumbnail, ViewState};
 
 /// A rectangle in window pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +47,8 @@ pub enum Fill {
     TickMinor,
     StatusLine,
     CommandLine,
+    /// The `:` line's caret.
+    Caret,
     Video,
     /// The media picker's panel, drawn over everything else.
     ModalBackground,
@@ -61,8 +63,12 @@ pub enum TextRole {
     ClipLabel,
     Status,
     Command,
+    /// Suggestions for the word being typed on the `:` line.
+    Completion,
     Message(Severity),
     Timecode,
+    /// A jump point's distance from the playhead, on the ruler (spec §11).
+    RulerNumber,
     /// The picker's title, e.g. "insert media".
     ModalTitle,
     /// What the user has typed to filter the list.
@@ -75,6 +81,7 @@ pub enum TextRole {
 impl Paint {
     /// True for anything belonging to a modal overlay.
     ///
+    ///
     /// The video is a texture the shell draws between the world and the
     /// overlays, so a modal has to be identifiable to stay on top of it -
     /// otherwise the picker is painted and then covered by the video.
@@ -84,6 +91,7 @@ impl Paint {
             Self::Rect { fill, .. } => {
                 matches!(fill, Fill::ModalBackground | Fill::ModalSelected)
             }
+            Self::Image { .. } => false,
             Self::Text { role, .. } => matches!(
                 role,
                 TextRole::ModalTitle
@@ -107,6 +115,14 @@ pub enum Paint {
         role: TextRole,
         text: String,
     },
+    /// A clip's thumbnail, drawn inside its lane. Carried by handle rather
+    /// than by pixels: the shell caches one texture per clip, and a draw
+    /// list is built every frame.
+    Image {
+        rect: Rect,
+        clip: davimci_core::ClipId,
+        image: Thumbnail,
+    },
 }
 
 /// An ordered list of paint operations, back to front.
@@ -126,6 +142,22 @@ impl DrawList {
             role,
             text: text.into(),
         });
+    }
+
+    pub fn image(&mut self, rect: Rect, clip: davimci_core::ClipId, image: Thumbnail) {
+        self.ops.push(Paint::Image { rect, clip, image });
+    }
+
+    /// Every thumbnail in the list, in draw order - what a shell uploads.
+    #[must_use]
+    pub fn images(&self) -> Vec<(Rect, davimci_core::ClipId, &Thumbnail)> {
+        self.ops
+            .iter()
+            .filter_map(|op| match op {
+                Paint::Image { rect, clip, image } => Some((*rect, *clip, image)),
+                _ => None,
+            })
+            .collect()
     }
 
     #[must_use]
@@ -223,6 +255,7 @@ pub fn summarise(list: &DrawList) -> String {
         let key = match op {
             Paint::Rect { fill, .. } => format!("{fill:?}"),
             Paint::Text { role, .. } => format!("{role:?}"),
+            Paint::Image { .. } => "Thumbnail".to_string(),
         };
         *counts.entry(key).or_insert(0usize) += 1;
     }

@@ -36,6 +36,7 @@ pub fn fill_color(fill: Fill) -> Color32 {
         Fill::TickMinor => Color32::from_rgb(80, 80, 90),
         Fill::StatusLine => Color32::from_rgb(18, 18, 22),
         Fill::CommandLine => Color32::from_rgb(28, 28, 34),
+        Fill::Caret => Color32::from_rgb(240, 240, 250),
         Fill::Video => Color32::BLACK,
         // The picker sits over the timeline, so it is opaque rather than
         // tinted: a half-transparent file list is unreadable over clips.
@@ -52,7 +53,9 @@ pub fn text_style(role: TextRole) -> (Color32, f32) {
         TextRole::ClipLabel => (Color32::from_rgb(235, 235, 245), 11.0),
         TextRole::Status => (Color32::from_rgb(210, 210, 220), 13.0),
         TextRole::Command => (Color32::from_rgb(240, 240, 250), 13.0),
+        TextRole::Completion => (Color32::from_rgb(150, 190, 240), 12.0),
         TextRole::Timecode => (Color32::from_rgb(240, 220, 90), 12.0),
+        TextRole::RulerNumber => (Color32::from_rgb(120, 120, 135), 10.0),
         TextRole::Message(Severity::Info) => (Color32::from_rgb(180, 210, 180), 13.0),
         TextRole::Message(Severity::Warning) => (Color32::from_rgb(230, 200, 120), 13.0),
         TextRole::Message(Severity::Error) => (Color32::from_rgb(240, 140, 140), 13.0),
@@ -71,21 +74,74 @@ fn to_egui(rect: Rect) -> EguiRect {
     )
 }
 
+/// One uploaded texture per clip thumbnail.
+///
+/// A draw list is rebuilt every frame, so uploading its thumbnails every
+/// frame would spend the GPU on pictures that did not change. The cache is
+/// keyed by clip and invalidated by the thumbnail's own in-point, which is
+/// what changes when a clip is trimmed or slipped.
+#[derive(Default)]
+pub struct ThumbnailTextures {
+    textures:
+        std::collections::HashMap<davimci_core::ClipId, (davimci_core::Frame, egui::TextureHandle)>,
+}
+
+impl std::fmt::Debug for ThumbnailTextures {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ThumbnailTextures")
+            .field("len", &self.textures.len())
+            .finish()
+    }
+}
+
+impl ThumbnailTextures {
+    fn texture(
+        &mut self,
+        ctx: &egui::Context,
+        clip: davimci_core::ClipId,
+        thumb: &davimci_app::Thumbnail,
+    ) -> egui::TextureHandle {
+        if let Some((source_in, tex)) = self.textures.get(&clip)
+            && *source_in == thumb.source_in
+        {
+            return tex.clone();
+        }
+        let image = egui::ColorImage::from_rgba_unmultiplied(
+            [thumb.width as usize, thumb.height as usize],
+            &thumb.rgba,
+        );
+        let tex = ctx.load_texture(
+            format!("davimci-thumb-{}", clip.get()),
+            image,
+            egui::TextureOptions::LINEAR,
+        );
+        self.textures.insert(clip, (thumb.source_in, tex.clone()));
+        tex
+    }
+
+    /// Forget textures for clips the list no longer draws.
+    pub fn retain(&mut self, list: &DrawList) {
+        let live: Vec<davimci_core::ClipId> =
+            list.images().into_iter().map(|(_, clip, _)| clip).collect();
+        self.textures.retain(|clip, _| live.contains(clip));
+    }
+}
+
 /// Draw a whole [`DrawList`] into `ui`, offset by the panel's origin.
 ///
 /// `Fill::Video` is skipped: the video pane is a texture, drawn by
 /// [`draw_video`], and painting a black rectangle over it would hide it.
-pub fn draw(list: &DrawList, ui: &Ui, origin: Pos2) {
-    draw_ops(list, ui, origin, false);
+pub fn draw(list: &DrawList, ui: &Ui, origin: Pos2, thumbs: &mut ThumbnailTextures) {
+    draw_ops(list, ui, origin, false, thumbs);
 }
 
 /// Draw only the modal overlay. The shell calls this *after* the video
 /// texture, so a picker is never hidden behind the picture.
 pub fn draw_modal(list: &DrawList, ui: &Ui, origin: Pos2) {
-    draw_ops(list, ui, origin, true);
+    draw_ops(list, ui, origin, true, &mut ThumbnailTextures::default());
 }
 
-fn draw_ops(list: &DrawList, ui: &Ui, origin: Pos2, modal: bool) {
+fn draw_ops(list: &DrawList, ui: &Ui, origin: Pos2, modal: bool, thumbs: &mut ThumbnailTextures) {
     let painter = ui.painter();
     for op in list.ops().iter().filter(|op| op.is_modal() == modal) {
         match op {
@@ -97,6 +153,16 @@ fn draw_ops(list: &DrawList, ui: &Ui, origin: Pos2, modal: bool) {
                     to_egui(*rect).translate(origin.to_vec2()),
                     CornerRadius::ZERO,
                     fill_color(*fill),
+                );
+            }
+            Paint::Image { rect, clip, image } => {
+                let tex = thumbs.texture(ui.ctx(), *clip, image);
+                let r = to_egui(*rect).translate(origin.to_vec2());
+                painter.with_clip_rect(r).image(
+                    tex.id(),
+                    r,
+                    EguiRect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                    Color32::WHITE,
                 );
             }
             Paint::Text { rect, role, text } => {

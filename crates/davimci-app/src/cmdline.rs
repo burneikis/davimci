@@ -1,8 +1,8 @@
-//! The `:` line: editing, history, and completion (plan.md Phase 9c).
+//! The `:` line: editing, history, and completion (plan.md Phase 9a).
 //!
-//! State only - no widget, no window. The shell draws the buffer and the
-//! caret; what a key does to them is decided here, so the TUI can reuse it
-//! verbatim rather than growing a second `:` line.
+//! State only - no widget, no window. A frontend forwards the keystrokes it
+//! receives while `COMMAND` is open and draws what the view state says; what
+//! a key *does* is decided here, so no two frontends can grow two `:` lines.
 
 /// Command-line state.
 #[derive(Debug, Clone, Default)]
@@ -15,6 +15,24 @@ pub struct CommandLine {
     /// Candidate vocabulary for Tab completion, supplied by the host: the
     /// GUI does not own the ex-command vocabulary (`davimci-cli` does).
     candidates: Vec<String>,
+}
+
+/// One keystroke the `:` line understands. A frontend names the key; what it
+/// means to the buffer is decided here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandKey {
+    Char(char),
+    Backspace,
+    Left,
+    Right,
+    /// Older history entry.
+    Up,
+    /// Newer history entry.
+    Down,
+    /// Complete to the longest common prefix.
+    Tab,
+    Submit,
+    Cancel,
 }
 
 /// What the shell should do after a key.
@@ -61,6 +79,30 @@ impl CommandLine {
         self.buffer.clear();
         self.cursor = 0;
         self.browsing = None;
+    }
+
+    /// Leave the `:` line, keeping the history.
+    pub fn close(&mut self) {
+        self.buffer.clear();
+        self.cursor = 0;
+        self.browsing = None;
+    }
+
+    /// What a frontend draws: the buffer, the caret, and the suggestions.
+    ///
+    /// A single completion identical to what is already typed is dropped:
+    /// echoing the line back as a suggestion tells the user nothing.
+    #[must_use]
+    pub fn view(&self) -> crate::view::CommandLineView {
+        let completions: Vec<String> = match self.completions().as_slice() {
+            [only] if *only == self.word() => Vec::new(),
+            all => all.iter().map(|c| (*c).to_string()).collect(),
+        };
+        crate::view::CommandLineView {
+            buffer: self.buffer.clone(),
+            cursor: self.cursor,
+            completions,
+        }
     }
 
     pub fn insert(&mut self, c: char) -> CommandLineEvent {
@@ -179,6 +221,33 @@ impl CommandLine {
         self.buffer.push_str(&common);
         self.cursor = self.buffer.len();
         CommandLineEvent::Editing
+    }
+
+    /// Apply one keystroke.
+    pub fn key(&mut self, key: CommandKey) -> CommandLineEvent {
+        match key {
+            CommandKey::Char(c) => self.insert(c),
+            CommandKey::Backspace => self.backspace(),
+            CommandKey::Left => {
+                self.left();
+                CommandLineEvent::Editing
+            }
+            CommandKey::Right => {
+                self.right();
+                CommandLineEvent::Editing
+            }
+            CommandKey::Up => {
+                self.history_prev();
+                CommandLineEvent::Editing
+            }
+            CommandKey::Down => {
+                self.history_next();
+                CommandLineEvent::Editing
+            }
+            CommandKey::Tab => self.complete(),
+            CommandKey::Submit => self.submit(),
+            CommandKey::Cancel => self.cancel(),
+        }
     }
 
     /// The word under completion: everything after the last space.

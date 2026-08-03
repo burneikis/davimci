@@ -19,6 +19,7 @@ pub mod editor;
 pub mod error;
 pub mod excmd;
 pub mod export;
+pub mod thumbnail;
 pub mod transport;
 #[cfg(feature = "window")]
 pub mod window;
@@ -32,7 +33,7 @@ pub use audio::{FadeEnd, duck_plan, loud_spans};
 pub use autosave::{Autosave, OnRecovery, Recovery};
 pub use editor::Editor;
 pub use error::CliError;
-pub use excmd::{ExCommand, ExOutcome, parse};
+pub use excmd::{ExCommand, ExOutcome, parse, vocabulary};
 pub use export::{ExportEvent, Exporter};
 pub use transport::{Transport, TransportState};
 #[cfg(feature = "window")]

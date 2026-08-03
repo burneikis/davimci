@@ -11,11 +11,13 @@ use davimci_keys::engine::{Outcome, TransportCmd};
 use davimci_keys::{Engine, Key, Keymap, MediaIntent, Mode, ZoomIntent};
 use davimci_motion::{JumpConfig, Zoom};
 
+use crate::cmdline::{CommandKey, CommandLine, CommandLineEvent};
 use crate::error::AppError;
 use crate::frontend::{Event, Frontend, Response, Surface};
 use crate::job::{JobList, JobUpdate};
 use crate::message::{Message, MessageQueue};
-use crate::view::{ViewInputs, ViewState};
+use crate::thumbnail::{Thumbnail, ThumbnailRequest, Thumbnails};
+use crate::view::{CommandLineView, ViewInputs, ViewState};
 use crate::viewport::Viewport;
 use crate::waveform::{Waveform, Waveforms};
 
@@ -127,10 +129,45 @@ pub trait Host {
         Vec::new()
     }
 
+    /// Clips on screen with no current thumbnail, nearest the playhead
+    /// first.
+    ///
+    /// The app decides *what* is worth a picture - it owns the viewport -
+    /// and the host decides *when* it can afford to decode one. A host that
+    /// ignores this simply shows plain clips.
+    fn request_thumbnails(&mut self, wanted: &[ThumbnailRequest]) {
+        let _ = wanted;
+    }
+
+    /// Thumbnails decoded since the last call. Arrives like job progress,
+    /// because decoding finishes whenever it finishes.
+    fn thumbnails(&mut self) -> Vec<(ClipId, Thumbnail)> {
+        Vec::new()
+    }
+
     /// True once the host wants the loop to stop (`:q` succeeded).
     fn wants_quit(&self) -> bool {
         false
     }
+}
+
+/// One key token as the `:` line reads it. `Ctrl` chords and anything the
+/// line has no meaning for are dropped rather than typed as text.
+fn command_key_of(key: Key) -> Option<CommandKey> {
+    use davimci_keys::Named;
+    Some(match key {
+        Key::Char(c) => CommandKey::Char(c),
+        Key::Named(Named::Space) => CommandKey::Char(' '),
+        Key::Named(Named::Enter) => CommandKey::Submit,
+        Key::Named(Named::Esc) => CommandKey::Cancel,
+        Key::Named(Named::Backspace) => CommandKey::Backspace,
+        Key::Named(Named::Tab) => CommandKey::Tab,
+        Key::Named(Named::Left) => CommandKey::Left,
+        Key::Named(Named::Right) => CommandKey::Right,
+        Key::Named(Named::Up) => CommandKey::Up,
+        Key::Named(Named::Down) => CommandKey::Down,
+        Key::Ctrl(_) => return None,
+    })
 }
 
 /// A host that does nothing, for tests and the headless frontend.
@@ -149,7 +186,12 @@ pub struct App {
     messages: MessageQueue,
     jobs: JobList,
     waveforms: Waveforms,
-    command_line: Option<String>,
+    thumbnails: Thumbnails,
+    /// The `:` line's buffer, history and completion vocabulary. Owned here
+    /// rather than in a frontend so every host shows the same line, with the
+    /// same completions, as it is typed.
+    command: CommandLine,
+    command_open: bool,
     /// What an `i`/`a`/`r` picker, if one is open, will do with its answer.
     pending_pick: Option<MediaIntent>,
     /// The subtitle clip a frontend is editing the text of, if any.
@@ -157,6 +199,11 @@ pub struct App {
     /// The selection at the moment `:` was pressed, for the `:` line that
     /// follows (spec §6.1).
     pending_selection: Option<Selection>,
+    /// Set while a batch of events is being drained: the expensive host
+    /// notifications are recorded here and issued once at the end.
+    batching: bool,
+    deferred_moved: bool,
+    deferred_changed: bool,
     quit: bool,
 }
 
@@ -176,10 +223,15 @@ impl App {
             messages: MessageQueue::default(),
             jobs: JobList::default(),
             waveforms: Waveforms::default(),
-            command_line: None,
+            thumbnails: Thumbnails::default(),
+            command: CommandLine::new(crate::cmdline::default_candidates()),
+            command_open: false,
             pending_pick: None,
             editing_text: None,
             pending_selection: None,
+            batching: false,
+            deferred_moved: false,
+            deferred_changed: false,
             quit: false,
         }
     }
@@ -300,11 +352,12 @@ impl App {
             mode: self.engine.mode(),
             selection: self.engine.mode_state().visual(),
             pending: String::new(),
-            command_line: self.command_line.clone(),
+            command_line: self.command_open.then(|| self.command.view()),
             message: self.messages.current().cloned(),
             job: self.jobs.foreground().cloned(),
             recording: self.session.macros().recording(),
             waveforms: (!self.waveforms.is_empty()).then_some(&self.waveforms),
+            thumbnails: (!self.thumbnails.is_empty()).then_some(&self.thumbnails),
         };
         ViewState::build(&self.session, self.viewport, &self.jump_cfg, &inputs)
     }
@@ -333,7 +386,7 @@ impl App {
             .map_or_else(|| self.session.timeline().playhead().track, |t| t.id);
         match self.session.set_playhead(frame, track) {
             Ok(()) => {
-                host.playhead_moved(&self.session);
+                self.note_moved(host);
                 self.follow();
             }
             Err(e) => self.messages.push(Message::error(e.to_string())),
@@ -343,6 +396,15 @@ impl App {
 
     /// Feed one key. The single entry point for every frontend's input path.
     pub fn key(&mut self, key: Key, host: &mut dyn Host) -> Response {
+        // While the `:` line is open it owns the keyboard, exactly as a
+        // modal does. A frontend that routes modal keys itself sends
+        // `Event::CommandKey`; a scripted or terminal frontend just sends
+        // keys, and they must not reach the grammar.
+        if self.command_open
+            && let Some(k) = command_key_of(key)
+        {
+            return self.command_key(k, host);
+        }
         // Entering COMMAND clears the visual selection in the key engine
         // (`:` is a mode change like any other), so what the user had
         // selected is remembered here, before the key is fed, and handed to
@@ -362,6 +424,39 @@ impl App {
         self.apply_outcome(fed.outcome, host)
     }
 
+    /// Handle a batch of frontend events, telling the host *once* about the
+    /// stale graph and the moved playhead at the end.
+    ///
+    /// This is the entry point a frontend should use for one frame's worth
+    /// of input. A held `h`/`l` delivers a burst of key repeats; seeking and
+    /// decoding once per repeat is what made holding a key stall and then
+    /// freeze, so the burst moves the playhead as many times as it says and
+    /// costs one picture (spec §14).
+    ///
+    /// Returns one [`Response`] per event handled, in order, so a frontend
+    /// can still open a picker or a `:` line.
+    pub fn drain<I: IntoIterator<Item = Event>>(
+        &mut self,
+        events: I,
+        host: &mut dyn Host,
+    ) -> Vec<Response> {
+        let was_batching = self.batching;
+        self.batching = true;
+        let mut out = Vec::new();
+        for event in events {
+            let response = self.event(event, host);
+            let quit = response == Response::Quit;
+            out.push(response);
+            if quit {
+                break;
+            }
+        }
+        if !was_batching {
+            self.flush_notifications(host);
+        }
+        out
+    }
+
     /// Handle one frontend event.
     pub fn event(&mut self, event: Event, host: &mut dyn Host) -> Response {
         match event {
@@ -370,8 +465,9 @@ impl App {
                 self.resize(s);
                 Response::Continue
             }
+            Event::CommandKey(key) => self.command_key(key, host),
             Event::Command(line) => {
-                self.command_line = None;
+                self.close_command_line();
                 // A `:` line may edit or swap the timeline, neither of which
                 // is survivable mid-playback, and the ex vocabulary lives in
                 // the host - so the clock is dropped unconditionally rather
@@ -394,8 +490,8 @@ impl App {
                 // A `:` line can edit (`:relink`) or swap the whole timeline
                 // (`:e`, `:bn`), so the graph and the playhead are both
                 // assumed stale rather than diffed.
-                host.timeline_changed(&self.session);
-                host.playhead_moved(&self.session);
+                self.note_changed(host);
+                self.note_moved(host);
                 self.follow();
                 if host.wants_quit() {
                     self.quit = true;
@@ -404,7 +500,7 @@ impl App {
                 Response::Continue
             }
             Event::CommandCancelled => {
-                self.command_line = None;
+                self.close_command_line();
                 self.pending_selection = None;
                 Response::Continue
             }
@@ -429,8 +525,8 @@ impl App {
                         }
                         // Importing is an edit: the graph is stale and the
                         // frame under the playhead may have changed.
-                        host.timeline_changed(&self.session);
-                        host.playhead_moved(&self.session);
+                        self.note_changed(host);
+                        self.note_moved(host);
                         if let Some(m) = msg {
                             self.messages.push(Message::info(m));
                         }
@@ -478,8 +574,8 @@ impl App {
                 }) {
                     Ok(label) => {
                         self.messages.push(Message::info(label));
-                        host.timeline_changed(&self.session);
-                        host.playhead_moved(&self.session);
+                        self.note_changed(host);
+                        self.note_moved(host);
                     }
                     Err(e) => self.messages.push(Message::error(e.to_string())),
                 }
@@ -502,6 +598,10 @@ impl App {
                 for (track, waveform) in host.waveforms() {
                     self.waveforms.insert(track, waveform);
                 }
+                for (clip, thumbnail) in host.thumbnails() {
+                    self.thumbnails.insert(clip, thumbnail);
+                }
+                self.ask_for_thumbnails(host);
                 self.follow();
                 Response::Continue
             }
@@ -521,16 +621,16 @@ impl App {
         match outcome {
             Outcome::Pending | Outcome::Cancelled => {}
             // `:` is a mode change in `davimci-keys`, not a distinct outcome:
-            // the grammar knows only that COMMAND was entered. Owning the
-            // `:` line is the frontend's job, so the app hands it over here.
+            // the grammar knows only that COMMAND was entered. The app owns
+            // the line itself; the frontend is told to route keys to it.
             Outcome::Mode(change) => {
                 if change.to == Mode::Command {
-                    self.command_line = Some(String::new());
+                    self.open_command_line();
                     self.follow();
                     return Response::OpenCommandLine;
                 }
                 if change.from == Mode::Command {
-                    self.command_line = None;
+                    self.close_command_line();
                 }
             }
             Outcome::Invalid => self.messages.push(Message::warning(
@@ -569,7 +669,7 @@ impl App {
                 return Response::EditText { clip, text };
             }
             Outcome::EnterCommandMode => {
-                self.command_line = Some(String::new());
+                self.open_command_line();
                 self.follow();
                 return Response::OpenCommandLine;
             }
@@ -584,13 +684,135 @@ impl App {
             Outcome::Error(msg) => self.messages.push(Message::error(msg)),
         }
         if edited {
-            host.timeline_changed(&self.session);
+            self.note_changed(host);
         }
         if moved {
-            host.playhead_moved(&self.session);
+            self.note_moved(host);
         }
         self.follow();
         Response::Continue
+    }
+
+    /// The vocabulary Tab completes against. The app does not own the ex
+    /// vocabulary (`davimci-cli` does), so the host supplies it once at
+    /// startup and it is shown to every frontend identically.
+    pub fn set_command_candidates(&mut self, candidates: Vec<String>) {
+        self.command.set_candidates(candidates);
+    }
+
+    /// The `:` line as it currently stands, if one is open.
+    #[must_use]
+    pub fn command_line(&self) -> Option<CommandLineView> {
+        self.command_open.then(|| self.command.view())
+    }
+
+    fn open_command_line(&mut self) {
+        self.command_open = true;
+        self.command.open();
+    }
+
+    fn close_command_line(&mut self) {
+        self.command_open = false;
+        self.command.close();
+    }
+
+    /// One keystroke into the open `:` line. A frontend names the key; the
+    /// app decides what it does and, on Enter, runs the line.
+    fn command_key(&mut self, key: CommandKey, host: &mut dyn Host) -> Response {
+        if !self.command_open {
+            // A stray command key with no line open would otherwise edit an
+            // invisible buffer and submit it later.
+            return Response::Continue;
+        }
+        match self.command.key(key) {
+            CommandLineEvent::Editing => Response::Continue,
+            CommandLineEvent::Submit(line) => self.event(Event::Command(line), host),
+            CommandLineEvent::Cancel => self.event(Event::CommandCancelled, host),
+        }
+    }
+
+    /// Ask the host for pictures of the visible clips that have none.
+    ///
+    /// Only video lanes, only what is on screen, and only what is missing or
+    /// stale: a thumbnail costs a decode, so asking for one the user cannot
+    /// see is a frame the preview does not get. Requests are ordered by
+    /// distance from the playhead, so a host that decodes one per tick fills
+    /// the screen outwards from where the user is looking.
+    fn ask_for_thumbnails(&mut self, host: &mut dyn Host) {
+        let tl = self.session.timeline();
+        let (from, to) = self.viewport.visible_range();
+        let playhead = tl.playhead().frame;
+        let mut visible: Vec<ClipId> = Vec::new();
+        let mut wanted: Vec<(u64, ThumbnailRequest)> = Vec::new();
+        for track in tl
+            .tracks()
+            .iter()
+            .skip(self.viewport.top_track())
+            .take(self.viewport.rows())
+            .filter(|t| t.kind == davimci_core::TrackKind::Video)
+        {
+            for clip in track
+                .clips()
+                .iter()
+                .filter(|c| c.end() > from && c.start < to)
+            {
+                visible.push(clip.id);
+                if self.thumbnails.get(clip.id, clip.source_in).is_some() {
+                    continue;
+                }
+                // Inside the clip, and inside the viewport: a clip whose
+                // head is scrolled off is pictured where it is visible.
+                let at = clip.start.max(from).min(Frame(clip.end().get() - 1));
+                let distance = at.get().abs_diff(playhead.get());
+                wanted.push((
+                    distance,
+                    ThumbnailRequest {
+                        clip: clip.id,
+                        at,
+                        source_in: clip.source_in,
+                    },
+                ));
+            }
+        }
+        // Pixels for clips that are gone are pixels nobody will ever draw.
+        self.thumbnails.retain(&visible);
+        if wanted.is_empty() {
+            return;
+        }
+        wanted.sort_by_key(|(d, _)| *d);
+        let requests: Vec<ThumbnailRequest> = wanted.into_iter().map(|(_, r)| r).collect();
+        host.request_thumbnails(&requests);
+    }
+
+    /// "The graph is stale" - issued now, or once at the end of the batch.
+    fn note_changed(&mut self, host: &mut dyn Host) {
+        if self.batching {
+            self.deferred_changed = true;
+        } else {
+            host.timeline_changed(&self.session);
+        }
+    }
+
+    /// "The playhead moved" - issued now, or once at the end of the batch.
+    fn note_moved(&mut self, host: &mut dyn Host) {
+        if self.batching {
+            self.deferred_moved = true;
+        } else {
+            host.playhead_moved(&self.session);
+        }
+    }
+
+    /// End a batch: tell the host once about everything it missed. Order is
+    /// the same as the unbatched path - the graph is rebuilt before a frame
+    /// is pulled from it.
+    fn flush_notifications(&mut self, host: &mut dyn Host) {
+        self.batching = false;
+        if std::mem::take(&mut self.deferred_changed) {
+            host.timeline_changed(&self.session);
+        }
+        if std::mem::take(&mut self.deferred_moved) {
+            host.playhead_moved(&self.session);
+        }
     }
 
     /// Scroll-follow: the playhead and the focused track are visible after
@@ -625,10 +847,14 @@ impl App {
 
     fn pump<F: Frontend>(&mut self, frontend: &mut F, host: &mut dyn Host) -> Result<(), AppError> {
         loop {
-            for event in frontend.poll() {
-                if self.event(event, host) == Response::Quit {
-                    return Ok(());
-                }
+            // One batch, one seek. A held `h`/`l` delivers a burst of
+            // repeats in a single poll; reprojecting and decoding once per
+            // repeat is what made holding a key stall and then freeze, so
+            // the batch moves the playhead as many times as it was told and
+            // the host is asked for a picture once, at the end (spec §14).
+            let events = frontend.poll();
+            if self.drain(events, host).contains(&Response::Quit) {
+                return Ok(());
             }
             if self.quit || host.wants_quit() {
                 return Ok(());

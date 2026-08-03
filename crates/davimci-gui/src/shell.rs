@@ -12,7 +12,8 @@
 use davimci_app::{AppError, Event, Frontend, Response, Surface, ViewState};
 use davimci_keys::MediaIntent;
 
-use crate::cmdline::{CommandLine, CommandLineEvent, default_candidates};
+use davimci_app::CommandKey;
+
 use crate::input::{Modifiers, RawKey, translate};
 use crate::layout::{Layout, Metrics, paint};
 use crate::paint::{Chrome, DrawList, PickerRow, PickerView};
@@ -44,8 +45,13 @@ pub struct Gui {
     metrics: Metrics,
     pending: Vec<GuiEvent>,
     out: Vec<Event>,
-    command: CommandLine,
+    /// Whether the `:` line is open. The line itself lives in the app; the
+    /// shell only needs to know that the keyboard belongs to it and that the
+    /// layout has a row for it.
     command_open: bool,
+    /// Whether the last view had suggestions, so the layout keeps a row for
+    /// them. Read from the view rather than decided here.
+    completions_shown: bool,
     picker: Option<MediaPicker>,
     /// Where the picker is looking. Remembered between opens, so a second
     /// `i` starts where the last one left off.
@@ -65,8 +71,8 @@ impl Gui {
             metrics: Metrics::default(),
             pending: Vec::new(),
             out: Vec::new(),
-            command: CommandLine::new(default_candidates()),
             command_open: false,
+            completions_shown: false,
             picker: None,
             browse_dir: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
             subtitle: None,
@@ -90,7 +96,13 @@ impl Gui {
 
     #[must_use]
     pub fn layout(&self) -> Layout {
-        Layout::compute(self.width, self.height, self.metrics, self.command_open)
+        Layout::compute(
+            self.width,
+            self.height,
+            self.metrics,
+            self.command_open,
+            self.completions_shown,
+        )
     }
 
     #[must_use]
@@ -99,8 +111,8 @@ impl Gui {
     }
 
     #[must_use]
-    pub fn command_line(&self) -> &CommandLine {
-        &self.command
+    pub fn command_is_open(&self) -> bool {
+        self.command_open
     }
 
     #[must_use]
@@ -157,7 +169,6 @@ impl Gui {
     /// The app told us it entered `COMMAND` mode.
     pub fn open_command_line(&mut self) {
         self.command_open = true;
-        self.command.open();
     }
 
     /// Turn one window event into app events, routing modals first.
@@ -254,42 +265,25 @@ impl Gui {
         }
 
         if self.command_open {
-            let ev = match &raw {
-                RawKey::Escape => self.command.cancel(),
-                RawKey::Enter => self.command.submit(),
-                RawKey::Backspace => self.command.backspace(),
-                RawKey::Tab => self.command.complete(),
-                RawKey::Up => {
-                    self.command.history_prev();
-                    CommandLineEvent::Editing
-                }
-                RawKey::Down => {
-                    self.command.history_next();
-                    CommandLineEvent::Editing
-                }
-                RawKey::Left => {
-                    self.command.left();
-                    CommandLineEvent::Editing
-                }
-                RawKey::Right => {
-                    self.command.right();
-                    CommandLineEvent::Editing
-                }
-                RawKey::Space => self.command.insert(' '),
-                RawKey::Char(c) => self.command.insert(*c),
-                RawKey::Other => CommandLineEvent::Editing,
+            // The buffer lives in the app: the shell forwards the keystroke
+            // and learns whether the line closed from the next view.
+            let key = match &raw {
+                RawKey::Escape => CommandKey::Cancel,
+                RawKey::Enter => CommandKey::Submit,
+                RawKey::Backspace => CommandKey::Backspace,
+                RawKey::Tab => CommandKey::Tab,
+                RawKey::Up => CommandKey::Up,
+                RawKey::Down => CommandKey::Down,
+                RawKey::Left => CommandKey::Left,
+                RawKey::Right => CommandKey::Right,
+                RawKey::Space => CommandKey::Char(' '),
+                RawKey::Char(c) => CommandKey::Char(*c),
+                RawKey::Other => return,
             };
-            match ev {
-                CommandLineEvent::Editing => {}
-                CommandLineEvent::Submit(line) => {
-                    self.command_open = false;
-                    self.out.push(Event::Command(line));
-                }
-                CommandLineEvent::Cancel => {
-                    self.command_open = false;
-                    self.out.push(Event::CommandCancelled);
-                }
+            if matches!(key, CommandKey::Cancel | CommandKey::Submit) {
+                self.command_open = false;
             }
+            self.out.push(Event::CommandKey(key));
             return;
         }
 
@@ -340,9 +334,11 @@ impl Frontend for Gui {
     fn render(&mut self, view: &ViewState) -> Result<(), AppError> {
         // A view whose command line is open is the app telling us COMMAND
         // mode is live; keep the modal in step with it rather than guessing.
-        if view.command_line.is_some() && !self.command_open {
-            self.open_command_line();
-        }
+        self.command_open = view.command_line.is_some();
+        self.completions_shown = view
+            .command_line
+            .as_ref()
+            .is_some_and(|c| !c.completions.is_empty());
         let layout = self.layout();
         // The picker is the shell's own state, not the app's, so it is
         // folded into the chrome here rather than carried in the view.
@@ -439,9 +435,18 @@ mod tests {
         for c in "wq".chars() {
             g.push(GuiEvent::Key(RawKey::Char(c), Modifiers::default()));
         }
-        assert!(g.poll().is_empty(), "keys leaked into the grammar");
+        // The buffer lives in the app, so the keys go there as command
+        // keys rather than into the grammar.
+        assert_eq!(
+            g.poll(),
+            vec![
+                Event::CommandKey(CommandKey::Char('w')),
+                Event::CommandKey(CommandKey::Char('q')),
+            ],
+            "keys leaked into the grammar"
+        );
         g.push(GuiEvent::Key(RawKey::Enter, Modifiers::default()));
-        assert_eq!(g.poll(), vec![Event::Command("wq".into())]);
+        assert_eq!(g.poll(), vec![Event::CommandKey(CommandKey::Submit)]);
         // And gives it back afterwards.
         g.push(GuiEvent::Key(RawKey::Char('x'), Modifiers::default()));
         assert_eq!(g.poll(), vec![Event::Key(Key::Char('x'))]);
@@ -452,7 +457,7 @@ mod tests {
         let mut g = gui();
         g.open_command_line();
         g.push(GuiEvent::Key(RawKey::Escape, Modifiers::default()));
-        assert_eq!(g.poll(), vec![Event::CommandCancelled]);
+        assert_eq!(g.poll(), vec![Event::CommandKey(CommandKey::Cancel)]);
     }
 
     #[test]

@@ -8,6 +8,7 @@
 use davimci_core::ClipId;
 use davimci_keys::{Key, MediaIntent};
 
+use crate::cmdline::CommandKey;
 use crate::error::AppError;
 use crate::view::ViewState;
 
@@ -34,8 +35,12 @@ impl Default for Surface {
 pub enum Event {
     Key(Key),
     Resize(Surface),
-    /// A `:` line was submitted. The frontend owns command-line editing (it
-    /// has the text widget); the app owns what the line means.
+    /// One keystroke into the open `:` line. The frontend names the key; the
+    /// app owns the buffer, the history and the completions, so the GUI and
+    /// the TUI cannot show two different `:` lines.
+    CommandKey(CommandKey),
+    /// A `:` line was submitted whole - a script, a test, or a frontend with
+    /// its own text widget. The app owns what the line means.
     Command(String),
     /// The `:` line was abandoned.
     CommandCancelled,

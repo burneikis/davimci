@@ -32,6 +32,8 @@ pub struct Window {
     /// Size of the video pane last frame, so the presenter is resized only
     /// when it actually changed.
     video_size: Resolution,
+    /// One GPU texture per clip thumbnail, kept across frames.
+    thumbnails: egui_shell::ThumbnailTextures,
 }
 
 impl std::fmt::Debug for Window {
@@ -58,6 +60,7 @@ impl Window {
                 width: 0,
                 height: 0,
             },
+            thumbnails: egui_shell::ThumbnailTextures::default(),
         }
     }
 
@@ -144,8 +147,10 @@ impl eframe::App for Window {
             self.gui.push(GuiEvent::CloseRequested);
         }
 
-        for event in self.gui.poll() {
-            let response = self.app.event(event, &mut self.editor);
+        // One frame of input is one batch: a held key repeats faster than a
+        // frame can be decoded, so the whole burst costs a single seek.
+        let events = self.gui.poll();
+        for response in self.app.drain(events, &mut self.editor) {
             // `i`/`a`/`r` ask for a picker; the frontend is what has one.
             self.gui.apply_response(&response);
         }
@@ -183,6 +188,11 @@ impl eframe::App for Window {
         if let Err(e) = self.gui.render(&view) {
             self.app.notify(davimci_app::Message::error(e.to_string()));
         }
+        // Textures for clips that are no longer drawn are pixels on the GPU
+        // nobody will ever look at again.
+        if let Some(list) = self.gui.last_draw() {
+            self.thumbnails.retain(list);
+        }
 
         if self.app.wants_quit() || self.editor.wants_quit() {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -198,7 +208,7 @@ impl eframe::App for Window {
         let screen = ui.max_rect();
         egui_shell::claim_input(ui, screen);
         if let Some(list) = self.gui.last_draw() {
-            egui_shell::draw(list, ui, screen.min);
+            egui_shell::draw(list, ui, screen.min, &mut self.thumbnails);
         }
         let layout = self.gui.layout();
         // The texture is the whole composited surface - letterbox bars

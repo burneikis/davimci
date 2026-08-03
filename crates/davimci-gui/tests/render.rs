@@ -5,11 +5,11 @@
 
 use davimci_app::Frontend;
 use davimci_app::fixtures;
-use davimci_gui::paint::{Fill, Paint, summarise};
+use davimci_gui::paint::{Fill, Paint, TextRole, summarise};
 use davimci_gui::{Chrome, Gui, Layout, Metrics, PickerIntent, VideoQuad, paint_view};
 
 fn layout(width: u32, height: u32) -> Layout {
-    Layout::compute(width, height, Metrics::default(), false)
+    Layout::compute(width, height, Metrics::default(), false, false)
 }
 
 #[test]
@@ -18,7 +18,7 @@ fn the_normal_view_paints_a_stable_draw_list() {
     let list = paint_view(&view, &layout(800, 600), &Chrome::default());
     assert_eq!(
         summarise(&list),
-        "Background=2 Clip=5 ClipLabel=5 Playhead=1 Ruler=1 Status=1 StatusLine=1 \
+        "Background=2 Clip=5 ClipLabel=5 Playhead=1 Ruler=1 RulerNumber=2 Status=1 StatusLine=1 \
 TickMajor=5 TickMinor=3 TrackHeader=3 TrackLane=2 TrackLaneFocused=1 TrackName=3"
     );
 }
@@ -83,7 +83,7 @@ fn every_golden_view_paints_at_extreme_sizes_without_panicking() {
     for (name, view) in fixtures::all() {
         for (w, h) in sizes {
             for open in [false, true] {
-                let l = Layout::compute(w, h, Metrics::default(), open);
+                let l = Layout::compute(w, h, Metrics::default(), open, false);
                 let list = paint_view(&view, &l, &Chrome::default());
                 assert!(!list.is_empty(), "{name} at {w}x{h}");
                 assert!(l.surface().columns >= 1);
@@ -109,16 +109,51 @@ fn the_status_line_carries_the_mode_line() {
 #[test]
 fn an_open_command_line_is_painted_only_when_the_view_has_one() {
     let mut view = fixtures::normal();
-    let l = Layout::compute(800, 600, Metrics::default(), true);
+    let l = Layout::compute(800, 600, Metrics::default(), true, false);
     assert!(
         paint_view(&view, &l, &Chrome::default())
             .rects(Fill::CommandLine)
             .is_empty()
     );
-    view.command_line = Some("wq".into());
+    view.command_line = Some(davimci_app::CommandLineView {
+        buffer: "wq".into(),
+        cursor: 2,
+        completions: Vec::new(),
+    });
     let list = paint_view(&view, &l, &Chrome::default());
     assert_eq!(list.rects(Fill::CommandLine).len(), 1);
     assert!(list.texts().contains(&":wq"));
+    assert_eq!(
+        list.rects(Fill::Caret).len(),
+        1,
+        "a line being typed needs a caret"
+    );
+}
+
+/// The typed line, its caret and its suggestions are all painted from the
+/// view state, so the user can see what they are typing (idea.md).
+#[test]
+fn completions_are_painted_on_their_own_row_above_the_line() {
+    let mut view = fixtures::normal();
+    view.command_line = Some(davimci_app::CommandLineView {
+        buffer: "b".into(),
+        cursor: 1,
+        completions: vec!["b".into(), "bn".into(), "bp".into()],
+    });
+    let l = Layout::compute(800, 600, Metrics::default(), true, true);
+    let row = l.completions.expect("a row for the suggestions");
+    let list = paint_view(&view, &l, &Chrome::default());
+    assert!(
+        list.texts()
+            .iter()
+            .any(|t| t.contains("bn") && t.contains("bp")),
+        "{:?}",
+        list.texts()
+    );
+    assert!(
+        row.y < l.command.expect("a command row").y,
+        "suggestions sit above the line they complete"
+    );
 }
 
 /// Regression: pressing `i` opened the picker but nothing painted it, so the
@@ -170,7 +205,7 @@ fn the_picker_title_names_the_intent() {
             .iter()
             .filter_map(|op| match op {
                 Paint::Text { text, .. } => Some(text.clone()),
-                Paint::Rect { .. } => None,
+                Paint::Rect { .. } | Paint::Image { .. } => None,
             })
             .collect::<Vec<_>>()
             .join(" | ");
@@ -205,6 +240,69 @@ fn an_analysed_audio_lane_paints_a_waveform() {
     assert!(
         bars.last().expect("bars").height > bars[0].height,
         "the envelope ignored the levels it was given"
+    );
+}
+
+/// Regression (idea.md): the envelope used to be painted over the clip
+/// labels, so an analysed lane was a lane whose clips had no readable names.
+/// Labels come last.
+#[test]
+fn clip_labels_are_painted_over_the_waveform() {
+    let view = fixtures::waveform();
+    let list = paint_view(&view, &layout(800, 600), &Chrome::default());
+    let last_wave = list
+        .ops()
+        .iter()
+        .rposition(|op| {
+            matches!(
+                op,
+                Paint::Rect {
+                    fill: Fill::Waveform,
+                    ..
+                }
+            )
+        })
+        .expect("an envelope");
+    // The last label belongs to the lane that has the envelope, since lanes
+    // are painted top to bottom.
+    let last_label = list
+        .ops()
+        .iter()
+        .rposition(|op| {
+            matches!(
+                op,
+                Paint::Text {
+                    role: TextRole::ClipLabel,
+                    ..
+                }
+            )
+        })
+        .expect("a clip label");
+    assert!(
+        last_label > last_wave,
+        "labels are drawn under the envelope that hides them"
+    );
+}
+
+/// A decoded thumbnail is drawn inside its clip, never wider than it
+/// (idea.md).
+#[test]
+fn a_clip_thumbnail_is_drawn_inside_its_clip() {
+    let mut view = fixtures::normal();
+    let thumb = davimci_app::Thumbnail::new(4, 2, vec![255u8; 32], davimci_core::Frame(0));
+    let clip = view.tracks[0].clips[0].clone();
+    view.tracks[0].clips[0].thumbnail = Some(thumb);
+    let l = layout(800, 600);
+    let list = paint_view(&view, &l, &Chrome::default());
+    let images = list.images();
+    assert_eq!(images.len(), 1, "one clip has a picture");
+    let (rect, id, _) = images[0];
+    assert_eq!(id, clip.id);
+    let (first, last) = clip.columns;
+    assert!(rect.x >= l.tracks.x + first as i32);
+    assert!(
+        rect.x + rect.width as i32 <= l.tracks.x + last as i32 + 1,
+        "the thumbnail spilled onto the next clip: {rect:?}"
     );
 }
 

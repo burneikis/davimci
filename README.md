@@ -123,7 +123,10 @@ it is linked dynamically, since davimci is GPL-3.0 over LGPL-2.1 MLT.
 | Overlay model: timecode string, safe-area rects, embedded host only | implemented, tested |
 | GUI layout and painting: panes, lanes, clips, ticks, playhead, selection | implemented, tested |
 | GUI input translation: window keys to `davimci-keys` tokens | implemented, tested |
-| `:` line: history, longest-common-prefix completion, cancel rules | implemented, tested |
+| `:` line: drawn as typed, caret, history, completion suggestions | implemented, tested |
+| Relative jump-point numbers on the ruler | implemented, tested |
+| Clip thumbnails, decoded by the host while the transport is idle | implemented, tested |
+| Batched input: a held key costs one seek, not one per repeat | implemented, tested |
 | Media picker and INSERT-mode subtitle editing (state, not widgets) | implemented, tested |
 | Editor assembly: workspace + backend + presenter + transport behind one `Host` | implemented, tested |
 | Transport: play/pause, shuttle with rate stepping, preview-and-return | implemented, tested |
@@ -202,7 +205,16 @@ unit tests, which assert MLT's own `ref_count()` directly.
 See `plan.md` for the phase order and `plan.md` milestones for what counts as
 usable (M3).
 
-Recent audit fixes, each with a regression test: counts clamp instead of
+Recent fixes from using the window, each with a regression test: holding
+`h`/`l` no longer lags and freezes (input is drained one batch per frame and
+the host is asked for one picture); the `:` line is visible while it is typed,
+with a caret and with the matching commands listed above it; clip labels are
+drawn over the waveform rather than under it; the ruler numbers its major
+jump points relative to the playhead, so `3l` lands on the tick marked 3; and
+video clips carry thumbnails, decoded one per tick while the transport is
+stopped and invalidated when a clip is trimmed or slipped.
+
+Earlier audit fixes, each with a regression test: counts clamp instead of
 overflowing on a long digit run (spec §3.1); a backward predicate motion can
 no longer answer the frame it started on; new track names take the lowest free
 index, so a removed track cannot leave a duplicate name (spec §5); subtitle

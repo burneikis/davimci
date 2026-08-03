@@ -11,10 +11,12 @@
 
 pub mod app;
 pub mod browse;
+pub mod cmdline;
 pub mod error;
 pub mod frontend;
 pub mod job;
 pub mod message;
+pub mod thumbnail;
 pub mod view;
 pub mod viewport;
 pub mod waveform;
@@ -24,10 +26,14 @@ pub mod fixtures;
 
 pub use app::{App, Host, NullHost};
 pub use browse::{BrowseEntry, is_media, list_dir};
+pub use cmdline::{CommandKey, CommandLine, CommandLineEvent, default_candidates};
 pub use error::AppError;
 pub use frontend::{Event, Frontend, Response, Surface};
 pub use job::{Job, JobList, JobState, JobUpdate};
 pub use message::{Message, MessageQueue, Severity};
-pub use view::{ClipView, PlayheadView, SelectionView, Tick, TrackView, ViewInputs, ViewState};
+pub use thumbnail::{Thumbnail, ThumbnailRequest, Thumbnails};
+pub use view::{
+    ClipView, CommandLineView, PlayheadView, SelectionView, Tick, TrackView, ViewInputs, ViewState,
+};
 pub use viewport::Viewport;
 pub use waveform::{Waveform, Waveforms};

@@ -555,6 +555,31 @@ fn an_edit_during_playback_pauses_before_reprojecting() {
     );
 }
 
+/// Thumbnails come from the host, one per tick, and only while the transport
+/// is stopped - the preview needs the decoder more than the timeline does
+/// (spec §15.2).
+#[test]
+fn a_tick_decodes_one_thumbnail_and_leaves_the_playhead_where_it_was() {
+    let (mut app, mut editor) = editor();
+    let before = app.session().timeline().playhead();
+    // First tick asks, second decodes what was asked for.
+    app.event(Event::Tick, &mut editor);
+    app.event(Event::Tick, &mut editor);
+    let drawn = app
+        .view()
+        .tracks
+        .iter()
+        .flat_map(|t| t.clips.clone())
+        .filter(|c| c.thumbnail.is_some())
+        .count();
+    assert_eq!(drawn, 1, "exactly one thumbnail per tick");
+    assert_eq!(
+        app.session().timeline().playhead(),
+        before,
+        "decoding a thumbnail moved the playhead"
+    );
+}
+
 // -- audio operations (spec §6.1, plan.md Phase 9e) -------------------------
 
 /// `:gain` sets an absolute level on the clip under the playhead, and it is

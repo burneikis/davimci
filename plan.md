@@ -633,8 +633,23 @@ Amendments made during implementation:
   it is why `Surface` carries `columns`/`rows` rather than pixels.
 - `davimci-keys` reports `:` as an ordinary mode change to `COMMAND`, not as
   `Outcome::EnterCommandMode`, so the app watches `ModeChanged` and hands the
-  keyboard over on that. Owning the `:` line stays a frontend job; deciding
-  what the line *means* stays the host's.
+  keyboard over on that. Deciding what the line *means* stays the host's.
+- The `:` line itself moved *up* into `davimci-app` after 9c: the buffer, the
+  caret, the history and the completions are view state, and a frontend that
+  kept its own was a frontend that could show a different line. A frontend
+  now forwards `Event::CommandKey` and draws `ViewState::command_line`, and
+  the ex vocabulary reaches completion through
+  `App::set_command_candidates`, since `davimci-app` must not know what `:wq`
+  is.
+- Input is drained in batches (`App::drain`), and the two expensive host
+  notifications - `timeline_changed`, `playhead_moved` - are issued once per
+  batch. A held `h`/`l` repeats faster than a frame decodes; one seek per
+  repeat is what made holding a key lag and then freeze (spec §14).
+- Thumbnails ride the same seam as waveforms and job progress: the app asks
+  for the visible video clips that have no current picture, nearest the
+  playhead first, and the host publishes what it decoded. A thumbnail is keyed
+  by the clip's in-point, so a trim or a slip invalidates it rather than
+  showing the wrong frame.
 - Spec §15 is new: the status-line format for every mode, the scroll-follow
   and zoom-anchoring rules, and the zoom keys `zi`/`zo`/`z0` (spec §11).
   Zoom is view state, so `davimci-keys` only reports `Outcome::Zoom` and
@@ -813,6 +828,27 @@ surface it was composed for, and nothing recomposed it when the pane resized,
 so the picture kept its startup size in the corner of the pane.
 `Editor::refresh_preview` now recomposes on a size change, with a regression
 test (`resizing_the_video_pane_recomposes_the_frame_at_the_new_size`).
+
+Four more defects, all found the same way - by using the window:
+
+- **Holding `h`/`l` lagged and then froze.** Every key repeat seeked and
+  decoded, so input outran the decoder. Input is now drained one batch per
+  frame (`App::drain`) and the host is told once, so a burst costs one
+  picture (spec §14).
+- **The `:` line was invisible while it was typed.** The app knew only that
+  `COMMAND` was open; the buffer lived in the shell. The line is view state
+  now - buffer, caret and completions - and the shell forwards keystrokes
+  instead of hoarding them (spec §15.3). Completion candidates come from the
+  host's real vocabulary, and the matches are shown on a row above the line.
+- **Clip labels were painted under the waveform**, so an analysed lane had
+  unreadable clip names. Labels are drawn last (spec §15.2).
+- **The ruler said where `h`/`l` would land but not how far**, so a count had
+  to be guessed. Major ticks carry relative jump-point numbers (spec §3.2).
+
+Also added here: clip thumbnails (spec §15.2). The picture is decoded by the
+host - `Editor` pulls one per tick, only while the transport is stopped, and
+puts the playhead back afterwards - and the shell caches one GPU texture per
+clip, keyed by in-point, so a redraw is not an upload.
 
 ### Phase 8b - export
 

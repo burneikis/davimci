@@ -130,6 +130,7 @@ fn run_commands_with_editor(ws: Workspace, commands: &[String]) -> Result<()> {
     let (backend, presenter) = engine_for(&session);
     let mut editor = Editor::new(ws, backend, presenter);
     let mut app = App::new(session);
+    app.set_command_candidates(davimci_cli::excmd::vocabulary());
     editor.prime(app.session());
 
     for line in commands {
@@ -172,7 +173,8 @@ fn run_window(ws: Workspace) -> Result<()> {
     let session = ws.current_session();
     let (backend, presenter) = engine_for(&session);
     let mut editor = davimci_cli::Editor::new(ws, backend, presenter);
-    let app = App::new(session);
+    let mut app = App::new(session);
+    app.set_command_candidates(davimci_cli::excmd::vocabulary());
     editor.prime(app.session());
     davimci_cli::Window::new(app, editor)
         .run()
@@ -217,6 +219,7 @@ fn run_session(ws: Workspace, script: &str, ticks: u32) -> Result<()> {
     let (backend, presenter) = engine_for(&session);
     let mut editor = Editor::new(ws, backend, presenter);
     let mut app = App::new(session);
+    app.set_command_candidates(davimci_cli::excmd::vocabulary());
     editor.prime(app.session());
 
     let mut frontend = HeadlessFrontend::script(

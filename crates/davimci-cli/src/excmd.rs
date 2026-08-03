@@ -238,6 +238,47 @@ pub fn parse(line: &str) -> Result<ExCommand, CliError> {
     }
 }
 
+/// Every `:` name this crate accepts, for the command line's completion
+/// (spec §12). The vocabulary lives here, next to [`parse`], so a command
+/// that exists is a command that can be completed.
+#[must_use]
+pub fn vocabulary() -> Vec<String> {
+    [
+        "w",
+        "write",
+        "q",
+        "q!",
+        "quit",
+        "quit!",
+        "wq",
+        "x",
+        "e",
+        "edit",
+        "export",
+        "render",
+        "presets",
+        "cancel",
+        "gain",
+        "fade",
+        "normalize",
+        "normalise",
+        "duck",
+        "new",
+        "ls",
+        "buffers",
+        "bn",
+        "bnext",
+        "bp",
+        "bprev",
+        "b",
+        "buffer",
+        "relink",
+    ]
+    .iter()
+    .map(|s| (*s).to_string())
+    .collect()
+}
+
 impl Workspace {
     /// Parse and run a `:` line, answering any recovery prompt with
     /// `on_recovery`, against no selection.

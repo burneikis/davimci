@@ -19,6 +19,10 @@ pub struct Metrics {
     pub track_header_width: u32,
     /// Fraction of the window height the video pane wants, in percent.
     pub video_percent: u32,
+    /// Advance of one monospace character, used to place the `:` caret and
+    /// the ruler's relative numbers. Text is measured by the shell's font,
+    /// but a caret has to be a rectangle somewhere.
+    pub char_width: u32,
 }
 
 impl Default for Metrics {
@@ -30,6 +34,7 @@ impl Default for Metrics {
             command_height: 20,
             track_header_width: 80,
             video_percent: 50,
+            char_width: 8,
         }
     }
 }
@@ -44,6 +49,9 @@ pub struct Layout {
     pub headers: Rect,
     pub status: Rect,
     pub command: Option<Rect>,
+    /// The suggestion row above the `:` line, when there is anything to
+    /// suggest.
+    pub completions: Option<Rect>,
     pub metrics: Metrics,
 }
 
@@ -54,7 +62,13 @@ impl Layout {
     /// ruler, video, timeline - so a window too short for everything loses
     /// the timeline's height rather than producing negative sizes.
     #[must_use]
-    pub fn compute(width: u32, height: u32, metrics: Metrics, command_open: bool) -> Self {
+    pub fn compute(
+        width: u32,
+        height: u32,
+        metrics: Metrics,
+        command_open: bool,
+        completions_shown: bool,
+    ) -> Self {
         let window = Rect {
             x: 0,
             y: 0,
@@ -70,6 +84,11 @@ impl Layout {
 
         let status_h = take(&mut remaining, metrics.status_height);
         let command_h = if command_open {
+            take(&mut remaining, metrics.command_height)
+        } else {
+            0
+        };
+        let completion_h = if command_open && completions_shown {
             take(&mut remaining, metrics.command_height)
         } else {
             0
@@ -110,6 +129,17 @@ impl Layout {
             height: tracks_h,
         };
         y += tracks_h as i32;
+        let completions = if completion_h > 0 {
+            Some(Rect {
+                x: 0,
+                y,
+                width,
+                height: completion_h,
+            })
+        } else {
+            None
+        };
+        y += completion_h as i32;
         let command = if command_open {
             Some(Rect {
                 x: 0,
@@ -136,6 +166,7 @@ impl Layout {
             headers,
             status,
             command,
+            completions,
             metrics,
         }
     }
@@ -183,8 +214,9 @@ pub fn paint(view: &ViewState, layout: &Layout, chrome: &Chrome) -> DrawList {
         }
     }
 
-    // Ruler.
+    // Ruler. Numbers first so a tick is never hidden behind one.
     d.rect(layout.ruler, Fill::Ruler);
+    paint_relative_numbers(&mut d, layout, view);
     for tick in &view.ticks {
         let height = if tick.major {
             layout.ruler.height
@@ -264,12 +296,47 @@ pub fn paint(view: &ViewState, layout: &Layout, chrome: &Chrome) -> DrawList {
                 Fill::Clip
             };
             d.rect(rect, fill);
-            d.text(rect, TextRole::ClipLabel, clip.label.clone());
+            // The thumbnail sits inside the clip, at the head, and is
+            // clipped to it: a picture wider than its clip would spill onto
+            // the neighbour it is not a picture of.
+            if let Some(thumb) = &clip.thumbnail
+                && rect.width > 4
+                && rect.height > 4
+            {
+                let height = rect.height;
+                let width = (thumb.width * height / thumb.height.max(1)).min(rect.width);
+                d.image(
+                    Rect {
+                        x: rect.x,
+                        y: rect.y,
+                        width: width.max(1),
+                        height,
+                    },
+                    clip.id,
+                    thumb.clone(),
+                );
+            }
         }
 
         // Waveform, drawn over the clips it belongs to: an envelope beside
         // the audio it describes is the whole point of showing it.
         paint_waveform(&mut d, layout, track, y, row_h);
+
+        // Labels last, so a clip is still identifiable on a lane whose
+        // waveform would otherwise scribble over its own name.
+        for clip in &track.clips {
+            let (first, last) = clip.columns;
+            d.text(
+                Rect {
+                    x: layout.tracks.x.saturating_add(first as i32),
+                    y: y.saturating_add(1),
+                    width: last.saturating_sub(first).saturating_add(1),
+                    height: row_h.saturating_sub(2),
+                },
+                TextRole::ClipLabel,
+                clip.label.clone(),
+            );
+        }
     }
 
     // Selection band, drawn over the lanes it covers.
@@ -310,7 +377,39 @@ pub fn paint(view: &ViewState, layout: &Layout, chrome: &Chrome) -> DrawList {
     d.text(layout.status, TextRole::Status, status_text(view));
     if let (Some(rect), Some(line)) = (layout.command, view.command_line.as_ref()) {
         d.rect(rect, Fill::CommandLine);
-        d.text(rect, TextRole::Command, format!(":{line}"));
+        d.text(rect, TextRole::Command, format!(":{}", line.buffer));
+        // The caret: a rectangle, because the shell owns the font and the
+        // layout owns the geometry. `:` plus the characters before the
+        // cursor, in monospace advances.
+        let before = line.buffer[..line.cursor.min(line.buffer.len())]
+            .chars()
+            .count() as u32;
+        let cw = layout.metrics.char_width.max(1);
+        d.rect(
+            Rect {
+                x: rect
+                    .x
+                    .saturating_add(4)
+                    .saturating_add((before.saturating_add(1) * cw) as i32),
+                y: rect.y.saturating_add(2),
+                width: 1.max(cw / 8),
+                height: rect.height.saturating_sub(4),
+            },
+            Fill::Caret,
+        );
+        // Suggestions for the word being typed, on their own row above the
+        // line - the app decided what they are, so both frontends show the
+        // same list.
+        if let Some(row) = layout.completions
+            && !line.completions.is_empty()
+        {
+            d.rect(row, Fill::CommandLine);
+            d.text(
+                row,
+                TextRole::Completion,
+                fit_completions(&line.completions, row.width, cw),
+            );
+        }
     }
 
     // The picker is modal: it owns the keyboard, so it is drawn over
@@ -319,6 +418,66 @@ pub fn paint(view: &ViewState, layout: &Layout, chrome: &Chrome) -> DrawList {
         paint_picker(&mut d, layout, picker);
     }
     d
+}
+
+/// Relative jump-point numbers on the ruler: `0` under the playhead, and the
+/// count each `l` or `h` away from it (spec §11), the way vim numbers lines.
+///
+/// Only ticks with room for their number are labelled, and only major ones,
+/// so a zoomed-out ruler stays a ruler rather than a wall of digits.
+fn paint_relative_numbers(d: &mut DrawList, layout: &Layout, view: &ViewState) {
+    let cw = layout.metrics.char_width.max(1);
+    let mut last_end: i64 = i64::MIN;
+    for tick in view.ticks.iter().filter(|t| t.major) {
+        let text = tick.relative.unsigned_abs().to_string();
+        let width = text.len() as u32 * cw;
+        let x = i64::from(layout.ruler.x) + i64::from(tick.column) + 2;
+        if x < last_end {
+            continue;
+        }
+        if x + i64::from(width) > i64::from(layout.ruler.x) + i64::from(layout.ruler.width) {
+            continue;
+        }
+        last_end = x + i64::from(width) + i64::from(cw);
+        d.text(
+            Rect {
+                x: x as i32,
+                y: layout.ruler.y,
+                width,
+                height: layout.ruler.height,
+            },
+            TextRole::RulerNumber,
+            text,
+        );
+    }
+}
+
+/// As many suggestions as fit on one row, oldest-first, with a count when
+/// some are left out - a list that runs off the edge is worse than a short
+/// one that says so.
+fn fit_completions(completions: &[String], width: u32, char_width: u32) -> String {
+    let columns = (width / char_width.max(1)).max(8) as usize;
+    let mut out = String::new();
+    let mut shown = 0;
+    for c in completions {
+        let want = if out.is_empty() { c.len() } else { c.len() + 2 };
+        // Leave room for a "+n more" tail.
+        if out.len() + want > columns.saturating_sub(8) {
+            break;
+        }
+        if !out.is_empty() {
+            out.push_str("  ");
+        }
+        out.push_str(c);
+        shown += 1;
+    }
+    if shown < completions.len() {
+        if !out.is_empty() {
+            out.push_str("  ");
+        }
+        out.push_str(&format!("+{} more", completions.len() - shown));
+    }
+    out
 }
 
 /// Draw the media picker centred over the window.
@@ -421,7 +580,7 @@ mod tests {
 
     #[test]
     fn regions_tile_the_window_without_overlapping() {
-        let l = Layout::compute(800, 600, Metrics::default(), true);
+        let l = Layout::compute(800, 600, Metrics::default(), true, false);
         let heights = l.video.height
             + l.ruler.height
             + l.tracks.height
@@ -434,7 +593,7 @@ mod tests {
 
     #[test]
     fn a_very_short_window_gives_up_timeline_height_not_correctness() {
-        let l = Layout::compute(400, 10, Metrics::default(), true);
+        let l = Layout::compute(400, 10, Metrics::default(), true, false);
         assert_eq!(l.status.height, 10);
         assert_eq!(l.tracks.height, 0);
         assert_eq!(l.surface().rows, 1);
@@ -442,14 +601,14 @@ mod tests {
 
     #[test]
     fn a_very_narrow_window_keeps_at_least_one_column() {
-        let l = Layout::compute(1, 600, Metrics::default(), false);
+        let l = Layout::compute(1, 600, Metrics::default(), false, false);
         assert_eq!(l.surface().columns, 1);
         assert!(l.command.is_none());
     }
 
     #[test]
     fn surface_reports_one_column_per_pixel_and_one_row_per_lane() {
-        let l = Layout::compute(800, 600, Metrics::default(), false);
+        let l = Layout::compute(800, 600, Metrics::default(), false, false);
         let s = l.surface();
         assert_eq!(s.columns, 800 - 80);
         assert_eq!(s.rows, (l.tracks.height / 40) as usize);

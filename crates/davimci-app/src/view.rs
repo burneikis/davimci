@@ -14,6 +14,7 @@ use davimci_motion::{JumpConfig, JumpPoints, Zoom};
 
 use crate::job::Job;
 use crate::message::Message;
+use crate::thumbnail::{Thumbnail, Thumbnails};
 use crate::viewport::Viewport;
 use crate::waveform::Waveforms;
 
@@ -26,13 +27,16 @@ pub struct ViewInputs<'a> {
     pub selection: Option<&'a VisualSelection>,
     /// Keys typed so far in an unfinished sequence, e.g. `"3d"`.
     pub pending: String,
-    /// Contents of the `:` line while in `COMMAND` mode.
-    pub command_line: Option<String>,
+    /// The `:` line while in `COMMAND` mode: what has been typed, where the
+    /// caret is, and what would complete it.
+    pub command_line: Option<CommandLineView>,
     pub message: Option<Message>,
     pub job: Option<Job>,
     pub recording: Option<char>,
     /// Analysed audio, when the host has published any (spec §6.1).
     pub waveforms: Option<&'a Waveforms>,
+    /// Decoded clip thumbnails, when the host has published any.
+    pub thumbnails: Option<&'a Thumbnails>,
 }
 
 impl Default for ViewInputs<'_> {
@@ -48,8 +52,23 @@ impl Default for ViewInputs<'_> {
             job: None,
             recording: None,
             waveforms: None,
+            thumbnails: None,
         }
     }
+}
+
+/// The `:` line as drawn: a frontend renders this and nothing of its own,
+/// so the GUI and the TUI cannot disagree about what the user typed.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CommandLineView {
+    pub buffer: String,
+    /// Byte offset of the caret in `buffer`.
+    pub cursor: usize,
+    /// Candidates matching the word being typed, in vocabulary order.
+    /// Empty while the word matches nothing, and while it matches exactly
+    /// one thing that is already fully typed - a suggestion list that only
+    /// repeats the line is noise.
+    pub completions: Vec<String>,
 }
 
 /// One tick on the ruler: a jump point that is currently on screen.
@@ -59,6 +78,11 @@ pub struct Tick {
     pub column: u32,
     /// Ticks at a clip boundary are drawn taller than subdivision ticks.
     pub major: bool,
+    /// Distance from the jump point at or before the playhead, counted in
+    /// jump points: `0` is the one the playhead sits on, `1` is the next
+    /// `l` lands on, `-1` the previous. This is the count `3l` needs, shown
+    /// the way vim's `relativenumber` shows lines (spec §11).
+    pub relative: i32,
 }
 
 /// A clip as drawn: timeline facts plus where they land on screen.
@@ -74,6 +98,9 @@ pub struct ClipView {
     pub selected: bool,
     pub offline: bool,
     pub linked: bool,
+    /// A picture of the clip's first visible frame, once the host has
+    /// decoded one. Shared, so assembling a view does not copy pixels.
+    pub thumbnail: Option<Thumbnail>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -127,7 +154,7 @@ pub struct ViewState {
     pub playhead: PlayheadView,
     pub selection: Option<SelectionView>,
     pub pending: String,
-    pub command_line: Option<String>,
+    pub command_line: Option<CommandLineView>,
     pub message: Option<Message>,
     pub job: Option<Job>,
     pub recording: Option<char>,
@@ -193,6 +220,10 @@ impl ViewState {
                             selected: selected_clip(t.id, c.start, c.end()),
                             offline: c.is_offline(),
                             linked: c.group.is_some(),
+                            thumbnail: inputs
+                                .thumbnails
+                                .and_then(|t| t.get(c.id, c.source_in))
+                                .cloned(),
                         })
                     })
                     .collect(),
@@ -249,7 +280,13 @@ impl ViewState {
         );
         let _ = write!(s, "ruler");
         for t in &self.ticks {
-            let _ = write!(s, " {}{}", t.column, if t.major { "!" } else { "." });
+            let _ = write!(
+                s,
+                " {}{}{}",
+                t.column,
+                if t.major { "!" } else { "." },
+                t.relative
+            );
         }
         s.push('\n');
         for t in &self.tracks {
@@ -299,7 +336,10 @@ impl ViewState {
             );
         }
         if let Some(cmd) = &self.command_line {
-            let _ = writeln!(s, "cmdline :{cmd}");
+            let _ = writeln!(s, "cmdline :{}|{}", cmd.buffer, cmd.cursor);
+            if !cmd.completions.is_empty() {
+                let _ = writeln!(s, "completions {}", cmd.completions.join(" "));
+            }
         }
         if !self.pending.is_empty() {
             let _ = writeln!(s, "pending {}", self.pending);
@@ -370,8 +410,17 @@ fn ruler_ticks(tl: &davimci_core::Timeline, viewport: Viewport, cfg: &JumpConfig
             .to_vec()
     };
     let all = JumpPoints::build(tl, Some(tl.playhead().track), viewport.zoom(), cfg, &[]);
+    // Where the playhead sits in the jump-point sequence. Everything on
+    // screen is numbered relative to it, so the number on a tick is the
+    // count that lands there: `3l` goes to the tick labelled 3.
+    let points = all.points();
+    let here = match points.binary_search(&tl.playhead().frame) {
+        Ok(i) => i as i64,
+        // Between two points: the one behind is 0, so the one ahead is 1.
+        Err(i) => i as i64 - 1,
+    };
     let mut ticks: Vec<Tick> = Vec::new();
-    for f in all.points() {
+    for (i, f) in points.iter().enumerate() {
         let Some(column) = viewport.column_of(*f) else {
             continue;
         };
@@ -379,12 +428,20 @@ fn ruler_ticks(tl: &davimci_core::Timeline, viewport: Viewport, cfg: &JumpConfig
             frame: *f,
             column,
             major: major.binary_search(f).is_ok(),
+            relative: i32::try_from(i as i64 - here).unwrap_or(i32::MAX),
         };
         // Two jump points can quantise onto one column when zoomed out; the
         // taller tick wins so a clip boundary never disappears behind a
         // subdivision.
         match ticks.last_mut() {
-            Some(prev) if prev.column == column => prev.major |= tick.major,
+            Some(prev) if prev.column == column => {
+                prev.major |= tick.major;
+                // Keep the number nearest the playhead: the count that
+                // lands on this column is the smaller one.
+                if tick.relative.abs() < prev.relative.abs() {
+                    prev.relative = tick.relative;
+                }
+            }
             _ => ticks.push(tick),
         }
     }
