@@ -1,4 +1,4 @@
-//! The background job runner (spec §10.2, plan.md Phase 5).
+//! The background job runner (spec 10.2, plan.md Phase 5).
 //!
 //! Analysis and proxy generation run behind the editor: importing a file must
 //! not block the first keystroke. Jobs report progress for the status line

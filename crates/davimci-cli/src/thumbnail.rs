@@ -1,4 +1,4 @@
-//! Turning a decoded frame into a timeline thumbnail (idea.md, spec §15.2).
+//! Turning a decoded frame into a timeline thumbnail (idea.md, spec 15.2).
 //!
 //! Integral nearest-neighbour scaling, deliberately: a thumbnail is drawn a
 //! few pixels tall, the arithmetic has to be exactly reproducible for the

@@ -1,4 +1,4 @@
-//! Exact frame-based time (spec §7.1, plan.md Phase 1).
+//! Exact frame-based time (spec 7.1, plan.md Phase 1).
 //!
 //! A project has exactly one framerate. All positions are whole frame counts,
 //! so there is one and only one notion of "frame N" and edit points cannot
@@ -89,7 +89,7 @@ impl Fps {
 
     /// Nearest-frame mapping of a source frame at `from` onto this rate.
     ///
-    /// This is the default conform rule from spec §7.1: exact whole frames,
+    /// This is the default conform rule from spec 7.1: exact whole frames,
     /// no accumulation of rounding error, because each frame is mapped
     /// independently from its own timestamp rather than by stepping.
     #[must_use]
@@ -139,7 +139,7 @@ impl fmt::Display for Resolution {
     }
 }
 
-/// Project-level properties every clip is conformed to (spec §7.1).
+/// Project-level properties every clip is conformed to (spec 7.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TimelineProps {
     pub fps: Fps,
@@ -148,7 +148,7 @@ pub struct TimelineProps {
 }
 
 impl Default for TimelineProps {
-    /// The spec §14 baseline: 1080p60.
+    /// The spec 14 baseline: 1080p60.
     fn default() -> Self {
         Self {
             fps: Fps::FPS_60,

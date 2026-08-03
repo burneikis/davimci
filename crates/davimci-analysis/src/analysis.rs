@@ -1,4 +1,4 @@
-//! The analysis pass (spec §10.2, plan.md Phase 5).
+//! The analysis pass (spec 10.2, plan.md Phase 5).
 //!
 //! Everything is precomputed on import: peak and RMS at a fixed hop, silence
 //! spans, and optional scene-change points. Nothing is analysed while
@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 /// Bump to invalidate every cached analysis on disk.
 pub const ANALYSIS_VERSION: u32 = 1;
 
-/// Analysis settings. The 10 ms hop is the spec §10.2 default.
+/// Analysis settings. The 10 ms hop is the spec 10.2 default.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisParams {
     pub hop_ms: u32,

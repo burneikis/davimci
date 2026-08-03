@@ -13,7 +13,7 @@ use crate::request::Request;
 /// Identifies a callback the host must ask the runtime to invoke.
 pub type HandlerId = u32;
 
-/// A keymap right-hand side (spec §9.2): either a named editor command or a
+/// A keymap right-hand side (spec 9.2): either a named editor command or a
 /// Lua function.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Rhs {
@@ -30,12 +30,12 @@ pub struct KeyBinding {
     pub keys: Vec<Key>,
     pub rhs: Rhs,
     /// `{ interrupt = true }`: give this binding the `Interrupt` transport
-    /// policy (spec §3.2.1, §9.2). Only meaningful for a callback; a command
+    /// policy (spec 3.2.1, 9.2). Only meaningful for a callback; a command
     /// string takes the policy of the action it names.
     pub interrupt: bool,
 }
 
-/// A `davimci.textobject.register` definition (spec §9.4).
+/// A `davimci.textobject.register` definition (spec 9.4).
 pub struct ObjectDef {
     pub name: String,
     pub inner: Option<Function>,

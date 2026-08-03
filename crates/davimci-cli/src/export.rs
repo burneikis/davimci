@@ -4,7 +4,7 @@
 //! around it - which preset, to what file, and how the user hears about it.
 //! That is this module.
 //!
-//! An export is a **background job**. MLT's consumer runs off its own thread,
+//! An export is a background job. MLT's consumer runs off its own thread,
 //! so `start` returns immediately and `poll` reports progress; the editor
 //! stays usable while a render runs, which is the whole reason jobs exist in
 //! the view state at all.
@@ -294,7 +294,7 @@ fn with_extension_if_missing(path: &Path, container: Container) -> PathBuf {
 }
 
 /// The default output name for `:render <preset>`: the project's name with
-/// the preset's container extension (spec §12).
+/// the preset's container extension (spec 12).
 #[must_use]
 pub fn default_output(project: Option<&Path>, container: Container) -> PathBuf {
     let stem = project

@@ -1,17 +1,15 @@
 //! Frame pacing against the backend's audio clock (plan.md Phase 9b).
 //!
-//! Audio is the master clock (spec §10.1), so video is fitted to it rather
+//! Audio is the master clock (spec 10.1), so video is fitted to it rather
 //! than the other way round. Two policies, both counted so tests can assert
 //! them exactly:
 //!
-//! - **drop-late**: a decoded frame older than the clock is discarded *when a
-//!   newer one is behind it in the queue*. Dropping is how the picture
-//!   catches up with the sound, so it only ever skips towards the clock:
-//!   the newest frame that is not in the future is always presented, even
-//!   when it is itself behind the clock. Discarding it too would leave a
-//!   frozen picture over moving audio, since a frame handed over by the
-//!   backend is by construction a frame the clock has already passed.
-//! - **repeat-on-starve**: when no frame has arrived for the current clock
+//! - drop-late: a frame older than the clock is discarded only when a newer
+//!   one is behind it in the queue, so dropping always skips towards the
+//!   clock. The newest frame that is not in the future is always presented,
+//!   even when it is itself late; discarding that one too would freeze the
+//!   picture over moving audio.
+//! - repeat-on-starve: when no frame has arrived for the current clock
 //!   position, the last presented frame is shown again. A black flash is
 //!   worse than a repeated field.
 //!

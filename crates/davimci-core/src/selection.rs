@@ -1,4 +1,4 @@
-//! What an edit acts on: a time range across a set of tracks (spec §6).
+//! What an edit acts on: a time range across a set of tracks (spec 6).
 //!
 //! A visual selection lives in the key engine, but a `:` command runs in the
 //! host - so the shape of "what is selected" has to be a model type both can

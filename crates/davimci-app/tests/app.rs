@@ -47,7 +47,7 @@ impl Frontend for Recorder {
 #[derive(Debug, Default)]
 struct TestHost {
     commands: Vec<String>,
-    /// The selection each `:` line arrived with (spec §6.1).
+    /// The selection each `:` line arrived with (spec 6.1).
     selections: Vec<Option<Selection>>,
     quit: bool,
 }
@@ -77,7 +77,7 @@ fn an_edit_reports_its_description_in_the_status_line() {
     let mut app = App::new(Session::new(timeline()));
     let mut host = NullHost;
     // A split at frame 0 lands on a clip boundary and is rejected, so step
-    // one frame in first - `<Right>` is the fixed one-frame motion (spec §11).
+    // one frame in first - `<Right>` is the fixed one-frame motion (spec 11).
     for k in Key::parse_str("<Right>s") {
         app.key(k, &mut host);
     }
@@ -202,7 +202,7 @@ fn a_colon_line_carries_the_visual_selection_to_the_host() {
     let mut app = App::new(Session::new(timeline()));
     let mut host = TestHost::default();
     // `v` then `l` selects a range on V1; `:` clears the selection in the
-    // key engine, so the app must have remembered it (spec §6.1).
+    // key engine, so the app must have remembered it (spec 6.1).
     for k in Key::parse_str("vl") {
         app.key(k, &mut host);
     }
@@ -234,7 +234,7 @@ fn a_cancelled_colon_line_does_not_leak_its_selection_into_the_next_one() {
 /// A held `h`/`l` arrives as a burst of repeats in one poll. Every repeat
 /// must move the playhead, but the host - which seeks and decodes - is asked
 /// once, or the editor spends the whole burst decoding frames nobody sees
-/// and appears to freeze (idea.md, spec §14).
+/// and appears to freeze (idea.md, spec 14).
 #[test]
 fn a_burst_of_repeated_keys_seeks_once_and_still_moves_every_step() {
     let mut app = App::new(Session::new(timeline()));
@@ -503,7 +503,7 @@ fn a_later_import_leaves_the_viewport_alone() {
     assert_eq!(app.viewport().zoom(), before.zoom());
 }
 
-/// spec §3.2.1: the host is told to drop the clock *before* it is asked to
+/// Spec 3.2.1: the host is told to drop the clock *before* it is asked to
 /// repaint, or the repaint is swallowed by the still-running pacer.
 #[derive(Debug, Default)]
 struct TransportHost {
@@ -565,7 +565,7 @@ fn spec_section_3_2_1_an_ex_command_interrupts_before_it_runs() {
     assert!(host.calls.contains(&"command"));
 }
 
-/// A click seeks: navigation, not an edit (spec §15.2).
+/// A click seeks: navigation, not an edit (spec 15.2).
 #[test]
 fn clicking_the_timeline_moves_the_playhead_without_touching_the_undo_log() {
     let mut app = App::new(Session::new(timeline()));
@@ -638,7 +638,7 @@ fn a_click_past_the_end_clamps_to_the_last_frame() {
     assert!(app.session().timeline().playhead().frame < duration);
 }
 
-/// Spec §15.4: INSERT on a subtitle clip edits text, and Esc commits it as an
+/// Spec 15.4: INSERT on a subtitle clip edits text, and Esc commits it as an
 /// ordinary undoable command.
 #[test]
 fn a_committed_subtitle_edit_is_one_undoable_command() {

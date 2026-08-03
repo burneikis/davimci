@@ -136,7 +136,7 @@ All transport keys are remappable like any other binding. A user who wants
 `<Space>` bare as play/pause simply loses it as leader and remaps.
 
 Playing from the end of the timeline is refused with a reason rather than
-reported as playback: the playhead may legally sit there (§15.2), there is
+reported as playback: the playhead may legally sit there (spec 15.2), there is
 nothing after it, and a status line that says "playing" while nothing moves
 is a lie. Playback that has run to the end must be startable again from
 anywhere in bounds - reaching the end is a stop, never a state the editor has
@@ -162,7 +162,7 @@ runs.
 
 The `interrupt_transport` action stops playback without running anything else.
 It has no default binding; it exists so a user bind, a `:` mapping, or a Lua
-callback can pause explicitly (`editor.interrupt_transport`, §9.9). A Lua
+callback can pause explicitly (`editor.interrupt_transport`, 9.9). A Lua
 keymap callback defaults to `keep` and opts in per binding:
 
 ```lua
@@ -197,7 +197,7 @@ or bound:
 map("normal", "]a", motions.next_audio_peak({ track = "A2", threshold_db = -2 }))
 ```
 
-Predicate motions are answered by the analysis index (§10.2), which is built
+Predicate motions are answered by the analysis index (spec 10.2), which is built
 in the background. A query therefore has three outcomes, not two: a match, a
 definite no-match, or **pending**. A partially analysed track always reports
 pending - the playhead does not move and the status line says analysis is
@@ -249,7 +249,7 @@ otherwise.
 | `T` | Slip: shift a clip's source in/out points without moving it on the timeline |
 | `gT` | Slide: move a clip along the timeline, adjacent clips absorb the change |
 
-Note this reassigns `gt`/`gT` from §3.3's track cycling; track cycling moves to
+Note this reassigns `gt`/`gT` from section 3.3's track cycling; track cycling moves to
 `]t` / `[t` to free the more valuable trim bindings.
 
 ### 4.1 `dW`-style scoping (the user's shorthand)
@@ -284,13 +284,13 @@ of tracks the verb may touch:
 | `is` | the VISUAL selection; fails outside VISUAL | focused track only |
 
 `ac` resolves to the same range as `ic` until a transition is attached to one
-of the clip's cuts (§6.2); it then widens to cover the whole overlap, with no
+of the clip's cuts (spec 6.2); it then widens to cover the whole overlap, with no
 change at the call site.
 
 This directly answers the "edit single tracks at a time, or grouped tracks"
 requirement: **the object you delete/select determines whether the operation
 is track-scoped or group-scoped**, and grouping is a per-clip relationship
-(see §5).
+(see section 5).
 
 ---
 
@@ -353,7 +353,7 @@ on the clip, apply as filters at render time, and are undoable like any other
 command. Because they change the audio, they invalidate the analysis of that
 track: the envelope is dropped and analysis re-runs in the background, so
 predicate motions report `Pending` rather than a measurement of the pre-gain
-signal (§10.2). `:analyze` forces the same thing by hand.
+signal (spec 10.2). `:analyze` forces the same thing by hand.
 
 `:gain`, `:normalize`, `:fade` and `+`/`-` act on every clip the visual
 selection overlaps, or on the clip under the playhead when nothing is
@@ -413,7 +413,7 @@ still opens. Types are extensible from Lua.
 - **Import is one edit.** Every track and clip a file produces is added by a
   single undoable command, so `u` after an import removes exactly what the
   import added - tracks included - and redo reproduces the same ids. An import
-  into an empty project also sets the timeline properties (§7.1) as part of
+  into an empty project also sets the timeline properties (spec 7.1) as part of
   that same command.
 Every audio track is exported as its own stream where the container allows it
 (Matroska). Tracks are routed to their own channel range before they are
@@ -442,7 +442,7 @@ Every imported source is **conformed** to the timeline on import:
 This keeps the core `Frame(u64)` time model exact - there is one and only one
 notion of "frame N" in a project, so splits, ripples, and marks can never drift
 between tracks. Conforming is a *display and render* transformation; the
-original source is untouched and export always relinks to it (spec §10.3).
+original source is untouched and export always relinks to it (spec 10.3).
 
 Changing `timeline.fps` after clips exist re-conforms all clips and is a single
 undoable command; the editor warns that frame-exact edit points may shift.
@@ -460,7 +460,7 @@ undoable command; the editor warns that frame-exact edit points may shift.
     editor's decision.
   - `:export` with no `--preset` infers one from the output file's extension,
     and an output path with no extension takes the preset's.
-  - Export presets definable in Lua config (see §9)
+  - Export presets definable in Lua config (see section 9)
 
 ---
 
@@ -509,11 +509,11 @@ map("normal", "<Right>", "editor.step_frame(1)")
 
 Modes are named `normal`, `visual`, `visual-line`, `visual-block`, `insert`,
 `command`. A string right-hand side must name one of the `editor.*` commands
-in §9.9; an unknown name is rejected when the config loads, not when the key
+in section 9.9; an unknown name is rejected when the config loads, not when the key
 is first pressed.
 
 `map` takes an optional fourth argument, an options table. `interrupt = true`
-gives the binding the `interrupt` transport policy (§3.2.1), which is the way
+gives the binding the `interrupt` transport policy (spec 3.2.1), which is the way
 a Lua callback that edits stops playback before it runs:
 
 ```lua
@@ -571,7 +571,7 @@ require("davimci.export").preset("youtube_1080p", {
 
 A preset names a codec (`h264`, `h265`, `vp9`, `prores`, `aac`, `opus`,
 `flac`, `pcm`); the editor maps it to an ffmpeg encoder, so a preset never
-spells an encoder name (§10.3). Container/codec pairings are validated where
+spells an encoder name (spec 10.3). Container/codec pairings are validated where
 the preset is *defined*, not where it runs: a misspelled container is a user
 error and must be reported when the config loads rather than after a long
 render.
@@ -644,14 +644,14 @@ The `editor.*` commands bindable from a keymap or callable from a callback:
 | `editor.step_frame(n)` | `n` frames, sign gives direction |
 | `editor.step_jump_point(n)` | `n` jump points, sign gives direction |
 | `editor.play_pause` | `<Space><Space>` |
-| `editor.interrupt_transport` | stop playback, commit the playhead (§3.2.1) |
+| `editor.interrupt_transport` | stop playback, commit the playhead (spec 3.2.1) |
 | `editor.message(text)` | status-line message |
 
-A registered motion (§9.3) is a pure query: it receives a snapshot - the
+A registered motion (spec 9.3) is a pure query: it receives a snapshot - the
 playhead, the focused track, clip bounds, and analysis samples - and returns
 a frame. It cannot move the playhead itself, and a query against a track
 whose analysis has not finished reports "not yet" rather than a frame, the
-same rule the built-in predicate motions follow (§3.4).
+same rule the built-in predicate motions follow (spec 3.4).
 
 A user callback that throws is logged, disabled for the rest of the session,
 and anything it queued before throwing is discarded, so a half-run handler
@@ -671,7 +671,7 @@ Resolutions for the previously-open architectural questions. Each records the ch
 **Why:**
 - MLT's playlist/tractor model maps almost 1:1 onto our track/clip model, so split and ripple are cheap in-memory playlist mutations - no re-render.
 - Frame-accurate seeking, multi-track compositing, A/V sync, and a real-time preview consumer (SDL) all come for free.
-- Producers are FFmpeg-backed, so the MKV/multi-track import story in §7 is already covered.
+- Producers are FFmpeg-backed, so the MKV/multi-track import story in section 7 is already covered.
 - Raw FFmpeg would mean hand-writing a compositor, sync layer, and preview clock before the first `s` keypress works.
 
 **Constraint:** the timeline model is **engine-agnostic**. We own the clip, track, grouping, and undo data structures; MLT sits behind a narrow `RenderBackend` interface (seek, preview, render, probe). A custom renderer can replace it later without touching the editor core.
@@ -691,13 +691,13 @@ Resolutions for the previously-open architectural questions. Each records the ch
 **How:**
 - One analysis pass per source on import: peak + RMS waveform at a fixed hop (default 10 ms), silence spans, and optional scene-change keyframes.
 - Results cached to a versioned sidecar at `.davimci/cache/<content_hash>.analysis`. Cache version bumps invalidate.
-- Predicate motions (§3.4) become an indexed lookup (O(log n)), so `]a` is instant and correct even when zoomed fully out.
+- Predicate motions (spec 3.4) become an indexed lookup (O(log n)), so `]a` is instant and correct even when zoomed fully out.
 - The job runs in the background with progress in the status line. Editing is allowed immediately; predicate motions report `analysis pending` until the relevant range is ready.
 - Re-analysis is user-triggered (`:analyze`) after gain/filter changes.
 
 ### 10.3 Proxies: automatic above a threshold, transparent at export
 
-**Decision:** proxy generation is on by default but conditional, and runs in the same background job as §10.2.
+**Decision:** proxy generation is on by default but conditional, and runs in the same background job as section 10.2.
 
 **Rule:** generate a proxy when the source is above 1080p, or uses a long-GOP / expensive-to-seek codec (H.265, 10-bit, HEVC screen captures). Below that threshold, decode the original directly.
 
@@ -767,9 +767,9 @@ The project, config directory, Lua module namespace, and project-local file all 
 | `f` + motion | audio fade |
 | `+`/`-` | gain adjust |
 | `gx`/`dax` | create / delete transition at nearest cut |
-| `zi`/`zo`/`z0` | zoom in / out / reset to default zoom (§15.2) |
+| `zi`/`zo`/`z0` | zoom in / out / reset to default zoom (spec 15.2) |
 | `:export`, `:render` | export via command mode |
-| `:w`, `:q`, `:wq`, `:e` | project lifecycle (see §12) |
+| `:w`, `:q`, `:wq`, `:e` | project lifecycle (see section 12) |
 | `]a`, `[a` (example) | scripted predicate motions (user-defined) |
 
 ---
@@ -780,15 +780,15 @@ Projects behave like vim buffers, with the same command vocabulary.
 
 | Command | Action |
 |---|---|
-| `:w [path]` | Save project (compacted snapshot + command log, spec §10.4) |
+| `:w [path]` | Save project (compacted snapshot + command log, spec 10.4) |
 | `:q` / `:q!` | Close project; `:q` refuses on unsaved changes |
 | `:wq` / `:x` | Save and close |
 | `:e <path>` | Open a project or import a media file into a new timeline |
 | `:ls` | List open timelines |
 | `:bn` / `:bp` / `:b <n>` | Switch between open timelines |
-| `:new` | New empty timeline (prompts for fps/resolution, see §7.1) |
+| `:new` | New empty timeline (prompts for fps/resolution, see section 7.1) |
 | `:relink [old] <new>` | Point offline clips at media that moved |
-| `:analyze` | Re-run analysis on the current project (§10.2) |
+| `:analyze` | Re-run analysis on the current project (spec 10.2) |
 
 - Multiple timelines may be open simultaneously; registers and marks are
   **global** across timelines, so a yank in one can be pasted into another. A
@@ -798,7 +798,7 @@ Projects behave like vim buffers, with the same command vocabulary.
   a comparison against the saved point in the undo tree, not a sticky flag, so
   undoing back to the saved state makes the timeline clean again.
 - `:e` decides what a file is by reading it, not by its extension: a davimci
-  project opens as a project, anything else is imported as media (§7).
+  project opens as a project, anything else is imported as media (spec 7).
 - Where a command takes a single path (`:e`, `:w`, `:wq`), the argument is the
   **rest of the line**, not one whitespace-delimited word, so a filename with
   spaces needs no quoting or escaping. `:relink`, which takes two paths, is
@@ -815,8 +815,8 @@ Projects behave like vim buffers, with the same command vocabulary.
   it repoints every clip whose media path is `<old>`. It is one undoable
   command however many clips it touches, and the clips come back online only
   if the new path exists - otherwise they stay offline and export stays
-  blocked (§0 offline-media policy).
-- `ProjectLoaded` fires after project-local `.davimci.lua` evaluation (§9.7).
+  blocked (spec 0 offline-media policy).
+- `ProjectLoaded` fires after project-local `.davimci.lua` evaluation (spec 9.7).
 
 ---
 
@@ -841,7 +841,7 @@ The project is open source and not commercial.
 
 Deliberately coarse; the only hard requirement:
 
-- **1080p60 playback and editing must be smooth**, with preview scaling (§10.3,
+- **1080p60 playback and editing must be smooth**, with preview scaling (spec 10.3,
   proxies) permitted to hit it on expensive sources.
 - Editing operations (split, ripple delete, undo) should feel instant on a
   timeline of a few hundred clips.
@@ -850,7 +850,7 @@ Deliberately coarse; the only hard requirement:
   reprojection however many repeats it contains: every repeat moves the
   playhead, and only the frame the user ends on is decoded. Holding `h` or
   `l` must never lag behind the keyboard and must never stall.
-- Predicate motions are indexed lookups and must not scan (§10.2).
+- Predicate motions are indexed lookups and must not scan (spec 10.2).
 
 Anything beyond this is measured before it is optimized.
 
@@ -869,13 +869,13 @@ two-digit ruler number ends up drawn as one digit.
 
 `-- MODE (scope) --`, where scope is the focused track's name in `NORMAL`,
 `INSERT` and `COMMAND`, and the comma-joined list of selected tracks in a
-`VISUAL*` mode - e.g. `-- VISUAL (V1,A2) --` (§2). A running background job,
+`VISUAL*` mode - e.g. `-- VISUAL (V1,A2) --` (spec 2). A running background job,
 an active macro recording, and the most recent message follow it, in that
 order.
 
 ### 15.2 Viewport
 
-- One zoom level per timeline; it drives the jump-point set (§3.2) *and* the
+- One zoom level per timeline; it drives the jump-point set (spec 3.2) *and* the
   horizontal scale, so `h`/`l` and the ruler can never disagree.
 - **Scroll-follow:** after any motion, the playhead and the focused track are
   visible. Following the playhead outranks staying inside the timeline, since
@@ -969,4 +969,4 @@ order.
   and non-focusable, so the terminal keeps keyboard focus.
 - Timecode is `HH:MM:SS:FF` at the timeline's nominal rate; there is no
   drop-frame representation, because the model is whole frames at one rate
-  (§7.1).
+  (spec 7.1).

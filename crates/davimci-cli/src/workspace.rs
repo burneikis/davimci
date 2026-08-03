@@ -1,9 +1,9 @@
-//! Open timelines and the state shared between them (spec §12, plan.md
+//! Open timelines and the state shared between them (spec 12, plan.md
 //! Phase 8).
 //!
 //! A [`Buffer`] is one open timeline: a `Session`, the path it came from, and
 //! its autosave writer. A [`Workspace`] is the set of them plus the state
-//! spec §12 declares **global** - registers and marks are shared, so a yank
+//! Spec 12 declares global - registers and marks are shared, so a yank
 //! in one timeline pastes into another.
 //!
 //! Marks live on a `Timeline` because that is where the model puts them, so
@@ -21,7 +21,7 @@ use davimci_core::{Mark, Register, Timeline, TimelineProps};
 use crate::autosave::{self, Autosave, OnRecovery, Recovery};
 use crate::error::CliError;
 
-/// State shared by every open timeline (spec §12).
+/// State shared by every open timeline (spec 12).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Globals {
     pub registers: BTreeMap<char, Register>,
@@ -256,7 +256,7 @@ impl Workspace {
         self.autosave_path(0, Some(project))
     }
 
-    /// Is there an autosave ahead of this project file (spec §12 crash
+    /// Is there an autosave ahead of this project file (spec 12 crash
     /// recovery)?
     #[must_use]
     pub fn pending_recovery(&self, project: &Path) -> Option<Recovery> {

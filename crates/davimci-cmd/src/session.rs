@@ -32,7 +32,7 @@ impl Session {
         }
     }
 
-    /// Reopen a session with the history it was saved with (spec §10.4).
+    /// Reopen a session with the history it was saved with (spec 10.4).
     ///
     /// Undo does not stop at the save point: reopening a project and pressing
     /// `u` steps back through what was done before it was saved, the same way
@@ -84,7 +84,7 @@ impl Session {
     }
 
     /// Put content in a named register. Like marks, registers are
-    /// bookkeeping rather than timeline content, and spec §12 makes them
+    /// bookkeeping rather than timeline content, and spec 12 makes them
     /// global across open timelines - so the workspace, not a command,
     /// decides what they hold.
     pub fn set_register(&mut self, name: char, register: Register) {
@@ -167,7 +167,7 @@ impl Session {
         self.history.undolist()
     }
 
-    /// Snapshot the current state, as `:w` does (spec §10.4).
+    /// Snapshot the current state, as `:w` does (spec 10.4).
     pub fn mark_saved(&mut self) {
         self.history.snapshot_now(&self.timeline);
     }

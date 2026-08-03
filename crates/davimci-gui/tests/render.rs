@@ -213,7 +213,7 @@ fn the_picker_title_names_the_intent() {
     }
 }
 
-/// Spec §6.1: an analysed audio lane draws its envelope, and only that lane.
+/// Spec 6.1: an analysed audio lane draws its envelope, and only that lane.
 #[test]
 fn an_analysed_audio_lane_paints_a_waveform() {
     let view = fixtures::waveform();

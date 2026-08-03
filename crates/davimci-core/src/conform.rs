@@ -1,24 +1,21 @@
 //! Re-conform: changing the timeline's framerate with clips already on it
-//! (spec §7.1, plan.md Phase 5).
+//! (spec 7.1, plan.md Phase 5).
 //!
 //! The timeline has exactly one framerate. Changing it retimes every clip,
 //! marker, mark, register and the playhead, so there is still one and only
 //! one notion of "frame N". Nearest-frame mapping is computed independently
 //! per boundary from [`Fps::conform_frame`], so error never accumulates.
 //!
-//! Rounding can, however, collapse a short clip to zero frames or push two
-//! neighbours into an overlap. Both would break a Phase 1 invariant, so the
-//! whole retime is computed into a candidate and validated *before* anything
-//! is committed - a rejected re-conform leaves the timeline byte-identical
-//! (plan.md Phase 0 rule 1), and a lossy one is repaired rather than
-//! rejected: a collapsed clip keeps one frame and its neighbours are pushed
-//! along.
+//! Rounding can collapse a short clip to zero frames or overlap two
+//! neighbours, both of which break an invariant, so the retime is computed
+//! into a candidate and validated before anything is committed. A collapsed
+//! clip is repaired rather than rejected: it keeps one frame and its
+//! neighbours are pushed along.
 //!
-//! Because repair is lossy, the inverse of a re-conform is not another
-//! re-conform. [`Timeline::reconform`] therefore hands back the exact prior
-//! geometry, and [`Timeline::restore_conform`] puts it back verbatim; that
-//! pair is what makes `:set timeline.fps` a single, exactly invertible
-//! undoable command.
+//! Repair is lossy, so the inverse of a re-conform is not another re-conform.
+//! [`Timeline::reconform`] hands back the exact prior geometry and
+//! [`Timeline::restore_conform`] puts it back verbatim, which is what makes
+//! `:set timeline.fps` exactly invertible.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -61,7 +58,7 @@ impl Timeline {
         }
     }
 
-    /// Retime the whole timeline to `props` (spec §7.1).
+    /// Retime the whole timeline to `props` (spec 7.1).
     ///
     /// Returns the state as it was, which is the only exact inverse.
     pub fn reconform(&mut self, props: TimelineProps) -> Result<ConformState, CoreError> {

@@ -1,5 +1,5 @@
-//! The grammar's output: what a fully-parsed key sequence means (spec §3,
-//! §4, §4.0.1, §6, §11).
+//! The grammar's output: what a fully-parsed key sequence means (spec 3,
+//! spec 4, 4.0.1, 6, 11).
 //!
 //! [`Action`] is deliberately inert - it names an intent, nothing more, so
 //! [`crate::parser::Parser`] stays free of `Timeline`/`Session` access and
@@ -9,7 +9,7 @@
 use crate::mode::Mode;
 use davimci_motion::{BuiltinMotion, TextObject};
 
-/// A verb that takes a target (spec §4, §4.0.1, §6.1).
+/// A verb that takes a target (spec 4, 4.0.1, 6.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Operator {
     /// `d` / `dw` / `dd`: ripple delete.
@@ -65,7 +65,7 @@ pub enum ArgKind {
     MacroReplay,
 }
 
-/// A zoom step (spec §11, §15.2). Zoom is view state, not an edit, so this
+/// A zoom step (spec 11, 15.2). Zoom is view state, not an edit, so this
 /// never reaches the undo log; the engine hands it back to the host, which
 /// owns the viewport.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,7 +78,7 @@ pub enum ZoomIntent {
     Reset,
 }
 
-/// What an action does to a running preview (spec §3.2.1).
+/// What an action does to a running preview (spec 3.2.1).
 ///
 /// Playback owns the playhead while it runs, so an action that reads or
 /// writes the playhead cannot share the clock with it: the pacer would
@@ -169,9 +169,9 @@ pub enum Action {
     },
     /// `+` / `-`: adjust gain in dB.
     GainAdjust(i32),
-    /// `<Space>m`: toggle mute on the current track (spec §6.1).
+    /// `<Space>m`: toggle mute on the current track (spec 6.1).
     ToggleMute,
-    /// `<Space>s`: toggle solo on the current track (spec §6.1).
+    /// `<Space>s`: toggle solo on the current track (spec 6.1).
     ToggleSolo,
     /// `gx`: create a transition at the nearest cut.
     CreateTransition,
@@ -189,10 +189,10 @@ pub enum Action {
     PreviewAndReturn,
     /// `<Space>l`.
     LoopSelection,
-    /// `zi` / `zo` / `z0`: change the zoom level (spec §11).
+    /// `zi` / `zo` / `z0`: change the zoom level (spec 11).
     Zoom(ZoomIntent),
     /// A host-owned callback, bound by a Lua `map(mode, lhs, function)`
-    /// (spec §9.2). The id is opaque here on purpose: `davimci-keys` must not
+    /// (spec 9.2). The id is opaque here on purpose: `davimci-keys` must not
     /// depend on `davimci-lua`, so the engine reports it back and the host
     /// invokes it.
     ///
@@ -202,7 +202,7 @@ pub enum Action {
         id: u32,
         interrupt: bool,
     },
-    /// Stop playback and commit the playhead (spec §3.2.1). Unbound by
+    /// Stop playback and commit the playhead (spec 3.2.1). Unbound by
     /// default; exists for user binds and `editor.interrupt_transport`.
     InterruptTransport,
     /// `:`.
@@ -212,7 +212,7 @@ pub enum Action {
 }
 
 impl Action {
-    /// What this action does to a running preview (spec §3.2.1).
+    /// What this action does to a running preview (spec 3.2.1).
     #[must_use]
     pub fn transport_policy(&self) -> TransportPolicy {
         use TransportPolicy::{Interrupt, Keep};

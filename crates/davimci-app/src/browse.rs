@@ -1,4 +1,4 @@
-//! Listing a directory for the media picker (spec §3.2, `i`/`a`/`r`).
+//! Listing a directory for the media picker (spec 3.2, `i`/`a`/`r`).
 //!
 //! This lives in `davimci-app` rather than in a frontend because both the GUI
 //! and the TUI need exactly the same list in exactly the same order. A

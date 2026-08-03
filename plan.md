@@ -12,14 +12,14 @@ the ordering; phases are ordered by dependency only.
 |---|---|---|
 | Core language | Rust | Memory safety around the MLT C API, strong enum/pattern modelling for modes/commands, good test tooling. |
 | Lua runtime | `mlua` with **vendored Lua 5.4** (not system Lua) | System Lua on Arch is 5.5, which `mlua` does not support. Vendoring pins the version and makes builds reproducible. LuaJIT is a build-time alternative. |
-| Render backend | `libmlt` via a hand-written `-sys` crate + safe wrapper | Per spec §10.1. |
+| Render backend | `libmlt` via a hand-written `-sys` crate + safe wrapper | Per spec 10.1. |
 | Media probing | `ffprobe`/`libavformat` through MLT producers where possible | Avoid a second demux stack. |
 | Video presentation | `winit` + `wgpu` textured quad, frames pulled from MLT, audio clock as master | A terminal cannot present real-time video; MLT's own `sdl2` consumer owns its window and can't be composited with our overlays. |
 | Primary UI | Single-window GUI: `egui`-on-`wgpu` chrome + custom-painted timeline, sharing the surface with the video quad | Keyboard-first is an input grammar, not a pixel backend. One window, one focus, overlays on the video. |
 | Secondary UI | Optional TUI (`ratatui`) in the terminal + a detached, non-focusable video window | Reuses the same presenter crate; useful over SSH-with-display, tiling setups, and as an early checkpoint. |
 | Serialization | `serde` + a versioned on-disk format (JSON for the project, binary for analysis cache) | Human-diffable projects, compact caches. |
 | Errors | `thiserror` in libraries, `anyhow` only at the binary edge | Typed errors are required by the recovery policy in Phase 0. |
-| License | GPL-3.0, dynamically linking LGPL-2.1 `libmlt` | Per spec §13. Never static-link MLT; never vendor `melt`. |
+| License | GPL-3.0, dynamically linking LGPL-2.1 `libmlt` | Per spec 13. Never static-link MLT; never vendor `melt`. |
 
 ### Build prerequisites (Arch)
 
@@ -53,7 +53,7 @@ crates/
   davimci-cli/       binary, arg parsing, frontend selection, project open/save
 ```
 
-The hard rule from spec §10.1: nothing outside `davimci-mlt` may reference MLT
+The hard rule from spec 10.1: nothing outside `davimci-mlt` may reference MLT
 types. `davimci-core` must compile and be fully testable with the backend absent.
 
 ---
@@ -131,16 +131,16 @@ Testing:
 Deliverables:
 - `Timeline`, `Track` (video/audio/text/overlay), `Clip`, `Segment`, `Marker`,
   `Mark`, `Register`, `Playhead` (frame position + focused track).
-- Frame-based time type (`Frame(u64)` + single project framerate per spec §7.1)
+- Frame-based time type (`Frame(u64)` + single project framerate per spec 7.1)
   - no floats in the model, all rational conversion at the edges.
 - Timeline properties (fps, resolution, sample rate) as project-level state,
   with the conform rules that every clip is validated against.
 - Clip properties: gain, fades, transform, and link group - stored on the clip,
   applied as render-time filters, never destructive.
-- Per-clip linkage groups (spec §5), with link/unlink operations.
+- Per-clip linkage groups (spec 5), with link/unlink operations.
 - Primitive operations, pure and backend-free: `split_at`, `ripple_delete`,
   `lift`, `insert`, `overwrite`, `yank`, `paste`, `move_clip`, plus the full
-  trim family (`ripple_trim`, `roll`, `slip`, `slide`) from spec §4.0.1.
+  trim family (`ripple_trim`, `roll`, `slip`, `slide`) from spec 4.0.1.
 - Invariants: no overlapping clips within a track; ripple preserves total
   ordering; group ops keep linked clips frame-aligned; every clip duration is a
   whole number of timeline frames.
@@ -177,7 +177,7 @@ Deliverables:
   ids, since the id cursor is part of the serialized state.
 - Phase 1 gained the four model primitives these inverses need: `join_at`,
   id-preserving `restore`, `set_group`, and `set_clip_props`.
-- Undo **tree** with `u`, `Ctrl-r`, `g-`, `g+`, `:undolist` (spec §10.4).
+- Undo **tree** with `u`, `Ctrl-r`, `g-`, `g+`, `:undolist` (spec 10.4).
 - Snapshot-every-N-commands drift guard (default 100, and on save).
 - Repeat register for `.`, macro record/replay buffers for `q`/`@`.
 - Project file = last snapshot + command log since it; versioned with a
@@ -211,7 +211,7 @@ Deliverables:
 - Built-ins: `h`/`l` (jump points), frame step, `w`/`b`/`e`, `0`/`$`/`gg`/`G`,
   `{`/`}`, `%`, `gt`/`gT`, marks.
 - Jump-point engine: computes the point set from zoom level + configured
-  sources (clip bounds, markers, silence, peaks) per spec §3.2, cached and
+  sources (clip bounds, markers, silence, peaks) per spec 3.2, cached and
   invalidated on timeline or zoom change.
 - Text objects `ic`/`ac`/`it`/`at`/`is` resolving to (range, track scope).
 - Predicate motion interface backed by the Phase 5 analysis index; returns
@@ -232,7 +232,7 @@ jump-point set is memoised behind a fingerprint of everything it reads, so a
 stale hit is not representable. Predicate motions go through the
 `PredicateIndex` trait and report `Pending` until Phase 5 implements it;
 `ac` resolves to the same range as `ic` until a cut carries a transition, and
-widens to cover the overlap once one does (spec §4.1, Phase 9f).
+widens to cover the overlap once one does (spec 4.1, Phase 9f).
 
 ---
 
@@ -241,11 +241,11 @@ widens to cover the overlap once one does (spec §4.1, Phase 9f).
 Deliverables:
 - Input grammar: `[count] [register] operator [count] motion|textobject`,
   plus standalone commands, `g`-prefixed sequences, and `<Space>` leader
-  sequences (spec §3.2.1).
+  sequences (spec 3.2.1).
 - Transport bindings: `<Space><Space>` play/pause, `H`/`L` shuttle (no default stop key),
   `<Space>p` preview-and-return, `<Space>l` loop selection. Transport dispatches
   to the backend clock, **not** through the undo log - playback is not an edit.
-- Transport policy per action (spec §3.2.1): a motion or an edit typed during
+- Transport policy per action (spec 3.2.1): a motion or an edit typed during
   playback interrupts the clock and commits the playhead before it runs; zoom,
   mode changes, and the transport family itself leave it running. Lua bindings
   opt in with `{ interrupt = true }` and can pause explicitly with
@@ -266,7 +266,7 @@ Testing:
 - Ambiguity tests: user maps `gx` while `gd` exists; assert correct resolution
   and timeout behavior.
 - End-to-end headless tests: feed keys -> assert final timeline snapshot,
-  giving executable coverage of the keybinding table in spec §11.
+  giving executable coverage of the keybinding table in spec 11.
 
 Status: complete. The grammar (`davimci-keys::parser`) is a pure state machine
 over `davimci-motion`'s `BuiltinMotion`/`TextObject` types and never touches a
@@ -280,7 +280,7 @@ since navigation was never meant to be a `Command`.
 Known gaps, tracked against later phases rather than left silent: `i`/`a`/`r`
 need the Phase 5 media picker; `<`/`>` jump-point edge trims parse but are not wired to a command yet;
 visual-mode text-object narrowing (typing `it`/`at` while a selection is
-live, spec §6) is not implemented - operators in a `VISUAL*` mode act on the
+live, spec 6) is not implemented - operators in a `VISUAL*` mode act on the
 whole selection instead.
 
 ---
@@ -289,8 +289,8 @@ whole selection instead.
 
 Deliverables:
 - Import pipeline: probe container, expose every audio and subtitle stream in
-  an MKV as its own track (spec §7).
-- **Conform stage (spec §7.1):** framerate retime, resolution scale with
+  an MKV as its own track (spec 7).
+- **Conform stage (spec 7.1):** framerate retime, resolution scale with
   letterbox/crop policy, audio resample - so everything downstream sees a
   single-rate, single-resolution timeline. Project fps/resolution defaults from
   the first import.
@@ -300,7 +300,7 @@ Deliverables:
   scene-change keyframes.
 - Indexed store enabling O(log n) predicate lookups; sidecar cache at
   `.davimci/cache/<content_hash>.analysis`, versioned and invalidated on bump.
-- Proxy generation per spec §10.3, with the `BeforeExport` original-source
+- Proxy generation per spec 10.3, with the `BeforeExport` original-source
   guard.
 
 Testing:
@@ -347,7 +347,7 @@ Amendments made during implementation:
   list cannot answer in log time. `index::MaxTree` is a max segment tree with
   a directional descent, so `]a` is O(log n) for any threshold and never
   scans.
-- Spec §10.3's `prores_proxy` was not an ffmpeg encoder name; the slow tests
+- Spec 10.3's `prores_proxy` was not an ffmpeg encoder name; the slow tests
   caught it. The default is now `prores_ks` at profile 0, and spec.md says so.
 
 Not yet wired: nothing calls this from a frontend, because there is no
@@ -377,7 +377,7 @@ Deliverables:
 
 Testing:
 - Wrapper unit tests under ASan/LeakSanitizer specifically for refcounting
-  (spec §10.1 accepted risk): create/clone/drop cycles must show zero leaks.
+  (spec 10.1 accepted risk): create/clone/drop cycles must show zero leaks.
 - Projection tests: for a fixture timeline, assert the generated MLT XML
   matches a golden file - catches ripple/compositing regressions without
   rendering.
@@ -409,7 +409,7 @@ Amendments made during implementation:
 
 - The projection reads track mute/solo and the media offline flag, and nothing
   could set them, so Phase 1 gained `set_track_muted`, `set_track_solo`, and
-  `set_media_offline`. Solo turned out to need a defined meaning; spec §6.1
+  `set_media_offline`. Solo turned out to need a defined meaning; spec 6.1
   now says it is exclusive by effect, so any solo silences every non-solo
   track and the backend resolves it at projection time.
 - Pulling frames directly from a tractor bypasses the consumer that normally
@@ -457,7 +457,7 @@ Deliverables:
   session rather than crashing the editor.
 
 Testing:
-- Every code snippet in spec §9 becomes a test fixture that must load and
+- Every code snippet in spec 9 becomes a test fixture that must load and
   behave as documented - the spec is the acceptance suite.
 - Lua-driven integration tests: a `.lua` file registers a custom motion and
   keymap, harness feeds keys, asserts resulting timeline state.
@@ -473,16 +473,16 @@ writes.** A `davimci.*` call either registers something or appends a `Request`;
 the host runs each request through `davimci_cmd::Session`, so a plugin edit is
 an ordinary undo-tree entry and the single-write-path rule holds at the
 plugin boundary. That is also what keeps the crate testable: `Runtime` needs
-no timeline, no backend, and no window, and the spec §9 snippets run verbatim
+no timeline, no backend, and no window, and the spec 9 snippets run verbatim
 as the acceptance suite.
 
 Amendments made during implementation:
 
-- A Lua function right-hand side (spec §9.2) had nothing to resolve to, since
+- A Lua function right-hand side (spec 9.2) had nothing to resolve to, since
   `davimci-keys` must not depend on `davimci-lua`. `Action::Plugin(u32)` and
   `Outcome::Plugin(u32)` carry an opaque callback id instead: the engine
   reports it, the host invokes it, and `Engine::execute_action` (new, public)
-  runs whatever edits come back. Spec §9.9 now documents the request model
+  runs whatever edits come back. spec 9.9 now documents the request model
   and the `editor.*` command set that a string right-hand side may name.
 - A registered motion cannot be handed a live `Timeline` without becoming a
   second write path, so it receives a `MotionEnv` snapshot - playhead,
@@ -493,13 +493,13 @@ Amendments made during implementation:
 - Cancellation needed defining, not just implementing: a `BeforeExport`
   handler refuses by returning `false` *or* by throwing. Throwing also
   disables the handler (Phase 0 recoverable policy); a `false` return is a
-  deliberate veto and leaves it in place. Spec §9.8 says so now.
-- Trust is not a binary: spec §9.7 said "opt-in" without saying what a
+  deliberate veto and leaves it in place. spec 9.8 says so now.
+- Trust is not a binary: spec 9.7 said "opt-in" without saying what a
   trusted file may do. An untrusted `.davimci.lua` is never read, and a trusted
   one still runs sandboxed (no `os`, `io`, `load`, `dofile`, and a `require`
-  that resolves `davimci.*` only). Spec §9.7 now spells this out.
+  that resolves `davimci.*` only). spec 9.7 now spells this out.
 - Export presets validate at definition, and codec names map to ffmpeg
-  encoders here rather than in the preset, so §10.3's "never a marketing
+  encoders here rather than in the preset, so section 10.3's "never a marketing
   name" rule cannot be broken by a config.
 
 Not yet wired: no frontend calls any of this, so `Runtime::take_requests` has
@@ -513,7 +513,7 @@ the key grammar, which still resolves only the built-in `ic`/`ac`/`it`/`at`/
 
 ## Phase 8 - Project Lifecycle (`davimci-cli`)
 
-Deliverables (spec §12):
+Deliverables (spec 12):
 - `:w`, `:q`, `:q!`, `:wq`, `:e`, `:new`, `:ls`, `:bn`/`:bp`/`:b <n>`.
 - Multiple open timelines with global registers and marks shared across them.
 - Continuous autosave of the command log to `.davimci/autosave/`, never touching
@@ -531,7 +531,7 @@ Testing:
 Status: complete. `davimci-cli` is the first crate allowed to touch the
 filesystem, and it is split so that only the parts that must: `excmd::parse`
 is a pure function from a `:` line to an `ExCommand` and is table-tested
-against the spec §12 vocabulary, while `Workspace` is the only thing that
+against the spec 12 vocabulary, while `Workspace` is the only thing that
 reads or writes. Every edit it performs is still an `EditCommand` - `:relink`
 and `:e <media>` are ordinary undo-tree entries - so the single-write-path
 rule survives contact with I/O.
@@ -543,14 +543,14 @@ Amendments made during implementation:
   by the CLI, which is the only layer that may ask whether a file exists, and
   passed *in* to the command; `davimci-core` never stats a path. The inverse
   restores both the old path and the old offline flag, so a mistaken relink
-  is one `u` away. Spec §12 now documents both argument forms.
-- Spec §12 called registers and marks "global" but the model stores both on a
+  is one `u` away. spec 12 now documents both argument forms.
+- Spec 12 called registers and marks "global" but the model stores both on a
   `Timeline`. `Workspace` implements global by syncing on every buffer
   switch, and `Session::set_register` joins `set_mark` as a non-command
   escape hatch, on the same reasoning: a register is bookkeeping, not
   timeline content, and vim does not put either in the undo log. A mark's
   focused track is dropped when it crosses into a timeline that has no such
-  track; spec §12 says so now.
+  track; spec 12 says so now.
 - Dirty state is `history().current() != saved_at`, not a flag, so undoing
   back to the saved state is clean again. This fell out of the undo tree and
   is worth more than a boolean: it makes `:q` refuse exactly when the file
@@ -571,7 +571,7 @@ rebuild-on-demand guard, and keeping them would multiply a project file by
 its edit count. A version 1 document has no history and opens the way it
 always did, with the saved state as a fresh root.
 
-Still not wired: `:analyze` is listed in spec §12 but is not accepted yet,
+Still not wired: `:analyze` is listed in spec 12 but is not accepted yet,
 and a *recovered autosave* replays into a fresh tree, since the autosave log
 is a flat list of commands rather than a tree.
 
@@ -643,14 +643,14 @@ Amendments made during implementation:
 - Input is drained in batches (`App::drain`), and the two expensive host
   notifications - `timeline_changed`, `playhead_moved` - are issued once per
   batch. A held `h`/`l` repeats faster than a frame decodes; one seek per
-  repeat is what made holding a key lag and then freeze (spec §14).
+  repeat is what made holding a key lag and then freeze (spec 14).
 - Thumbnails ride the same seam as waveforms and job progress: the app asks
   for the visible video clips that have no current picture, nearest the
   playhead first, and the host publishes what it decoded. A thumbnail is keyed
   by the clip's in-point, so a trim or a slip invalidates it rather than
   showing the wrong frame.
-- Spec §15 is new: the status-line format for every mode, the scroll-follow
-  and zoom-anchoring rules, and the zoom keys `zi`/`zo`/`z0` (spec §11).
+- Spec 15 is new: the status-line format for every mode, the scroll-follow
+  and zoom-anchoring rules, and the zoom keys `zi`/`zo`/`z0` (spec 11).
   Zoom is view state, so `davimci-keys` only reports `Outcome::Zoom` and
   `App::zoom_*` applies it - the same entry point a pointer wheel or a menu
   uses, and nothing zoom-related reaches the undo log.
@@ -688,8 +688,7 @@ Testing:
   produces identical video pixels - proves the paths have not diverged.
 - Detached-window focus behavior is a manual checklist item (i3, floating).
 
-Status: pacing, fitting, composition and overlays complete; the windowed host
-is not written yet.
+Status: complete. The windowed host lives in `davimci-gui`'s `egui_shell`.
 
 What exists is the whole decision layer: `Pacer` (drop-late / repeat-on-starve
 with counters, tested against `MockBackend` for in-step, fast, starved and
@@ -710,7 +709,7 @@ Amendments made during implementation:
 - The presenter describes overlays, it does not rasterise text: a timecode is
   a string and safe areas are rectangles, drawn by the host's own text stack.
   Rasterising here would give the GUI and the TUI two different-looking
-  timecodes for the same frame. Spec §15.5 says so now, along with the
+  timecodes for the same frame. spec 15.5 says so now, along with the
   drop/repeat policy and the drop-frame-free timecode format.
 
 Defects found and fixed by running it against real media:
@@ -748,7 +747,7 @@ Deliverables:
   + `egui` chrome.
 - Status line, command line (`:`) with history and completion.
 - Media picker for `i`/`a`/`r`; text-edit INSERT mode for subtitle clips;
-  clip properties panel (spec §8 transforms).
+  clip properties panel (spec 8 transforms).
 - Key event translation into `davimci-keys` tokens; nothing else.
 
 Testing:
@@ -761,8 +760,8 @@ Testing:
 - Golden view-state reuse: renders are driven by the Phase 9a fixtures, so a
   view-state regression fails in both `davimci-app` and here.
 
-Status: the frontend's decision layer is complete and tested; the `winit` +
-`wgpu` + `egui` window that rasterises it is not written yet.
+Status: complete. The decision layer is tested with no display present, and
+the `egui` window that rasterises it is under "The shell" below.
 
 Implemented: `Layout` (video pane, ruler, track lanes and headers, status and
 command lines, derived from window size with a documented priority order),
@@ -784,7 +783,7 @@ Amendments made during implementation:
   golden view states from 9a drive it, so a view-state change fails in
   `davimci-app` and here - the reuse plan.md asked for, without a GPU in the
   test suite.
-- Modal behaviour needed defining rather than inventing: spec §15.3/§15.4 now
+- Modal behaviour needed defining rather than inventing: spec 15.3/15.4 now
   say that Esc or backspacing over the `:` cancels the line, that Tab
   completes to the longest common prefix, how the picker filters and wraps,
   and that an INSERT-mode edit ending equal to the original text commits
@@ -816,7 +815,7 @@ Amendments made during implementation:
 - Printable keys are taken from egui's `Event::Text` (already shifted by the
   platform layout) and named keys and Control chords from `Event::Key`, since
   `Text` is emitted for neither. Whitespace text is dropped so `Space` cannot
-  arrive twice - it is a leader (spec §3.2.1) and a double press would fire
+  arrive twice - it is a leader (spec 3.2.1) and a double press would fire
   the wrong binding.
 - The presenter's surface is kept equal to the video pane, so
   `davimci-present` letterboxes into exactly the rectangle that will be
@@ -833,18 +832,18 @@ Six more defects, all found the same way - by using the window:
 - **Holding `h`/`l` lagged and then froze.** Every key repeat seeked and
   decoded, so input outran the decoder. Input is now drained one batch per
   frame (`App::drain`) and the host is told once, so a burst costs one
-  picture (spec §14).
+  picture (spec 14).
 - **The `:` line was invisible while it was typed.** The app knew only that
   `COMMAND` was open; the buffer lived in the shell. The line is view state
   now - buffer, caret and completions - and the shell forwards keystrokes
-  instead of hoarding them (spec §15.3). Completion candidates come from the
+  instead of hoarding them (spec 15.3). Completion candidates come from the
   host's real vocabulary, and the matches are shown on a row above the line.
 - **Clip labels were painted under the waveform**, so an analysed lane had
-  unreadable clip names. Labels are drawn last (spec §15.2).
+  unreadable clip names. Labels are drawn last (spec 15.2).
 - **The ruler said where `h`/`l` would land but not how far**, so a count had
   to be guessed. Every tick carries a relative jump-point number, clip
   boundaries and subdivisions alike, thinned only where two would overlap
-  (spec §3.2). Labelling only the boundaries was the first attempt, and it
+  (spec 3.2). Labelling only the boundaries was the first attempt, and it
   was useless: the counts that need reading are the ones between cuts.
 - **Playback could not be restarted after it ran to the end.** Reaching the
   end leaves MLT's producer at speed zero, and `mlt_producer_seek` does not
@@ -852,9 +851,9 @@ Six more defects, all found the same way - by using the window:
   `preview_start` resets the speed, with a regression test that fakes the
   post-EOF state (`a_preview_started_after_playback_ran_off_the_end_plays_again`).
   Starting playback *from* the end is now refused with a sentence rather than
-  reported as playback (spec §3.2.1).
+  reported as playback (spec 3.2.1).
 
-Also added here: clip thumbnails (spec §15.2), drawn as a filmstrip - a
+Also added here: clip thumbnails (spec 15.2), drawn as a filmstrip - a
 picture every thumbnail-width, each of the media at that point. Two earlier
 attempts were wrong and both were caught by looking at the window: one picture
 at the clip's head is not a strip, and the same picture repeated is not a
@@ -881,9 +880,9 @@ Status: implemented, with one gap named below.
 
 The MLT side already existed; what was missing was everything around it.
 `davimci-backend::preset` holds the preset registry, and it is pure data - it
-maps a *codec* name to an ffmpeg encoder (spec §10.3) and refuses an
+maps a *codec* name to an ffmpeg encoder (spec 10.3) and refuses an
 impossible container/codec pairing when the preset is **defined**, not after
-a long render (spec §9.5). `davimci-cli::export` drives one, turning backend
+a long render (spec 9.5). `davimci-cli::export` drives one, turning backend
 progress into job updates and a final status line.
 
 `:export <path> [--preset <name>]`, `:render <preset>`, `:presets` and
@@ -895,7 +894,7 @@ batch export from the command line work.
 
 Amendments made during implementation:
 
-- `:cancel` and `:presets` were added to spec §7's export list; neither was
+- `:cancel` and `:presets` were added to spec 7's export list; neither was
   named there and both are needed to use the feature.
 - An export is a background job, so the editor stays live while one runs.
   Progress is polled on the tick, through a new `Host::jobs` seam, since a
@@ -919,7 +918,7 @@ Three findings, each a defect this work exposed:
   one track's audio and dropped the rest. That was a preview bug as much as
   an export one.
 - Clips carried no stream selection, so three audio tracks off one container
-  all decoded stream zero (spec §7 says one track per stream).
+  all decoded stream zero (spec 7 says one track per stream).
   `MediaRef` gained `stream` and `channels`, filled in at import.
 - The producers were missing MLT's *audio* normalisers. `loader.ini` lists
   `swresample`/`audiochannels` and `resample`, and the loader always adds
@@ -976,7 +975,7 @@ failed with a `:e <path>` usage error. The binary stringified an argv path
 into a `:` line, and the parser split it on whitespace. Two fixes, since
 there were two bugs: argv paths now go straight to `ExCommand::Edit` without
 a round trip through the parser, and a single-path command's argument is the
-rest of the line (spec §12), because media filenames contain spaces
+rest of the line (spec 12), because media filenames contain spaces
 constantly. Regression tests cover both spellings.
 
 Both remaining seams are now wired:
@@ -990,13 +989,13 @@ Both remaining seams are now wired:
   text, and the frontend opens its buffer; anywhere else it still asks for
   media. Committing sends `Event::TextEdited`, which the app applies as
   `EditCommand::SetClipText` - so text editing is one undo step, and an edit
-  that ends equal to the original commits nothing (spec §15.4).
+  that ends equal to the original commits nothing (spec 15.4).
 
 ### Wiring and transport (the glue)
 
 Status: complete. `davimci_cli::Editor` is the only type that holds a
 workspace, a `RenderBackend`, a `Presenter` and the transport at once, and it
-lives in the binary crate because no frontend may reference MLT (spec §10.1).
+lives in the binary crate because no frontend may reference MLT (spec 10.1).
 It implements `davimci_app::Host`, so the app drives it without knowing any
 of that exists. `davimci_cli::Transport` implements `<Space><Space>`, `J`/`K`/
 `L` and `<Space>p`.
@@ -1017,7 +1016,7 @@ Amendments made during implementation:
 - `App::replace_session` and `Engine::reset` were needed for `:e`/`:bn`: a
   viewport column, a visual selection and a half-typed sequence all mean
   something only in the timeline they were made in, so they are reset rather
-  than carried across. Registers survive, since spec §12 makes them global.
+  than carried across. Registers survive, since spec 12 makes them global.
 - Session ownership had to be decided rather than duplicated. `App` owns the
   live session; `Workspace` owns the buffers. The live one is pushed in
   before a `:` command and pulled back after
@@ -1080,7 +1079,7 @@ Testing:
 
 Status: implemented, with the selection-scope gap named below.
 
-Deferred to here deliberately (spec §6.1): these are clip properties applied as
+Deferred to here deliberately (spec 6.1): these are clip properties applied as
 render-time filters, so they need the backend and a UI to be worth having.
 
 Deliverables:
@@ -1136,12 +1135,12 @@ which belongs with the rest of playback rather than here.
 
 Status: implemented, apart from the Lua-side registry named below.
 
-Deliverables (spec §6.2):
+Deliverables (spec 6.2):
 - Transition objects occupying a clip overlap; `gx`, `:transition`, `dax`.
 - Handle-frame validation with a clear failure when handles are insufficient
   (Phase 0 user-error class - reject before mutating).
 - Mapping onto MLT transitions; Lua-extensible registry.
-- Makes the `ac` text object (spec §4.1) fully meaningful.
+- Makes the `ac` text object (spec 4.1) fully meaningful.
 
 Testing:
 - Handle-availability tests: sufficient, insufficient, and exactly-enough.
@@ -1170,7 +1169,7 @@ Amendments made during implementation:
   a build without it.
 - `:set transition.duration <frames>` is not a separate command: there is no
   `:set` family yet, and re-running `:transition <name> <frames>` on the same
-  cut replaces what is there, which covers it. spec §6.2 says so.
+  cut replaces what is there, which covers it. spec 6.2 says so.
 
 Remaining: the Lua side of the registry. `transitions::spec` is the seam it
 needs, and adding it means a `RenderBackend` method so `davimci-lua` can
@@ -1184,12 +1183,12 @@ Deliverables:
 - Headless scripted-session runner: a file of keystrokes plus assertions,
   usable as both a test format and a debugging tool.
 - Crash recovery: autosave of the command log; recover on next open.
-- Performance validation against spec §14: **1080p60 playback and editing must
+- Performance validation against spec 14: **1080p60 playback and editing must
   be smooth**; split/ripple/undo instant on a few hundred clips; predicate
   motions never scan. Coarse targets, measured before any optimization.
 
 Testing:
-- Full-workflow integration tests mirroring spec §1: import multi-track MKV ->
+- Full-workflow integration tests mirroring spec 1: import multi-track MKV ->
   ripple-delete sections -> mute/trim one audio track -> add an overlay ->
   add subtitles -> export; assert final `ffprobe` output and a golden timeline
   snapshot.
@@ -1263,13 +1262,13 @@ mind from the start (cheap), but only one host is *implemented* until M6
 
 ## Deferred (tracked, not in v1)
 
-- GPU preview path (spec §10.6) - largely resolved by the `wgpu` presenter;
+- GPU preview path (spec 10.6) - largely resolved by the `wgpu` presenter;
   what remains deferred is zero-copy hardware-decode surface import.
 - Terminal-inline preview (kitty/sixel via `ratatui-image`) as a fallback for
   the TUI when no window can be opened. Explicitly low priority: escape-
   sequence throughput gives no frame-pacing guarantees, so it can never be the
   primary path.
-- Custom subtitle layout engine vs. MLT built-in producers (spec §10.6).
+- Custom subtitle layout engine vs. MLT built-in producers (spec 10.6).
 - Beat detection as a jump-point source.
 - Advanced audio: EQ, compression, noise reduction beyond `:duck`.
 - Video effects/filters beyond transform and transitions.

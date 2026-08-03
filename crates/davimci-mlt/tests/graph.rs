@@ -99,7 +99,7 @@ fn a_split_patches_the_playlist_instead_of_rebuilding_the_graph() {
     assert_eq!(
         (b.rebuilds, b.patches),
         (1, 1),
-        "a split is a playlist mutation, not a rebuild (spec §10.1)"
+        "a split is a playlist mutation, not a rebuild (spec 10.1)"
     );
 
     // And the patched graph still plays.

@@ -93,7 +93,7 @@ fn inset(quad: Quad, percent: u32) -> Quad {
 }
 
 /// `HH:MM:SS:FF`, non-drop-frame: davimci's model is whole frames at one rate
-/// (spec §7.1), so there is no drop-frame case to represent.
+/// (spec 7.1), so there is no drop-frame case to represent.
 #[must_use]
 pub fn timecode(position: Frame, fps: Fps) -> String {
     let rate = fps.as_f64().round().max(1.0) as u64;

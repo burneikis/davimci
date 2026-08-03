@@ -149,7 +149,7 @@ impl Gui {
                 self.open_picker_at(intent_of(*intent), &dir);
             }
             // `i` on a subtitle clip edits its text rather than opening a
-            // picker (spec §8, §15.4).
+            // picker (spec 8, 15.4).
             Response::EditText { clip, text } => {
                 self.open_subtitle(SubtitleEdit::new(*clip, text.clone()));
             }
@@ -251,7 +251,7 @@ impl Gui {
             match ev {
                 SubtitleEvent::Editing => {}
                 // An edit that ends equal to the original commits nothing at
-                // all (spec §15.4), so the app is told it was abandoned.
+                // all (spec 15.4), so the app is told it was abandoned.
                 SubtitleEvent::Unchanged => {
                     self.subtitle = None;
                     self.out.push(Event::TextEditCancelled);

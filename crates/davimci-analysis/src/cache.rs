@@ -1,4 +1,4 @@
-//! The analysis sidecar cache (spec §10.2).
+//! The analysis sidecar cache (spec 10.2).
 //!
 //! Analysis is expensive and deterministic, so it is written to
 //! `.davimci/cache/<content_hash>.analysis` next to the project and reused on

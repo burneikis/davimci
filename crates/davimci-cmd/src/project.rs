@@ -1,4 +1,4 @@
-//! The project format: last snapshot + the command log since it (spec §10.4).
+//! The project format: last snapshot + the command log since it (spec 10.4).
 //!
 //! No I/O lives here - `davimci-cmd` stays a pure library (plan.md cross-cutting
 //! rule 1). `davimci-cli` reads and writes the bytes; this module only turns a
@@ -18,7 +18,7 @@ use crate::session::Session;
 /// previous version.
 ///
 /// Version 2 added the undo tree: a reopened project keeps its history
-/// (spec §10.4).
+/// (spec 10.4).
 pub const FORMAT_VERSION: u32 = 2;
 
 /// A saved project.
@@ -209,7 +209,7 @@ mod tests {
 
     #[test]
     fn opening_a_project_keeps_the_history_it_was_saved_with() {
-        // Spec §10.4: undo does not stop at the save point.
+        // spec 10.4: undo does not stop at the save point.
         let s = saved_session();
         let text = ProjectFile::from_session(&s).to_json().unwrap();
         let mut opened = ProjectFile::from_json(&text)

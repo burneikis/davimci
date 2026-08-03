@@ -1,4 +1,4 @@
-//! Import + analysis, wired together (spec §10.2, plan.md Phase 5).
+//! Import + analysis, wired together (spec 10.2, plan.md Phase 5).
 //!
 //! The order matters and is the whole point of the phase: probe, conform,
 //! import, then *return*. Analysis and proxy generation are queued behind the
@@ -33,7 +33,7 @@ pub struct AnalysisReady {
     pub analysis: Analysis,
 }
 
-/// Analyse one stream, using the cache when it is valid (spec §10.2).
+/// Analyse one stream, using the cache when it is valid (spec 10.2).
 ///
 /// A cache hit skips decoding entirely. A miss, a version bump, or a corrupt
 /// entry all recompute; a cache that cannot be *written* is a warning, not a

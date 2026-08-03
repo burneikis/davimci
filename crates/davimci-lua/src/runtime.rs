@@ -30,13 +30,13 @@ pub enum Sandbox {
     Restricted,
 }
 
-/// A clip handed to a user text object (spec §9.4).
+/// A clip handed to a user text object (spec 9.4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClipInfo {
     pub start: u64,
     pub end: u64,
-    /// The clip plus its adjoining transitions. Equal to the core range
-    /// until Phase 9f adds transitions.
+    /// The clip plus its adjoining transitions. Equal to the core range when
+    /// the clip has none.
     pub with_transitions_start: u64,
     pub with_transitions_end: u64,
 }
@@ -247,7 +247,7 @@ impl Runtime {
         }
     }
 
-    /// Fire an event at every enabled handler bound to it (spec §9.8).
+    /// Fire an event at every enabled handler bound to it (spec 9.8).
     ///
     /// A handler refuses a cancellable event either by returning `false`
     /// (optionally with a message) or by raising an error. Raising also
@@ -321,7 +321,7 @@ impl Runtime {
         self.disabled.borrow_mut().insert(id);
     }
 
-    /// Run a registered motion (spec §9.3) against a snapshot.
+    /// Run a registered motion (spec 9.3) against a snapshot.
     ///
     /// The snapshot is the whole contract: a motion sees frames and samples,
     /// never a live timeline, so it cannot mutate anything and needs no
@@ -369,7 +369,7 @@ impl Runtime {
         }
     }
 
-    /// Resolve a user text object (spec §9.4) to a frame range.
+    /// Resolve a user text object (spec 9.4) to a frame range.
     pub fn run_object(
         &self,
         name: &str,

@@ -5,7 +5,7 @@
 //! per track, blanks for gaps, one entry per clip with its render-time
 //! filters. `xml` serialises this shape for the golden tests, and `patch`
 //! diffs two of them so an edit becomes playlist mutations rather than a
-//! rebuild (spec §10.1).
+//! rebuild (spec 10.1).
 
 use davimci_core::{Clip, ClipId, Frame, Timeline, TimelineProps, TrackId, TrackKind, Transition};
 
@@ -14,7 +14,7 @@ use davimci_core::{Clip, ClipId, Frame, Timeline, TimelineProps, TrackId, TrackK
 pub enum Resource {
     /// A conformed media file on disk.
     File(String),
-    /// A generated text/subtitle clip (spec §8).
+    /// A generated text/subtitle clip (spec 8).
     Text(String),
     /// Offline media: renders as a placeholder so the project stays editable
     /// while export stays blocked (Phase 0).
@@ -49,7 +49,7 @@ impl Resource {
 
 /// Which stream of a container an entry plays.
 ///
-/// A multi-stream file becomes one track per stream (spec §7), so an entry
+/// A multi-stream file becomes one track per stream (spec 7), so an entry
 /// that does not name its stream would play the demuxer's default and every
 /// audio track would carry the same samples.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,7 +58,7 @@ pub enum StreamSelect {
     Video(u32),
 }
 
-/// A render-time filter attached to one entry. Never destructive (spec §6.1).
+/// A render-time filter attached to one entry. Never destructive (spec 6.1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FilterSpec {
     pub service: String,
@@ -73,7 +73,7 @@ pub struct ClipEntry {
     pub resource: Resource,
     /// Inclusive in-point into the source, in timeline frames.
     pub in_point: Frame,
-    /// **Inclusive** out-point: MLT's `out` is the last frame, not one past
+    /// Inclusive out-point: MLT's `out` is the last frame, not one past
     /// it, which is the one off-by-one this whole layer exists to contain.
     pub out_point: Frame,
     /// Which stream of the resource to decode, when the resource has more
@@ -93,7 +93,7 @@ impl ClipEntry {
     }
 }
 
-/// The overlap between two clips, projected (spec §6.2).
+/// The overlap between two clips, projected (spec 6.2).
 ///
 /// MLT has no "transition inside a playlist": a transition composites two
 /// *tracks*. So the overlap becomes one playlist entry that is itself a
@@ -248,7 +248,7 @@ impl Projection {
                     // The overlap is made of handle frames on both sides, so
                     // it eats into this clip's head and the previous clip's
                     // tail; the entries around it are shortened to match and
-                    // the timeline length is unchanged (spec §6.2).
+                    // the timeline length is unchanged (spec 6.2).
                     let incoming = attached(track, i);
                     let outgoing = attached(track, i + 1);
                     // The previous entry has already been shortened by this
@@ -281,7 +281,7 @@ impl Projection {
         }
     }
 
-    /// The incoming clip of every projected transition (spec §6.2).
+    /// The incoming clip of every projected transition (spec 6.2).
     ///
     /// The backend owns one nested tractor per transition and uses this to
     /// know which ones a patch has left behind.
@@ -448,7 +448,7 @@ fn project_clip(clip: &Clip, kind: TrackKind) -> ClipEntry {
     }
 }
 
-/// Clip properties become filters; the media is never touched (spec §6.1).
+/// Clip properties become filters; the media is never touched (spec 6.1).
 fn filters_for(clip: &Clip, kind: TrackKind) -> Vec<FilterSpec> {
     let mut out = Vec::new();
     let props = &clip.props;
@@ -616,7 +616,7 @@ mod tests {
         assert_eq!(c.length(), 1);
     }
 
-    /// The load-bearing property of spec §6.2: the overlap is made of handle
+    /// The load-bearing property of spec 6.2: the overlap is made of handle
     /// frames, so planting one changes no clip's position and no track's
     /// length - it only moves the in and out points around the cut.
     #[test]

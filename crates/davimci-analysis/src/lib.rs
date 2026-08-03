@@ -1,5 +1,5 @@
-//! Media import, conform, and analysis (plan.md Phase 5, spec §7, §10.2,
-//! §10.3).
+//! Media import, conform, and analysis (plan.md Phase 5, spec 7, 10.2,
+//! spec 10.3).
 //!
 //! The shape of this crate follows one rule: everything that can be a pure
 //! function of data is one, and the parts that must touch the outside world

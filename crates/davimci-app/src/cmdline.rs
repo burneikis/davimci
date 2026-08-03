@@ -259,7 +259,7 @@ impl CommandLine {
     }
 }
 
-/// The spec §12 vocabulary, as a default candidate list for a host that has
+/// The spec 12 vocabulary, as a default candidate list for a host that has
 /// not supplied one.
 #[must_use]
 pub fn default_candidates() -> Vec<String> {

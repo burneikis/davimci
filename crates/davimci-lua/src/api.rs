@@ -1,4 +1,4 @@
-//! The `davimci.*` module surface (spec §9.2 - §9.8).
+//! The `davimci.*` module surface (spec 9.2 to 9.8).
 //!
 //! Every module is a plain table published into `package.loaded`, so the
 //! documented `require("davimci.keymap")` form works without a `package.path`
@@ -19,7 +19,7 @@ use crate::preset::{ExportPreset, SubtitleSelection, TrackSelection, parse_resol
 use crate::registry::{Autocmd, KeyBinding, ObjectDef, Rhs, State, parse_mode};
 use crate::request::{OptValue, Opts, Request, parse_editor_command};
 
-/// The v1 event list (spec §9.8). A typo in an event name binds a handler
+/// The v1 event list (spec 9.8). A typo in an event name binds a handler
 /// that would never fire, so it is rejected at registration.
 pub const EVENTS: &[&str] = &[
     "PlayheadMoved",

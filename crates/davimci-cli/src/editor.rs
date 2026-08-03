@@ -3,7 +3,7 @@
 //!
 //! This is the only place that is allowed to know about all of them at once.
 //! It lives in the binary crate on purpose: no frontend may reference MLT
-//! (spec §10.1), so the thing that owns a `RenderBackend` *and* a frontend
+//! (spec 10.1), so the thing that owns a `RenderBackend` *and* a frontend
 //! cannot be `davimci-gui`.
 //!
 //! Session ownership: `App` owns the live session, the workspace owns the
@@ -164,7 +164,7 @@ impl Editor {
                     Err(e) => return Some(Err(e.into())),
                 };
                 // `:render` names the file after the project, so the common
-                // case needs no path at all (spec §12).
+                // case needs no path at all (spec 12).
                 let out = crate::export::default_output(
                     self.workspace.current().path().map(std::path::Path::new),
                     container,
@@ -182,7 +182,7 @@ impl Editor {
         }
     }
 
-    /// `:normalize` and `:duck` (spec §6.1).
+    /// `:normalize` and `:duck` (spec 6.1).
     ///
     /// They live here rather than in the workspace for the same reason the
     /// export commands do: they need something the workspace has no business
@@ -283,7 +283,7 @@ impl Editor {
         ))
     }
 
-    /// Import a picked file at the position the intent implies (spec §3.2).
+    /// Import a picked file at the position the intent implies (spec 3.2).
     ///
     /// All three intents are one command, so one `u` undoes the whole import
     /// including the delete that `r` needs.
@@ -683,7 +683,7 @@ impl Host for Editor {
         self.project(session);
         // Analysis follows the timeline: a new audio track is queued, and a
         // gain or fade change invalidates what was measured before it
-        // (spec §6.1, §10.2).
+        // (spec 6.1, 10.2).
         self.analyser.sync(session.timeline());
     }
 

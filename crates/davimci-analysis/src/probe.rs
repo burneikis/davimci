@@ -1,8 +1,8 @@
-//! Container probing (spec §7, plan.md Phase 5).
+//! Container probing (spec 7, plan.md Phase 5).
 //!
 //! Probing answers one question: what streams are in this file, and what
 //! shape is each one? Every audio and subtitle stream in an MKV must be
-//! visible here, because §7 requires each to become its own track.
+//! visible here, because section 7 requires each to become its own track.
 //!
 //! The parser is separated from the process launch on purpose: JSON in,
 //! [`MediaInfo`] out is a pure function, so the whole stream-mapping matrix
@@ -46,7 +46,7 @@ pub struct StreamInfo {
     pub channels: Option<u32>,
     /// Length in *source* frames or samples, when the container states it.
     pub frames: Option<u64>,
-    /// Bit depth, when stated. Part of the proxy threshold rule (spec §10.3).
+    /// Bit depth, when stated. Part of the proxy threshold rule (spec 10.3).
     pub bit_depth: Option<u32>,
 }
 

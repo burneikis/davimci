@@ -1,4 +1,4 @@
-//! Spec §9 is the acceptance suite: every snippet in the spec appears here
+//! Spec 9 is the acceptance suite: every snippet in the spec appears here
 //! verbatim and must load and behave as documented (plan.md Phase 7).
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -20,9 +20,9 @@ fn exec(rt: &Runtime, src: &str) {
         .unwrap_or_else(|e| panic!("chunk failed: {e}"));
 }
 
-// ---------------------------------------------------------------- §9.2 ----
+// spec 9.2
 
-/// Spec §9.2, verbatim.
+/// Spec 9.2, verbatim.
 const SPEC_9_2: &str = r#"
 local map = require("davimci.keymap").map
 
@@ -116,9 +116,9 @@ fn a_later_map_of_the_same_key_replaces_the_earlier_one() {
     );
 }
 
-// ---------------------------------------------------------------- §9.3 ----
+// spec 9.3
 
-/// Spec §9.3, verbatim apart from the `map` local the snippet assumes.
+/// Spec 9.3, verbatim apart from the `map` local the snippet assumes.
 const SPEC_9_3: &str = r#"
 local motions = require("davimci.motions")
 local map = require("davimci.keymap").map
@@ -232,9 +232,9 @@ fn running_an_unregistered_motion_is_a_user_error() {
     assert_eq!(e.class(), ErrorClass::User);
 }
 
-// ---------------------------------------------------------------- §9.4 ----
+// spec 9.4
 
-/// Spec §9.4, verbatim.
+/// Spec 9.4, verbatim.
 const SPEC_9_4: &str = r#"
 local textobj = require("davimci.textobject")
 
@@ -278,9 +278,9 @@ fn an_object_with_neither_form_is_rejected() {
     );
 }
 
-// ---------------------------------------------------------------- §9.5 ----
+// spec 9.5
 
-/// Spec §9.5, verbatim.
+/// Spec 9.5, verbatim.
 const SPEC_9_5: &str = r#"
 require("davimci.export").preset("youtube_1080p", {
   container = "mp4",
@@ -342,9 +342,9 @@ fn an_impossible_codec_pairing_is_refused_at_definition() {
     assert!(rt.preset_names().is_empty());
 }
 
-// ---------------------------------------------------------------- §9.6 ----
+// spec 9.6
 
-/// Spec §9.6, verbatim.
+/// Spec 9.6, verbatim.
 const SPEC_9_6: &str = r#"
 require("davimci.timeline").configure({
   jump_points = { "clip_bounds", "markers", "silence" },
@@ -389,9 +389,9 @@ fn a_rejected_configure_leaves_the_previous_settings_intact() {
     assert_eq!(rt.timeline_config(), before);
 }
 
-// ---------------------------------------------------------------- §9.8 ----
+// spec 9.8
 
-/// Spec §9.8, verbatim.
+/// Spec 9.8, verbatim.
 const SPEC_9_8: &str = r#"
 require("davimci.autocmd").on("SplitPerformed", function(event)
   -- e.g. auto-tag both resulting clips
@@ -497,7 +497,7 @@ fn an_unknown_event_name_is_rejected_at_registration() {
     assert!(e.user_message().contains("PlayheadMoved"), "{e}");
 }
 
-// -------------------------------------------------- hooks and cancellation --
+// hooks and cancellation
 
 #[test]
 fn a_before_export_handler_raising_an_error_aborts_the_render() {
@@ -596,7 +596,7 @@ fn a_handler_can_be_removed_with_off() {
     assert_eq!(rt.exec_eval_number("count"), 0.0);
 }
 
-// ------------------------------------------------------- error isolation --
+// error isolation
 
 #[test]
 fn a_throwing_handler_is_disabled_for_the_session_and_the_editor_survives() {
@@ -684,7 +684,7 @@ fn a_broken_config_file_costs_only_that_file() {
     std::fs::remove_dir_all(&root).unwrap();
 }
 
-// ------------------------------------------------------ §9.7 project-local --
+// section 9.7 project-local
 
 fn scratch(name: &str) -> PathBuf {
     let p = std::env::temp_dir().join(format!(
@@ -777,7 +777,7 @@ fn a_missing_project_local_file_is_silent() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-// ---------------------------------------------------------- editor bridge --
+// editor bridge
 
 #[test]
 fn editor_calls_queue_requests_instead_of_editing() {
@@ -836,7 +836,7 @@ fn the_runtime_is_debug_printable_for_diagnostics() {
     assert!(s.contains("youtube_1080p"), "{s}");
 }
 
-/// spec §9.2: a callback binding opts into interrupting playback; without
+/// Spec 9.2: a callback binding opts into interrupting playback; without
 /// the option it keeps the clock, because the grammar cannot know whether
 /// the Lua function edits.
 #[test]
@@ -865,7 +865,7 @@ fn spec_section_9_2_a_keymap_opts_into_interrupting_playback() {
     assert!(!policy("gk").interrupts());
 }
 
-/// spec §9.9: plugins and string bindings can pause playback explicitly.
+/// Spec 9.9: plugins and string bindings can pause playback explicitly.
 #[test]
 fn spec_section_9_9_interrupt_transport_is_callable_and_bindable() {
     assert_eq!(

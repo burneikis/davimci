@@ -1,6 +1,6 @@
 //! Safe, RAII wrappers over the raw MLT handles.
 //!
-//! MLT is refcounted C with manual `*_close` calls; spec §10.1 accepts that
+//! MLT is refcounted C with manual `*_close` calls; spec 10.1 accepts that
 //! risk and asks for exactly this layer plus a test suite that exercises it.
 //! The rules here are:
 //!
@@ -113,7 +113,7 @@ impl<'a> Properties<'a> {
     }
 }
 
-/// An MLT profile: the project's single framerate and resolution (spec §7.1).
+/// An MLT profile: the project's single framerate and resolution (spec 7.1).
 #[derive(Debug)]
 pub struct Profile {
     raw: sys::mlt_profile,
@@ -768,7 +768,7 @@ mod tests {
         assert_eq!(p.fps(), (24_000, 1001));
     }
 
-    /// The spec §10.1 accepted risk, tested directly: a cloned handle is a
+    /// The spec 10.1 accepted risk, tested directly: a cloned handle is a
     /// counted reference, and dropping it gives the count back.
     #[test]
     fn clone_ref_is_balanced_by_drop() {

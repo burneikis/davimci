@@ -1,9 +1,9 @@
-//! Clip thumbnails for the timeline (idea.md, spec §15.2).
+//! Clip thumbnails for the timeline (idea.md, spec 15.2).
 //!
 //! A clip is drawn as a filmstrip: several pictures across its width, each
 //! one of the media at *that* point, so a strip reads as the shot changing
 //! rather than as one frame stamped repeatedly. Each picture is therefore
-//! identified by the **source** frame it shows, which is what keeps it valid
+//! identified by the source frame it shows, which is what keeps it valid
 //! while a clip is moved and what makes it stale when the clip is slipped.
 //!
 //! Decoding needs a backend, which this crate does not have, so thumbnails

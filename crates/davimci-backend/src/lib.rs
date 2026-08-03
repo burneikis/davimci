@@ -1,11 +1,11 @@
-//! The `RenderBackend` boundary (plan.md Phase 6, spec §10.1).
+//! The `RenderBackend` boundary (plan.md Phase 6, spec 10.1).
 //!
 //! MLT sits behind this trait so it can be replaced without touching the
 //! editor core. Nothing here may reference MLT types, and nothing here does
 //! any decoding: this crate is the interface plus a deterministic
 //! [`MockBackend`] that every upstream test runs against.
 //!
-//! The preview contract is **frame pull, not a backend-owned window**: the
+//! The preview contract is frame pull, not a backend-owned window: the
 //! backend hands out RGBA buffers and `davimci-present` puts them on screen,
 //! which is what lets overlays exist and lets the GUI and TUI share one video
 //! path.
@@ -56,7 +56,7 @@ pub trait RenderBackend {
     ///
     /// Called after every committed edit. Implementations should patch the
     /// existing graph where they can rather than rebuilding it, since split
-    /// and ripple are playlist mutations (spec §10.1).
+    /// and ripple are playlist mutations (spec 10.1).
     fn set_timeline(&mut self, timeline: &Timeline) -> Result<()>;
 
     /// Move the playhead. Frame-exact: no nearest-keyframe behaviour.
@@ -77,7 +77,7 @@ pub trait RenderBackend {
     ///
     /// Asked rather than assumed: a backend without it shuttles by stepping
     /// the playhead, which is a different feature with the same key
-    /// (spec §3.2.1).
+    /// (spec 3.2.1).
     fn supports_varispeed(&self) -> bool {
         false
     }

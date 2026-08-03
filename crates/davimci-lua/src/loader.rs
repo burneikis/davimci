@@ -1,4 +1,4 @@
-//! Finding and loading config (spec §9.1, §9.7).
+//! Finding and loading config (spec 9.1, 9.7).
 //!
 //! Load order mirrors Neovim's: `init.lua` first (it may `require` the
 //! others itself), then `keymaps.lua`, then every file in `motions/`,
@@ -65,7 +65,7 @@ fn lua_files_in(dir: &Path) -> Vec<PathBuf> {
     files
 }
 
-/// The answer to "may this project-local config run?" (spec §9.7).
+/// The answer to "may this project-local config run?" (spec 9.7).
 ///
 /// Project-local config is code from wherever the footage came from, so it
 /// is opt-in: nothing runs until the user says so for that exact path.
@@ -105,7 +105,7 @@ impl Runtime {
         notices
     }
 
-    /// Load `<dir>/.davimci.lua` if the user trusts it (spec §9.7).
+    /// Load `<dir>/.davimci.lua` if the user trusts it (spec 9.7).
     ///
     /// An untrusted file is not read, not compiled, and not run; a trusted
     /// one still runs under [`Sandbox::Restricted`], because "I want this

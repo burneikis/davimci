@@ -1,4 +1,4 @@
-//! Predicate motions (spec §3.4).
+//! Predicate motions (spec 3.4).
 //!
 //! These are the motions that ask a question about the *media* rather than
 //! the timeline structure: "next audio peak above -2 dB", "next silence

@@ -5,7 +5,7 @@
 //! it watches the timeline, queues one job per audio source, publishes the
 //! resulting envelopes to the view state, and drops them again when a gain or
 //! fade changes, since a measurement of the pre-gain signal is no longer a
-//! description of what will be heard (spec §6.1, §10.2).
+//! description of what will be heard (spec 6.1, 10.2).
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -101,7 +101,7 @@ impl Analyser {
                 continue;
             }
             if changed && known {
-                // The old measurement described the pre-gain signal (§10.2).
+                // The old measurement described the pre-gain signal (spec 10.2).
                 self.analyses.remove(&track.id);
                 self.stale.push(track.id);
             }
@@ -110,7 +110,7 @@ impl Analyser {
         }
     }
 
-    /// Re-run analysis for every known track (`:analyze`, spec §12).
+    /// Re-run analysis for every known track (`:analyze`, spec 12).
     pub fn reanalyse(&mut self) -> usize {
         let sources: Vec<(TrackId, Source)> = self
             .requested
@@ -297,7 +297,7 @@ mod tests {
 
     #[test]
     fn changing_gain_marks_the_envelope_stale() {
-        // Spec §6.1: gain invalidates the analysis for that clip.
+        // spec 6.1: gain invalidates the analysis for that clip.
         let dir = tmpdir("stale");
         let mut a = Analyser::new(&dir);
         let mut tl = multi_audio_fixture(1, Some(2));

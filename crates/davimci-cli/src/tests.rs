@@ -62,7 +62,7 @@ fn json(tl: &Timeline) -> String {
     serde_json::to_string(tl).unwrap()
 }
 
-// -- parsing ------------------------------------------------------------
+// parsing
 
 #[test]
 fn the_ex_grammar_covers_the_spec_12_table() {
@@ -125,7 +125,7 @@ fn unknown_and_misused_commands_are_user_errors_with_a_sentence() {
     }
 }
 
-// -- save / load --------------------------------------------------------
+// save / load
 
 #[test]
 fn saving_and_reopening_gives_a_byte_identical_timeline() {
@@ -181,7 +181,7 @@ fn writing_without_a_filename_is_refused_rather_than_guessed() {
     ));
 }
 
-// -- dirty state --------------------------------------------------------
+// dirty state
 
 #[test]
 fn quit_refuses_on_unsaved_changes_and_quit_bang_discards() {
@@ -230,7 +230,7 @@ fn quitting_the_last_timeline_ends_the_session() {
     assert!(ws.should_quit());
 }
 
-// -- buffers ------------------------------------------------------------
+// buffers
 
 #[test]
 fn buffers_list_and_switch_like_vim() {
@@ -260,7 +260,7 @@ fn buffers_list_and_switch_like_vim() {
 
 #[test]
 fn registers_and_marks_are_global_across_timelines() {
-    // spec §12: "registers and marks are global across timelines, so a yank
+    // spec 12: "registers and marks are global across timelines, so a yank
     // in one can be pasted into another".
     let dir = Scratch::new("globals");
     let mut ws = Workspace::new(dir.path()).without_autosave();
@@ -303,7 +303,7 @@ fn registers_and_marks_are_global_across_timelines() {
     assert_eq!(ws.current().timeline().dump(), "V1:[y 0-50]\nA1: -\n");
 }
 
-// -- autosave and crash recovery ----------------------------------------
+// autosave and crash recovery
 
 #[test]
 fn autosave_never_touches_the_project_file() {
@@ -445,7 +445,7 @@ fn a_corrupt_autosave_is_reported_rather_than_partially_applied() {
     assert!(autosave::inspect(&log).is_none());
 }
 
-// -- relink -------------------------------------------------------------
+// relink
 
 #[test]
 fn relink_brings_offline_media_back_and_is_undoable() {
@@ -532,7 +532,7 @@ fn relink_with_no_matching_clip_is_a_user_error() {
     ));
 }
 
-// -- :e dispatch --------------------------------------------------------
+// :e dispatch
 
 #[test]
 fn edit_of_a_missing_file_fails_without_opening_a_buffer() {
@@ -557,7 +557,7 @@ fn a_project_file_is_recognised_by_its_content_not_its_name() {
     assert_eq!(ws.current().timeline().dump(), "V1:[a 0-60]\nA1: -\n");
 }
 
-// -- transitions (spec §6.2) --------------------------------------------
+// transitions (spec 6.2)
 
 #[test]
 fn transition_command_adds_replaces_and_removes_at_the_nearest_cut() {

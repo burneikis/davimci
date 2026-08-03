@@ -1,6 +1,6 @@
-//! Continuous autosave of the command log (spec §12, plan.md Phase 8).
+//! Continuous autosave of the command log (spec 12, plan.md Phase 8).
 //!
-//! Two rules shape this module. **Autosave never touches the project file** -
+//! Two rules shape this module. Autosave never touches the project file -
 //! it writes only under `<root>/.davimci/autosave/`, so a crash can never
 //! damage the thing the user saved. And it stores the *log*, not the state:
 //! appending one line per command is cheap enough to do after every edit,

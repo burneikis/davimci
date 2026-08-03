@@ -80,7 +80,7 @@ fn to_egui(rect: Rect) -> EguiRect {
 /// A draw list is rebuilt every frame, so uploading its thumbnails every
 /// frame would spend the GPU on pictures that did not change. The cache is
 /// keyed by clip *and* source frame, because a clip's filmstrip is several
-/// different pictures of it (spec §15.2).
+/// different pictures of it (spec 15.2).
 #[derive(Default)]
 pub struct ThumbnailTextures {
     textures:

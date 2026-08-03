@@ -1,4 +1,4 @@
-//! The media picker behind `i` / `a` / `r` (plan.md Phase 9c, spec §11).
+//! The media picker behind `i` / `a` / `r` (plan.md Phase 9c, spec 11).
 //!
 //! State only: the shell draws a list and the host supplies its entries. The
 //! GUI never reads a directory - the crate does no I/O, so the picker stays

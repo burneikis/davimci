@@ -1,4 +1,4 @@
-//! The data a user-defined motion is allowed to see (spec §9.3).
+//! The data a user-defined motion is allowed to see (spec 9.3).
 //!
 //! A registered motion is a pure query - it is handed a snapshot and returns
 //! a frame - so a plugin cannot move the playhead behind the editor's back,

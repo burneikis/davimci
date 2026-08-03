@@ -4,15 +4,12 @@
 
 `spec.md` defines behaviour: keybindings, modes, semantics, formats, the Lua
 config API. `plan.md` defines construction: crate boundaries, phase order, test
-strategy. Code implements both and defines neither.
 
+strategy. Code implements both and defines neither.
 If a task needs behaviour the spec does not cover, amend `spec.md` first, in
 the same change, and say so. If it needs work out of phase order, say why -
-usually it means a dependency was missed. When behaviour changes, `spec.md`,
-`plan.md`, and the README status all change alongside the code.
-
-Keep the README status section honest about what works, what is a placeholder,
-and which phase is in progress.
+usually it means a dependency was missed. When behaviour changes, `spec.md`
+and `plan.md` change alongside the code.
 
 ## Architectural rules
 
@@ -25,8 +22,8 @@ have no backend and no I/O, and must stay testable with no window, GPU, or
 media. No frontend contains view logic; if a change has to land in both
 `davimci-gui` and `davimci-tui`, it belongs in `davimci-app` or `davimci-present`.
 
-All mutation goes through a `Command` with `apply`/`invert`. There is no other
-write path to the timeline - undo, `.`-repeat, macros, the Lua API, and the
+All mutation goes through a `Command` whose `apply` returns the command that
+undoes it. There is no other write path to the timeline - undo, `.`-repeat, macros, the Lua API, and the
 project format all depend on it. Commands validate before they mutate, so a
 rejected command leaves the timeline byte-identical and never enters the undo
 log.
@@ -35,7 +32,18 @@ A timeline has one framerate and one resolution; sources are conformed on
 import. Time is `Frame(u64)`, with no floats in the model.
 
 `libmlt` is linked dynamically and `melt`/`melted` are never vendored, since
-davimci is GPL-3.0 over LGPL-2.1 MLT (spec §13).
+davimci is GPL-3.0 over LGPL-2.1 MLT (spec 13).
+
+## Comments and docs
+
+Name things so the code reads without commentary; comment the reasons the code
+cannot state. A module doc says what the module is for and which rule it
+enforces, in a few lines. Do not narrate implementation history, restate the
+signature below, list what is unfinished, or track phase numbers - that is what
+`plan.md` and `todo.md` are for.
+
+A comment that is now false is a bug. Delete stale comments rather than
+appending corrections to them.
 
 ## Errors
 

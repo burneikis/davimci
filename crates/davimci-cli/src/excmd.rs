@@ -1,4 +1,4 @@
-//! The `:` command set for project lifecycle (spec §12, plan.md Phase 8).
+//! The `:` command set for project lifecycle (spec 12, plan.md Phase 8).
 //!
 //! Parsing is separated from execution so the grammar can be tested with no
 //! filesystem: [`parse`] is a pure function from a command line to an
@@ -53,15 +53,15 @@ pub enum ExCommand {
     Presets,
     /// `:cancel` - stop the running export.
     CancelRender,
-    /// `:gain <db>` - absolute gain on the clip under the playhead (§6.1).
+    /// `:gain <db>` - absolute gain on the clip under the playhead (spec 6.1).
     Gain(f32),
-    /// `:fade in|out <ms>` (§6.1).
+    /// `:fade in|out <ms>` (spec 6.1).
     Fade { end: crate::audio::FadeEnd, ms: u64 },
-    /// `:normalize [target_db]` (§6.1). Needs analysis, so the editor runs it.
+    /// `:normalize [target_db]` (spec 6.1). Needs analysis, so the editor runs it.
     Normalize { target_db: f32 },
-    /// `:duck <track> <db>` (§6.1). Needs analysis, so the editor runs it.
+    /// `:duck <track> <db>` (spec 6.1). Needs analysis, so the editor runs it.
     Duck { track: String, db: f32 },
-    /// `:transition <name> [frames]` (§6.2), on the cut nearest the playhead.
+    /// `:transition <name> [frames]` (spec 6.2), on the cut nearest the playhead.
     /// `:transition none` deletes the one that is there. Re-running it on a
     /// cut that already has one replaces it, which is how a transition's type
     /// or duration is changed.
@@ -276,7 +276,7 @@ pub fn parse(line: &str) -> Result<ExCommand, CliError> {
 }
 
 /// Every `:` name this crate accepts, for the command line's completion
-/// (spec §12). The vocabulary lives here, next to [`parse`], so a command
+/// (spec 12). The vocabulary lives here, next to [`parse`], so a command
 /// that exists is a command that can be completed.
 #[must_use]
 pub fn vocabulary() -> Vec<String> {
@@ -324,7 +324,7 @@ impl Workspace {
         self.run_selected(line, on_recovery, None)
     }
 
-    /// Parse and run a `:` line against the user's selection (spec §6.1).
+    /// Parse and run a `:` line against the user's selection (spec 6.1).
     /// `None` means the clip-property commands fall back to the playhead.
     pub fn run_selected(
         &mut self,
@@ -402,7 +402,7 @@ impl Workspace {
                 Ok(ExOutcome::msg(self.current().name()))
             }
             // Gain and fades are clip properties, so the workspace can run
-            // them: no backend, no analysis, just an undoable edit (§6.1).
+            // them: no backend, no analysis, just an undoable edit (spec 6.1).
             ExCommand::Gain(db) => {
                 let clips =
                     crate::audio::targets(self.current().timeline(), selection, "set gain on")?;
@@ -440,14 +440,14 @@ impl Workspace {
                 Err(CliError::AnalysisNotReady("this command"))
             }
             // A transition is an undoable edit on the timeline and needs
-            // neither backend nor analysis, so it runs here (spec §6.2).
+            // neither backend nor analysis, so it runs here (spec 6.2).
             ExCommand::Transition { kind, frames } => self.transition(kind.as_deref(), *frames),
             ExCommand::Relink { old, new } => self.relink(old.as_deref(), new),
         }
     }
 
     /// `:e <path>`: a davimci project opens as a project, anything else is
-    /// imported as media into a fresh timeline (spec §12).
+    /// imported as media into a fresh timeline (spec 12).
     fn edit(
         &mut self,
         path: &std::path::Path,
@@ -500,7 +500,7 @@ impl Workspace {
     ///
     /// Deleting looks for the transition *under* the playhead first, because
     /// the overlap straddles its cut and the user is usually standing in it;
-    /// creating always takes the nearest cut (spec §6.2).
+    /// creating always takes the nearest cut (spec 6.2).
     fn transition(
         &mut self,
         kind: Option<&str>,

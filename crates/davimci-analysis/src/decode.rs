@@ -66,7 +66,7 @@ pub const SCENE_THRESHOLD: f32 = 10.0;
 
 /// Scene-change points in milliseconds, via ffmpeg's `scdet` filter.
 ///
-/// Optional by spec §10.2: a failure here degrades to "no scene changes"
+/// Optional by spec 10.2: a failure here degrades to "no scene changes"
 /// rather than failing the import.
 pub fn scene_changes(path: &Path, threshold: f32) -> Result<Vec<u64>, AnalysisError> {
     let name = path.display().to_string();

@@ -1,4 +1,4 @@
-//! Proxy media (spec §10.3).
+//! Proxy media (spec 10.3).
 //!
 //! A proxy is generated when the source is above 1080p or uses a
 //! long-GOP/expensive-to-seek codec; below that, the original decodes
@@ -6,8 +6,8 @@
 //! frame numbers are identical in both - a cut made on a proxy is the same
 //! cut on the original.
 //!
-//! The hard invariant is at the other end: **export always relinks to the
-//! original**. [`export_guard`] is the built-in `BeforeExport` check, and it
+//! The hard invariant is at the other end: export always relinks to the
+//! original. [`export_guard`] is the built-in `BeforeExport` check, and it
 //! fails the render rather than quietly shipping 540p.
 
 use std::path::{Path, PathBuf};
@@ -19,13 +19,13 @@ use crate::conform::Conformed;
 use crate::error::AnalysisError;
 use crate::probe::{MediaInfo, StreamInfo};
 
-/// Proxy settings, mirroring `davimci.media.configure` in spec §10.3.
+/// Proxy settings, mirroring `davimci.media.configure` in spec 10.3.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProxyPolicy {
     pub auto: bool,
     pub height: u32,
     pub codec: String,
-    /// Sources taller than this get a proxy (spec §10.3: above 1080p).
+    /// Sources taller than this get a proxy (spec 10.3: above 1080p).
     pub max_native_height: u32,
     /// Codecs that are expensive to seek regardless of resolution.
     pub expensive_codecs: Vec<String>,
@@ -58,7 +58,7 @@ impl ProxyPolicy {
         }
     }
 
-    /// The spec §10.3 threshold rule.
+    /// The spec 10.3 threshold rule.
     #[must_use]
     pub fn needs_proxy(&self, stream: &StreamInfo) -> bool {
         if !self.auto {
@@ -227,7 +227,7 @@ impl ProxyMap {
     }
 }
 
-/// The built-in `BeforeExport` check (spec §10.3 hard invariant).
+/// The built-in `BeforeExport` check (spec 10.3 hard invariant).
 ///
 /// Fails the render if any clip would resolve to a proxy. It reports the
 /// first offender by name, because "some clip somewhere" is not an actionable

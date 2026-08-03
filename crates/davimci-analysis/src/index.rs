@@ -1,4 +1,4 @@
-//! The indexed store behind predicate motions (spec §3.4, §10.2).
+//! The indexed store behind predicate motions (spec 3.4, 10.2).
 //!
 //! `]a` must be instant and correct even when zoomed fully out, so it may not
 //! scan. Peaks are queried through a max segment tree, which answers "the
@@ -181,7 +181,7 @@ impl AnalysisIndex {
     }
 
     /// Invalidate a track: gain or fades changed, so the cached measurements
-    /// no longer describe what will be heard (spec §10.2, `:analyze`).
+    /// no longer describe what will be heard (spec 10.2, `:analyze`).
     pub fn invalidate(&mut self, track: TrackId) {
         if self.tracks.contains_key(&track) {
             self.tracks.insert(track, TrackAnalysis::Pending);

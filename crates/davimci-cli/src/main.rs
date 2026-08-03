@@ -184,7 +184,7 @@ fn run_window(ws: Workspace) -> Result<()> {
 /// Build the render backend and presenter for a session.
 ///
 /// MLT is only touched here, in the binary: no frontend may reference it
-/// (spec §10.1). A missing or broken `libmlt` degrades to the mock backend
+/// (spec 10.1). A missing or broken `libmlt` degrades to the mock backend
 /// rather than refusing to start, so editing still works without a working
 /// decoder (Phase 0: recoverable errors degrade locally).
 fn engine_for(session: &davimci_cmd::Session) -> (Box<dyn RenderBackend>, Presenter) {

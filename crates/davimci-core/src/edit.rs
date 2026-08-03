@@ -1,4 +1,4 @@
-//! Primitive edit operations (plan.md Phase 1, spec §4).
+//! Primitive edit operations (plan.md Phase 1, spec 4).
 //!
 //! Every primitive is pure model code: no backend, no I/O. Every primitive is
 //! validate-then-mutate, so a rejected operation leaves the timeline
@@ -22,7 +22,7 @@ pub(crate) fn shift(frame: Frame, delta: i64) -> Result<Frame, CoreError> {
 impl Timeline {
     // -- split -----------------------------------------------------------
 
-    /// Split the clip under `frame` on `track` (spec §4, `s`).
+    /// Split the clip under `frame` on `track` (spec 4, `s`).
     ///
     /// Returns the id of the newly created right-hand clip. Splitting exactly
     /// on a clip boundary is a no-op error: there is nothing to cut.
@@ -100,7 +100,7 @@ impl Timeline {
     }
 
     /// Merge the clip starting at `frame` into its left neighbour - the exact
-    /// inverse of [`Timeline::split_at`] (spec §4).
+    /// inverse of [`Timeline::split_at`] (spec 4).
     ///
     /// Only clips that are genuinely two halves of one source window may be
     /// joined: same media, contiguous source, identical properties, and no
@@ -213,7 +213,7 @@ impl Timeline {
 
     // -- yank / delete ---------------------------------------------------
 
-    /// Copy `[start, end)` on `track` into a register (spec §4, `y`).
+    /// Copy `[start, end)` on `track` into a register (spec 4, `y`).
     ///
     /// Partially covered clips are copied trimmed; the timeline is untouched.
     pub fn yank_range(
@@ -243,7 +243,7 @@ impl Timeline {
         })
     }
 
-    /// Remove `[start, end)` and leave a gap (spec §4, `gd` lift).
+    /// Remove `[start, end)` and leave a gap (spec 4, `gd` lift).
     pub fn lift_range(
         &mut self,
         track: TrackId,
@@ -259,7 +259,7 @@ impl Timeline {
         Ok(yanked)
     }
 
-    /// Remove `[start, end)` and close the gap (spec §4, `x`/`d`).
+    /// Remove `[start, end)` and close the gap (spec 4, `x`/`d`).
     pub fn ripple_delete_range(
         &mut self,
         track: TrackId,
@@ -284,7 +284,7 @@ impl Timeline {
         self.lift_range(track, s, e)
     }
 
-    /// Ripple-delete one whole clip (spec §4, `dd`).
+    /// Ripple-delete one whole clip (spec 4, `dd`).
     pub fn ripple_delete_clip(
         &mut self,
         track: TrackId,
@@ -296,7 +296,7 @@ impl Timeline {
 
     // -- insert / overwrite / paste --------------------------------------
 
-    /// Insert a clip at `at`, rippling later clips right (spec §4, `i`/`p`).
+    /// Insert a clip at `at`, rippling later clips right (spec 4, `i`/`p`).
     ///
     /// A clip straddling `at` is split, so insertion never overwrites.
     pub fn insert_clip(
@@ -324,7 +324,7 @@ impl Timeline {
         Ok(id)
     }
 
-    /// Place a clip at `at`, replacing whatever is there (spec §4, `gp`).
+    /// Place a clip at `at`, replacing whatever is there (spec 4, `gp`).
     pub fn overwrite_clip(
         &mut self,
         track: TrackId,
@@ -344,7 +344,7 @@ impl Timeline {
         Ok(id)
     }
 
-    /// Paste register contents at `at` (spec §4, `p` / `gp`).
+    /// Paste register contents at `at` (spec 4, `p` / `gp`).
     ///
     /// Pasted clips get fresh ids so a register can be pasted repeatedly.
     pub fn paste(

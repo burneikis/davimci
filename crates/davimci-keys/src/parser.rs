@@ -1,4 +1,4 @@
-//! The input grammar (spec §3.2.1): `[count] [register] operator [count]
+//! The input grammar (spec 3.2.1): `[count] [register] operator [count]
 //! motion|textobject`, plus standalone commands, `g`-prefixed sequences, and
 //! `<Space>` leader sequences.
 //!
@@ -70,7 +70,7 @@ enum St {
 
 /// The key-sequence parser. Mode-aware only for the one place the grammar
 /// genuinely branches on it: an operator in a `VISUAL*` mode applies to the
-/// live selection immediately rather than waiting for a motion (spec §6).
+/// live selection immediately rather than waiting for a motion (spec 6).
 #[derive(Debug, Clone)]
 pub struct Parser {
     state: St,
@@ -103,7 +103,7 @@ impl Parser {
     }
 
     /// Resolve whatever `PendingWithFallback` is currently buffered, as a
-    /// caller does on an ambiguity timeout (spec §3.2.1's "pending-input
+    /// caller does on an ambiguity timeout (spec 3.2.1's "pending-input
     /// state with timeout for ambiguous prefixes").
     pub fn timeout(&mut self) -> Step {
         match std::mem::replace(&mut self.state, St::Idle) {
@@ -243,7 +243,7 @@ impl Parser {
                 Step::Pending
             }
             // In a VISUAL mode an operator always acts on the live
-            // selection at once (spec §6): it can never be the start of a
+            // selection at once (spec 6): it can never be the start of a
             // longer literal sequence like `dax`, so the ambiguity the
             // default table has in NORMAL mode does not apply here.
             Lookup::PendingWithFallback(leaf @ LeafAction::Operator(_)) if mode.is_visual() => {
@@ -475,7 +475,7 @@ impl Parser {
     }
 }
 
-/// Largest accepted count (spec §3.1). Vim clamps rather than rejecting a
+/// Largest accepted count (spec 3.1). Vim clamps rather than rejecting a
 /// long digit run, and so do we: no count a user can type may overflow.
 pub const MAX_COUNT: u32 = 1_000_000;
 

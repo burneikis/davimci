@@ -1,4 +1,4 @@
-//! Transition types, mapped onto MLT services (spec §6.2).
+//! Transition types, mapped onto MLT services (spec 6.2).
 //!
 //! The model stores a transition as a *name*, because types are extensible
 //! and `davimci-core` may not know what MLT is. This is the one place that

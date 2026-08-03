@@ -99,7 +99,7 @@ pub fn zoomed_out() -> ViewState {
 }
 
 /// An analysed audio lane: `A1` has a waveform, the video lanes do not
-/// (spec §6.1). Frontends render this to prove the envelope reaches the
+/// (spec 6.1). Frontends render this to prove the envelope reaches the
 /// screen.
 #[must_use]
 pub fn waveform() -> ViewState {

@@ -208,7 +208,7 @@ fn jump_points_get_denser_as_zoom_increases() {
     assert_eq!(land_at(Zoom::MAX), Some(Frame(1)));
 }
 
-// -- text objects ------------------------------------------------------
+// text objects
 
 fn resolve_object(tl: &Timeline, o: &O) -> Result<(TimeRange, Vec<TrackId>), MotionError> {
     let jumps = JumpPoints::default();
@@ -219,7 +219,7 @@ fn resolve_object(tl: &Timeline, o: &O) -> Result<(TimeRange, Vec<TrackId>), Mot
     }
 }
 
-/// spec §4.1: the object decides the scope, not the verb.
+/// Spec 4.1: the object decides the scope, not the verb.
 #[test]
 fn object_scope_matrix() {
     // Ungrouped: every object stays on the focused track.
@@ -275,7 +275,7 @@ fn objects_need_a_clip_under_the_playhead() {
     );
 }
 
-// -- predicate motions -------------------------------------------------
+// predicate motions
 
 #[test]
 fn predicate_motions_report_pending_until_analysis_lands() {

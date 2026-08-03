@@ -9,12 +9,12 @@ use davimci_core::{Fps, Frame, Resolution};
 pub struct RenderSettings {
     pub resolution: Resolution,
     pub fps: Fps,
-    /// An ffmpeg *encoder* name, never a marketing name (spec §10.3).
+    /// An ffmpeg *encoder* name, never a marketing name (spec 10.3).
     pub video_codec: String,
     pub audio_codec: String,
     /// Container extension, e.g. `mkv`, `mp4`.
     pub container: String,
-    /// Whether each audio track gets its own stream in the file (spec §7).
+    /// Whether each audio track gets its own stream in the file (spec 7).
     /// Only some containers can carry that, and only some sources can be
     /// routed, so this is decided before the render rather than during it.
     pub separate_audio_tracks: bool,

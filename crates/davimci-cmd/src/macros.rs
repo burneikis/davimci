@@ -1,4 +1,4 @@
-//! Macro record/replay buffers for `q` and `@` (spec §3, §11).
+//! Macro record/replay buffers for `q` and `@` (spec 3, 11).
 //!
 //! A macro is a list of opaque input tokens, not a list of commands: vim
 //! replays keystrokes, so `@a` re-runs motions and counts against wherever

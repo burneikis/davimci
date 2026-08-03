@@ -1,6 +1,6 @@
 //! Incremental projection diffing.
 //!
-//! Split and ripple are playlist mutations, not re-renders (spec §10.1), so
+//! Split and ripple are playlist mutations, not re-renders (spec 10.1), so
 //! the backend asks this module what changed rather than rebuilding the
 //! graph. The diff is pure data and is verified by a property test: applying
 //! the ops to the old entry list must reproduce the new one exactly, which is
@@ -53,7 +53,7 @@ enum Key {
     Clip(ClipId),
     /// A transition is identified by the clip it comes *into*, and must not
     /// be confused with that clip's own entry: they sit next to each other in
-    /// the playlist and share an id (spec §6.2).
+    /// the playlist and share an id (spec 6.2).
     Transition(ClipId),
 }
 
@@ -224,7 +224,7 @@ mod tests {
         assert_eq!(patches[0].ops, vec![TrackOp::Remove { index: 1 }]);
     }
 
-    /// Spec §6.2 / plan.md Phase 9f: the overlap is its own playlist entry,
+    /// Spec 6.2 / plan.md Phase 9f: the overlap is its own playlist entry,
     /// so planting one is an insert next to two resizes - not a rebuild - and
     /// rippling a neighbour away removes it rather than orphaning it.
     #[test]

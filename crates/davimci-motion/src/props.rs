@@ -44,7 +44,7 @@ proptest! {
         prop_assert_eq!(pts.first().copied(), Some(Frame::ZERO));
     }
 
-    /// spec §3.2: zooming in never removes a jump point.
+    /// Spec 3.2: zooming in never removes a jump point.
     #[test]
     fn zooming_in_only_adds_points(spans in spans(), level in 0u8..16) {
         let tl = timeline(&spans, &[]);

@@ -1,4 +1,4 @@
-//! The undo tree (spec §10.4).
+//! The undo tree (spec 10.4).
 //!
 //! History branches: undoing and then editing again keeps the abandoned
 //! branch, reachable with `g-`/`g+` and listed by `:undolist`. Nodes hold the
@@ -20,7 +20,7 @@ impl NodeId {
     pub const ROOT: Self = Self(0);
 }
 
-/// The default drift-guard interval (spec §10.4).
+/// The default drift-guard interval (spec 10.4).
 pub const DEFAULT_SNAPSHOT_INTERVAL: u64 = 100;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -146,7 +146,7 @@ impl UndoTree {
         self.current = id;
     }
 
-    /// Pin the current state, as `:w` does (spec §10.4: snapshot on save).
+    /// Pin the current state, as `:w` does (spec 10.4: snapshot on save).
     pub fn snapshot_now(&mut self, state: &Timeline) {
         if let Some(n) = self.nodes.get_mut(self.current.0) {
             n.snapshot = Some(state.clone());
@@ -360,7 +360,7 @@ impl UndoTree {
     }
 
     /// The commands from the nearest snapshot up to the current state, and
-    /// that snapshot - the project file's two halves (spec §10.4).
+    /// that snapshot - the project file's two halves (spec 10.4).
     #[must_use]
     pub fn compacted(&self) -> Option<(Timeline, Vec<EditCommand>)> {
         let path = self.path_to_root(self.current);
@@ -380,7 +380,7 @@ impl UndoTree {
     }
 }
 
-/// One node of a saved history (spec §10.4).
+/// One node of a saved history (spec 10.4).
 ///
 /// Intermediate snapshots are deliberately absent: they are a drift guard
 /// that can be rebuilt, not part of the history's meaning, and keeping them

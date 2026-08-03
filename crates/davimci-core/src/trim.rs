@@ -1,4 +1,4 @@
-//! The trim family: ripple trim, roll, slip, slide (spec §4.0.1).
+//! The trim family: ripple trim, roll, slip, slide (spec 4.0.1).
 //!
 //! All four are validate-then-mutate and all four respect source handles: a
 //! trim that would run past the end of the media is a user error, rejected
@@ -56,7 +56,7 @@ fn check_handle(clip: &Clip, edge: Edge, delta: i64) -> Result<(), CoreError> {
 }
 
 impl Timeline {
-    /// Ripple trim (spec §4.0.1, `t`): move one edge, shift later clips so no
+    /// Ripple trim (spec 4.0.1, `t`): move one edge, shift later clips so no
     /// gap opens. Trimming the head moves the in-point; the clip stays put.
     pub fn ripple_trim(
         &mut self,
@@ -97,7 +97,7 @@ impl Timeline {
         Ok(())
     }
 
-    /// Roll (spec §4.0.1, `gt`): move a cut point; both neighbours absorb the
+    /// Roll (spec 4.0.1, `gt`): move a cut point; both neighbours absorb the
     /// change, so total duration is unchanged.
     pub fn roll(&mut self, track: TrackId, cut: Frame, delta: i64) -> Result<(), CoreError> {
         if delta == 0 {
@@ -129,7 +129,7 @@ impl Timeline {
         Ok(())
     }
 
-    /// Slip (spec §4.0.1, `T`): change a clip's source in/out points without
+    /// Slip (spec 4.0.1, `T`): change a clip's source in/out points without
     /// moving it or changing its duration.
     pub fn slip(&mut self, track: TrackId, clip: ClipId, delta: i64) -> Result<(), CoreError> {
         if delta == 0 {
@@ -154,7 +154,7 @@ impl Timeline {
         Ok(())
     }
 
-    /// Slide (spec §4.0.1, `gT`): move a clip along the timeline; the
+    /// Slide (spec 4.0.1, `gT`): move a clip along the timeline; the
     /// adjacent clips absorb the movement. Both neighbours must be adjacent.
     pub fn slide(&mut self, track: TrackId, clip: ClipId, delta: i64) -> Result<(), CoreError> {
         if delta == 0 {

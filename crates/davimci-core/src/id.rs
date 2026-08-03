@@ -35,7 +35,7 @@ define_id!(TrackId, "t", "Identifies a track within one timeline.");
 define_id!(
     GroupId,
     "g",
-    "Identifies a per-clip linkage group (spec §5)."
+    "Identifies a per-clip linkage group (spec 5)."
 );
 
 /// Monotonic id source. Held by the timeline; never reset.

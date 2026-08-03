@@ -31,7 +31,7 @@ pub trait Host {
     /// to say".
     ///
     /// `selection` is what the user had selected when the line was submitted
-    /// (spec §6.1), or `None` in `NORMAL` - the visual selection lives in
+    /// (spec 6.1), or `None` in `NORMAL` - the visual selection lives in
     /// the key engine, and this is the seam that carries it to a host that
     /// has the vocabulary but not the modes. Commands that act on "the clip"
     /// fall back to the playhead when it is `None`.
@@ -46,12 +46,12 @@ pub trait Host {
     }
 
     /// Dispatch a transport action to the backend clock. Never an edit, so it
-    /// never reaches the undo log (spec §3.2.1).
+    /// never reaches the undo log (spec 3.2.1).
     fn transport(&mut self, cmd: TransportCmd) {
         let _ = cmd;
     }
 
-    /// Stop playback and commit the playhead where it reached (spec §3.2.1).
+    /// Stop playback and commit the playhead where it reached (spec 3.2.1).
     ///
     /// Called before an action whose [`davimci_keys::TransportPolicy`] is
     /// `Interrupt` reports its effects, so the host has already let go of the
@@ -114,7 +114,7 @@ pub trait Host {
         Vec::new()
     }
 
-    /// Audio analysed since the last call, per track (spec §6.1).
+    /// Audio analysed since the last call, per track (spec 6.1).
     ///
     /// Analysis runs in the background and finishes whenever it finishes, so
     /// it arrives the same way job progress does rather than as a return
@@ -124,7 +124,7 @@ pub trait Host {
     }
 
     /// Tracks whose audio changed, so any published envelope is now stale
-    /// (spec §6.1: gain and fades invalidate the analysis).
+    /// (spec 6.1: gain and fades invalidate the analysis).
     fn stale_waveforms(&mut self) -> Vec<TrackId> {
         Vec::new()
     }
@@ -188,7 +188,7 @@ pub struct App {
     waveforms: Waveforms,
     thumbnails: Thumbnails,
     /// How wide the frontend draws one thumbnail, in columns; zero means it
-    /// draws none (spec §15.2).
+    /// draws none (spec 15.2).
     thumbnail_columns: u32,
     /// The `:` line's buffer, history and completion vocabulary. Owned here
     /// rather than in a frontend so every host shows the same line, with the
@@ -200,7 +200,7 @@ pub struct App {
     /// The subtitle clip a frontend is editing the text of, if any.
     editing_text: Option<ClipId>,
     /// The selection at the moment `:` was pressed, for the `:` line that
-    /// follows (spec §6.1).
+    /// follows (spec 6.1).
     pending_selection: Option<Selection>,
     /// Set while a batch of events is being drained: the expensive host
     /// notifications are recorded here and issued once at the end.
@@ -265,7 +265,7 @@ impl App {
         self.follow();
     }
 
-    /// The live visual selection, if any (spec §6.1). `None` in `NORMAL`.
+    /// The live visual selection, if any (spec 6.1). `None` in `NORMAL`.
     #[must_use]
     pub fn selection(&self) -> Option<Selection> {
         self.engine.selection()
@@ -305,7 +305,7 @@ impl App {
     }
 
     /// Zoom lives here rather than in the key engine because the viewport is
-    /// app state: `zi`/`zo`/`z0` (spec §11) come back as [`Outcome::Zoom`]
+    /// app state: `zi`/`zo`/`z0` (spec 11) come back as [`Outcome::Zoom`]
     /// and land here, as does a wheel or a menu, so the anchoring rule has
     /// exactly one implementation.
     pub fn zoom_in(&mut self) {
@@ -423,7 +423,7 @@ impl App {
         // Playback owns the playhead while it runs, so an interrupting bind
         // takes it back before anything is reported: otherwise the pacer
         // overwrites the motion on the next tick and the preview never moves
-        // (spec §3.2.1).
+        // (spec 3.2.1).
         if fed.transport.interrupts() {
             host.interrupt_transport(&self.session);
         }
@@ -437,7 +437,7 @@ impl App {
     /// of input. A held `h`/`l` delivers a burst of key repeats; seeking and
     /// decoding once per repeat is what made holding a key stall and then
     /// freeze, so the burst moves the playhead as many times as it says and
-    /// costs one picture (spec §14).
+    /// costs one picture (spec 14).
     ///
     /// Returns one [`Response`] per event handled, in order, so a frontend
     /// can still open a picker or a `:` line.
@@ -477,7 +477,7 @@ impl App {
                 // A `:` line may edit or swap the timeline, neither of which
                 // is survivable mid-playback, and the ex vocabulary lives in
                 // the host - so the clock is dropped unconditionally rather
-                // than parsed for (spec §3.2.1).
+                // than parsed for (spec 3.2.1).
                 host.interrupt_transport(&self.session);
                 // Read before the command runs: `:` mode has already left
                 // visual mode behind, so the selection is the one the user
@@ -572,7 +572,7 @@ impl App {
                     return Response::Continue;
                 };
                 // Editing text is an ordinary edit: one command, one undo
-                // step (spec §15.4).
+                // step (spec 15.4).
                 match self.session.exec(&davimci_cmd::EditCommand::SetClipText {
                     track,
                     clip,
@@ -867,7 +867,7 @@ impl App {
             // repeats in a single poll; reprojecting and decoding once per
             // repeat is what made holding a key stall and then freeze, so
             // the batch moves the playhead as many times as it was told and
-            // the host is asked for a picture once, at the end (spec §14).
+            // the host is asked for a picture once, at the end (spec 14).
             let events = frontend.poll();
             if self.drain(events, host).contains(&Response::Quit) {
                 return Ok(());

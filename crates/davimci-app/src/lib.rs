@@ -1,7 +1,7 @@
 //! Frontend-agnostic view state and event loop (plan.md Phase 9a).
 //!
 //! Built before any frontend so no frontend can invent its own. The rule this
-//! crate exists to enforce: **no frontend contains view logic.** Zoom,
+//! crate exists to enforce: no frontend contains view logic. Zoom,
 //! scroll-follow, ruler ticks, the mode line, message and job reporting, and
 //! the meaning of a key all live here; a frontend polls events, reports its
 //! size, and draws a [`ViewState`].

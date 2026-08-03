@@ -33,7 +33,7 @@ pub struct ViewInputs<'a> {
     pub message: Option<Message>,
     pub job: Option<Job>,
     pub recording: Option<char>,
-    /// Analysed audio, when the host has published any (spec §6.1).
+    /// Analysed audio, when the host has published any (spec 6.1).
     pub waveforms: Option<&'a Waveforms>,
     /// Decoded clip thumbnails, when the host has published any.
     pub thumbnails: Option<&'a Thumbnails>,
@@ -85,7 +85,7 @@ pub struct Tick {
     /// Distance from the jump point at or before the playhead, counted in
     /// jump points: `0` is the one the playhead sits on, `1` is the next
     /// `l` lands on, `-1` the previous. This is the count `3l` needs, shown
-    /// the way vim's `relativenumber` shows lines (spec §11).
+    /// the way vim's `relativenumber` shows lines (spec 11).
     pub relative: i32,
 }
 
@@ -120,7 +120,7 @@ pub struct TrackView {
     pub locked: bool,
     pub focused: bool,
     /// True when some other track is soloed, so this one is silent by effect
-    /// (spec §6.1).
+    /// (spec 6.1).
     pub silenced_by_solo: bool,
     pub clips: Vec<ClipView>,
     /// Peak level per visible column, `0..=255`, for audio lanes whose
@@ -150,7 +150,7 @@ pub struct SelectionView {
 #[derive(Debug, Clone)]
 pub struct ViewState {
     pub mode: Mode,
-    /// Rendered exactly as spec §2 shows it: `-- VISUAL (V1,A2) --`.
+    /// Rendered exactly as spec 2 shows it: `-- VISUAL (V1,A2) --`.
     pub mode_line: String,
     pub viewport: Viewport,
     pub visible_range: (Frame, Frame),

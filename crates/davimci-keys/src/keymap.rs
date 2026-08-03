@@ -5,7 +5,7 @@
 //! here - they compose, so [`crate::parser::Parser`] handles them. What
 //! lives in the table is everything that is a fixed sequence: bare motions,
 //! operator triggers, and standalone commands, including the ambiguous
-//! `g`-prefixed and `<Space>`-leader families (spec §3.2.1, §11).
+//! `g`-prefixed and `<Space>`-leader families (spec 3.2.1, 11).
 
 use std::collections::HashMap;
 
@@ -31,7 +31,7 @@ pub enum Lookup {
 }
 
 /// Key-sequence to [`LeafAction`] bindings, defaults with overrides layered
-/// on top (config over defaults, spec §9).
+/// on top (config over defaults, spec 9).
 #[derive(Debug, Clone)]
 pub struct Keymap {
     bindings: HashMap<Vec<Key>, LeafAction>,
@@ -44,7 +44,7 @@ impl Default for Keymap {
 }
 
 impl Keymap {
-    /// The built-in bindings, spec §11.
+    /// The built-in bindings, spec 11.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -101,23 +101,23 @@ fn standalone(a: Action) -> LeafAction {
     LeafAction::Standalone(a)
 }
 
-/// The default keymap, spec §11 plus the tables in §3-§6.1.
+/// The default keymap, spec 11 plus the tables in 3-6.1.
 #[must_use]
 pub fn default_bindings() -> Vec<(Vec<Key>, LeafAction)> {
     use Direction::{Backward, Forward};
     vec![
-        // -- frame-accurate movement (§3.1) --
+        // -- frame-accurate movement (spec 3.1) --
         (k("<Left>"), motion(BuiltinMotion::Frame(Backward))),
         (k("<Right>"), motion(BuiltinMotion::Frame(Forward))),
-        // -- jump points (§3.2) --
+        // -- jump points (spec 3.2) --
         (k("h"), motion(BuiltinMotion::JumpPoint(Backward))),
         (k("l"), motion(BuiltinMotion::JumpPoint(Forward))),
-        // -- track focus (§3.1) --
+        // -- track focus (spec 3.1) --
         (k("j"), motion(BuiltinMotion::TrackStep(Forward))),
         (k("k"), motion(BuiltinMotion::TrackStep(Backward))),
         (k("]t"), motion(BuiltinMotion::TrackCycle(Forward))),
         (k("[t"), motion(BuiltinMotion::TrackCycle(Backward))),
-        // -- clip/edit-point motions (§3.3) --
+        // -- clip/edit-point motions (spec 3.3) --
         (k("w"), motion(BuiltinMotion::ClipBoundary(Forward))),
         (k("b"), motion(BuiltinMotion::ClipBoundary(Backward))),
         (k("e"), motion(BuiltinMotion::ClipEnd)),
@@ -128,7 +128,7 @@ pub fn default_bindings() -> Vec<(Vec<Key>, LeafAction)> {
         (k("{"), motion(BuiltinMotion::Marker(Backward))),
         (k("}"), motion(BuiltinMotion::Marker(Forward))),
         (k("%"), motion(BuiltinMotion::MatchingEdit)),
-        // -- editing verbs (§4) --
+        // -- editing verbs (spec 4) --
         (k("s"), standalone(Action::SplitCurrent)),
         (k("gs"), standalone(Action::SplitAll)),
         (k("x"), standalone(Action::RippleDeleteClip)),
@@ -176,7 +176,7 @@ pub fn default_bindings() -> Vec<(Vec<Key>, LeafAction)> {
         (k("."), standalone(Action::Repeat)),
         (k("q"), LeafAction::NeedsArg(ArgKind::MacroStart)),
         (k("@"), LeafAction::NeedsArg(ArgKind::MacroReplay)),
-        // -- trim family (§4.0.1) --
+        // -- trim family (spec 4.0.1) --
         (k("t"), op(Operator::RippleTrim)),
         (k("gt"), op(Operator::Roll)),
         (k("T"), op(Operator::Slip)),
@@ -195,7 +195,7 @@ pub fn default_bindings() -> Vec<(Vec<Key>, LeafAction)> {
                 count: 1,
             }),
         ),
-        // -- visual mode (§6) --
+        // -- visual mode (spec 6) --
         (k("v"), standalone(Action::EnterVisual(Mode::Visual))),
         (k("V"), standalone(Action::EnterVisual(Mode::VisualLine))),
         (
@@ -203,28 +203,28 @@ pub fn default_bindings() -> Vec<(Vec<Key>, LeafAction)> {
             standalone(Action::EnterVisual(Mode::VisualBlock)),
         ),
         (k("o"), standalone(Action::SwapVisualEnds)),
-        // -- marks (§3.3) --
+        // -- marks (spec 3.3) --
         (k("m"), LeafAction::NeedsArg(ArgKind::SetMark)),
         (k("`"), LeafAction::NeedsArg(ArgKind::JumpMark)),
-        // -- audio (§6.1) --
+        // -- audio (spec 6.1) --
         (k("f"), op(Operator::Fade)),
         (k("+"), standalone(Action::GainAdjust(1))),
         (k("-"), standalone(Action::GainAdjust(-1))),
         (k("<Space>m"), standalone(Action::ToggleMute)),
         (k("<Space>s"), standalone(Action::ToggleSolo)),
-        // -- transitions (§6.2) --
+        // -- transitions (spec 6.2) --
         (k("gx"), standalone(Action::CreateTransition)),
         (k("dax"), standalone(Action::DeleteTransition)),
-        // -- transport (§3.2.1) --
+        // -- transport (spec 3.2.1) --
         (k("<Space><Space>"), standalone(Action::PlayPause)),
         (k("H"), standalone(Action::Shuttle { forward: false })),
         (k("L"), standalone(Action::Shuttle { forward: true })),
         // No default stop binding: shuttling the opposite way decelerates
         // through zero, and `<Space><Space>` stops outright. `ShuttleStop`
-        // stays available for users who want a dedicated key (spec §3.2.1).
+        // stays available for users who want a dedicated key (spec 3.2.1).
         (k("<Space>p"), standalone(Action::PreviewAndReturn)),
         (k("<Space>l"), standalone(Action::LoopSelection)),
-        // -- zoom (§11, §15.2) --
+        // -- zoom (spec 11, 15.2) --
         (k("zi"), standalone(Action::Zoom(ZoomIntent::In))),
         (k("zo"), standalone(Action::Zoom(ZoomIntent::Out))),
         (k("z0"), standalone(Action::Zoom(ZoomIntent::Reset))),

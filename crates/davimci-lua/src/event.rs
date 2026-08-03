@@ -1,4 +1,4 @@
-//! The v1 event list (spec §9.8) and what dispatching one produces.
+//! The v1 event list (spec 9.8) and what dispatching one produces.
 
 use mlua::{Lua, Table};
 

@@ -1,16 +1,13 @@
-//! Lua configuration and plugin API (plan.md Phase 7, spec §9).
+//! Lua configuration and plugin API (plan.md Phase 7, spec 9).
 //!
-//! The shape of this crate follows one rule: **Lua may ask, never write.**
-//! Every `davimci.*` call either registers something (a keymap, a motion, a
-//! text object, an export preset, an event handler) or queues a
-//! [`Request`] for the host to run through the command layer. There is no
-//! path from a config file to a timeline mutation that skips
-//! `davimci_cmd::Session`, so undo, `.`-repeat, and macros stay authoritative
-//! even when a plugin drives the edit.
+//! Lua may ask, never write. Every `davimci.*` call either registers
+//! something (a keymap, a motion, a text object, an export preset, an event
+//! handler) or queues a [`Request`] for the host to run through the command
+//! layer, so undo, `.`-repeat, and macros stay authoritative even when a
+//! plugin drives the edit.
 //!
-//! The second rule is Phase 0's: a user callback that throws is disabled for
-//! the session, its notice goes to the status line, and editing continues.
-//! Nothing here can produce a fatal error.
+//! A user callback that throws is disabled for the session, its notice goes
+//! to the status line, and editing continues. Nothing here is fatal.
 //!
 //! ```no_run
 //! use davimci_lua::{ConfigPaths, Runtime};

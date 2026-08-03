@@ -40,7 +40,7 @@ pub enum Fill {
     ClipOffline,
     ClipLinked,
     Selection,
-    /// One column of an audio lane's envelope (spec §6.1).
+    /// One column of an audio lane's envelope (spec 6.1).
     Waveform,
     Playhead,
     TickMajor,
@@ -67,7 +67,7 @@ pub enum TextRole {
     Completion,
     Message(Severity),
     Timecode,
-    /// A jump point's distance from the playhead, on the ruler (spec §11).
+    /// A jump point's distance from the playhead, on the ruler (spec 11).
     RulerNumber,
     /// The picker's title, e.g. "insert media".
     ModalTitle,

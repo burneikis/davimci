@@ -6,13 +6,10 @@
 //! view logic lives here - the crate cannot even reach a `Timeline`, since it
 //! does not depend on `davimci-core`'s timeline API for anything but ids.
 //!
-//! **Windowing status.** The `winit` + `wgpu` + `egui` shell that uploads
-//! [`paint::DrawList`] and the presenter's RGBA surface to a real window is
-//! not implemented yet; see README and plan.md Phase 9c. The split is
-//! deliberate rather than cosmetic: the shell can only place pixels the model
-//! below already decided on, so when it lands it must reproduce these draw
-//! lists rather than reinterpret them, and the layout, painting and input
-//! tests keep passing with no display present.
+//! The `egui` shell behind the `window` feature only uploads what
+//! [`paint::DrawList`] and the presenter already decided on; it never
+//! reinterprets them. That is what lets the layout, painting and input tests
+//! run with no display present.
 
 #[cfg(feature = "window")]
 pub mod egui_shell;

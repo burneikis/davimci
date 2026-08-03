@@ -1,4 +1,4 @@
-//! Modes and visual selection state (spec §6, §11).
+//! Modes and visual selection state (spec 6, 11).
 
 use davimci_core::{Frame, TrackId};
 use davimci_motion::{Direction, TimeRange};
@@ -23,7 +23,7 @@ impl Mode {
     }
 }
 
-/// Fired whenever [`ModeState`] changes mode, for Lua `autocmd`s (spec §9).
+/// Fired whenever [`ModeState`] changes mode, for Lua `autocmd`s (spec 9).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ModeChanged {
     pub from: Mode,
@@ -44,7 +44,7 @@ pub struct VisualSelection {
     pub anchor: Anchor,
     pub active: Anchor,
     /// The set of tracks the selection covers. Block mode toggles members
-    /// with `j`/`k` + a toggle key (spec §5); the other visual modes always
+    /// with `j`/`k` + a toggle key (spec 5); the other visual modes always
     /// hold exactly the track the selection started on.
     pub tracks: Vec<TrackId>,
 }
@@ -58,7 +58,7 @@ impl VisualSelection {
         }
     }
 
-    /// `o`: swap the active end (spec §6).
+    /// `o`: swap the active end (spec 6).
     pub fn swap(&mut self) {
         std::mem::swap(&mut self.anchor, &mut self.active);
     }

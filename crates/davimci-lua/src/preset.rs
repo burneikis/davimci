@@ -1,4 +1,4 @@
-//! Export presets defined from Lua (spec §9.5).
+//! Export presets defined from Lua (spec 9.5).
 //!
 //! Validation happens where the preset is *defined*, not where it is used:
 //! a misspelled container is a user error (Phase 0), and the user should
@@ -58,7 +58,7 @@ const CONTAINERS: &[(&str, &[&str], &[&str])] = &[
     ("webm", &["vp9"], &["opus"]),
 ];
 
-/// Spec §10.3's rule: a preset names a codec, the backend gets an ffmpeg
+/// Spec 10.3's rule: a preset names a codec, the backend gets an ffmpeg
 /// *encoder*. Keeping the mapping here is what stops a marketing name from
 /// reaching the command line.
 fn video_encoder(codec: &str) -> Option<&'static str> {
@@ -151,7 +151,7 @@ impl ExportPreset {
                 .to_string(),
             container: self.container.clone(),
             // Matroska is the container that keeps every audio track as its
-            // own stream (spec §7); anywhere else they are mixed.
+            // own stream (spec 7); anywhere else they are mixed.
             separate_audio_tracks: matches!(self.container.as_str(), "mkv" | "matroska")
                 && self.audio_tracks != TrackSelection::None,
             extra: Vec::new(),

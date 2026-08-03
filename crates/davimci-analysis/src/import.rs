@@ -1,9 +1,9 @@
-//! The import pipeline (spec §7, plan.md Phase 5).
+//! The import pipeline (spec 7, plan.md Phase 5).
 //!
 //! One file in, one undoable edit out. Every audio and subtitle stream in an
 //! MKV becomes its own track, so each is independently trimmable, mutable and
 //! ripple-deletable, and everything is conformed to the timeline on the way
-//! in (spec §7.1).
+//! in (spec 7.1).
 //!
 //! Import is a [`EditCommand::Sequence`], not a direct mutation: undo of an
 //! import removes exactly the tracks and clips it added, and redo reproduces
@@ -27,7 +27,7 @@ pub struct ImportOptions {
     pub conform: ConformOptions,
     /// Where on the timeline the clips land.
     pub at: Frame,
-    /// Whether landing clips push later ones right (spec §4, `i`) or sit on
+    /// Whether landing clips push later ones right (spec 4, `i`) or sit on
     /// top of whatever is there (`gp`, and a plain import into empty space).
     pub placement: Placement,
     /// Put the first stream of a matching kind on this track instead of
@@ -47,11 +47,11 @@ pub enum Placement {
     /// a fresh timeline, where there is nothing to disturb.
     #[default]
     Overwrite,
-    /// Push later clips right by the imported length (spec §4, `i`).
+    /// Push later clips right by the imported length (spec 4, `i`).
     Insert,
 }
 
-/// Which track a source stream ended up on (spec §7 mapping).
+/// Which track a source stream ended up on (spec 7 mapping).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StreamMapping {
     pub stream: u32,
@@ -68,7 +68,7 @@ pub struct Imported {
     pub mapping: Vec<StreamMapping>,
     /// Conformed source length, in timeline frames.
     pub length: Frame,
-    /// True when the timeline adopted this file's properties (spec §7.1).
+    /// True when the timeline adopted this file's properties (spec 7.1).
     pub set_timeline_props: bool,
 }
 
@@ -131,7 +131,7 @@ pub fn plan(
         });
     }
 
-    // An empty timeline takes its properties from the first import (§7.1).
+    // An empty timeline takes its properties from the first import (spec 7.1).
     let empty = tl.tracks().iter().all(davimci_core::Track::is_empty);
     let props = if empty {
         conform::props_from(info, tl.props)
@@ -300,7 +300,7 @@ fn media_clip(
 ) -> Clip {
     // Bind the clip to the stream it came from: three audio tracks off one
     // container are three different streams, not three copies of stream zero
-    // (spec §7).
+    // (spec 7).
     let media = MediaRef::new(&info.path, conformed.source_fps, conformed.length).on_stream(
         stream.index,
         stream.channels.map(|c| c.min(u32::from(u16::MAX)) as u16),

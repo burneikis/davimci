@@ -199,7 +199,7 @@ fn a_preset_decides_the_container_and_codec_of_the_file() {
             "csv=p=0",
         ],
     );
-    // The preset said `h264`; the file must actually be h264 (spec §10.3).
+    // The preset said `h264`; the file must actually be h264 (spec 10.3).
     assert_eq!(codec, "h264", "the preset's codec did not reach the file");
     let _ = std::fs::remove_file(&out);
 }

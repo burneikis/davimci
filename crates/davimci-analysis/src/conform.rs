@@ -1,16 +1,16 @@
-//! The conform stage (spec §7.1).
+//! The conform stage (spec 7.1).
 //!
 //! Everything downstream of import sees a single-rate, single-resolution
 //! timeline, so every source is conformed on the way in:
 //!
-//! - **framerate**: the source's frame count is mapped to timeline frames by
+//! - framerate: the source's frame count is mapped to timeline frames by
 //!   [`Fps::conform_frame`], which is nearest-frame and computed per boundary,
 //!   so a long clip cannot accumulate drift;
-//! - **resolution**: a fit rectangle, letterbox/pillarbox or crop-to-fill;
-//! - **audio**: resampled to the project sample rate.
+//! - resolution: a fit rectangle, letterbox/pillarbox or crop-to-fill;
+//! - audio: resampled to the project sample rate.
 //!
 //! All of it is display-and-render transformation. The original file is never
-//! touched and export relinks to it (spec §10.3).
+//! touched and export relinks to it (spec 10.3).
 
 use davimci_core::{Fps, Frame, Resolution, TimelineProps};
 use serde::{Deserialize, Serialize};
@@ -93,7 +93,7 @@ pub struct Conformed {
     pub resample_audio: bool,
 }
 
-/// Conform a probed file to `props` (spec §7.1).
+/// Conform a probed file to `props` (spec 7.1).
 ///
 /// The framerate a file is conformed *from* is its video stream's rate;
 /// audio-only files carry no rate of their own, so they are measured in
@@ -139,7 +139,7 @@ pub fn ms_at_frame(frame: Frame, fps: Fps) -> u64 {
     (num / u128::from(fps.num)) as u64
 }
 
-/// Timeline properties defaulted from the first import (spec §7.1).
+/// Timeline properties defaulted from the first import (spec 7.1).
 #[must_use]
 pub fn props_from(info: &MediaInfo, fallback: TimelineProps) -> TimelineProps {
     TimelineProps {

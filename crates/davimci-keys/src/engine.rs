@@ -3,7 +3,7 @@
 //! (`davimci-cmd`), against a live [`Session`].
 //!
 //! Transport (`<Space><Space>`, `J`/`K`/`L`, ...) is deliberately *not*
-//! dispatched through [`Session::exec`]: spec §3.2.1 is explicit that
+//! dispatched through [`Session::exec`]: spec 3.2.1 is explicit that
 //! playback is not an edit. [`Engine::feed`] returns a [`TransportCmd`] for
 //! the caller to hand to the render backend's clock (plan.md Phase 6).
 
@@ -35,13 +35,13 @@ pub enum TransportCmd {
     ShuttleStop,
     PreviewAndReturn,
     LoopSelection,
-    /// Stop playback and commit the playhead (spec §3.2.1). Unlike
+    /// Stop playback and commit the playhead (spec 3.2.1). Unlike
     /// [`TransportCmd::PlayPause`] this never toggles: interrupting a stopped
     /// transport does nothing.
     Interrupt,
 }
 
-/// What a chosen media file is for (spec §3.2, `i`/`a`/`r`).
+/// What a chosen media file is for (spec 3.2, `i`/`a`/`r`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MediaIntent {
     /// `i`: insert at the playhead, rippling later clips right.
@@ -67,7 +67,7 @@ pub enum Outcome {
     Moved,
     /// A predicate motion's analysis has not finished.
     PredicatePending,
-    /// The mode changed (`ModeChanged` event, spec §9's `autocmd` hook).
+    /// The mode changed (`ModeChanged` event, spec 9's `autocmd` hook).
     Mode(ModeChanged),
     MacroStarted(char),
     MacroStopped(char),
@@ -76,7 +76,7 @@ pub enum Outcome {
     /// A transport action; not run through the undo log.
     Transport(TransportCmd),
     /// `zi`/`zo`/`z0`: the host owns the viewport, so zoom is reported
-    /// rather than applied. Not an edit and never undoable (spec §15.2).
+    /// rather than applied. Not an edit and never undoable (spec 15.2).
     Zoom(ZoomIntent),
     /// `:` was pressed; the caller now owns command-line input.
     EnterCommandMode,
@@ -85,7 +85,7 @@ pub enum Outcome {
     /// the host's job; this only says what the chosen file is *for*.
     PickMedia(MediaIntent),
     /// `i` on a subtitle clip: INSERT mode is scoped to text editing there
-    /// (spec §8, §15.4), so the caller should open a text buffer rather than
+    /// (spec 8, 15.4), so the caller should open a text buffer rather than
     /// a media picker.
     EditText {
         clip: ClipId,
@@ -94,15 +94,14 @@ pub enum Outcome {
     /// A Lua-bound key fired; the host must run callback `.0` through
     /// `davimci_lua::Runtime::invoke` and execute the requests it returns.
     Plugin(u32),
-    /// Something named in spec but not yet backed by a command (e.g.
-    /// transitions, Phase 9f).
+    /// Something named in the spec but not yet backed by a command.
     NotImplemented(&'static str),
     /// Rejected: the message is user-facing text, never `Debug` output.
     Error(String),
 }
 
 /// One key's worth of result: what happened, and what it means for a running
-/// preview (spec §3.2.1).
+/// preview (spec 3.2.1).
 ///
 /// The policy travels with the outcome rather than being looked up later
 /// because the host never sees the [`Action`]: only the engine knows which
@@ -130,7 +129,7 @@ pub struct Engine {
     mode: ModeState,
     jump_cfg: JumpConfig,
     zoom: Zoom,
-    /// Registers named with `"<reg>` (spec §11's `"ayy`); distinct from the
+    /// Registers named with `"<reg>` (spec 11's `"ayy`); distinct from the
     /// clipboard/anonymous register used when none is named.
     registers: HashMap<char, Register>,
 }
@@ -173,7 +172,7 @@ impl Engine {
     }
 
     /// What the user has selected, as a model-level [`Selection`] the host
-    /// can act on (spec §6.1). `None` outside visual mode: a command with no
+    /// can act on (spec 6.1). `None` outside visual mode: a command with no
     /// selection falls back to the playhead, and "no selection" must not be
     /// confused with "an empty selection".
     #[must_use]
@@ -188,7 +187,7 @@ impl Engine {
     }
 
     /// Return to `NORMAL` with nothing pending, for a host that has switched
-    /// to a different timeline. Registers survive, because spec §12 makes
+    /// to a different timeline. Registers survive, because spec 12 makes
     /// them global across open timelines; a selection and a half-typed
     /// sequence do not, because they name positions in the timeline that is
     /// being left.
@@ -245,7 +244,7 @@ impl Engine {
 
     /// Run an already-parsed action. A frontend needs this for actions that
     /// did not come from a keystroke - a Lua plugin callback asking for an
-    /// edit (spec §9.2) goes through here, so plugin edits are ordinary
+    /// edit (spec 9.2) goes through here, so plugin edits are ordinary
     /// commands with ordinary undo.
     pub fn execute_action(&mut self, action: Action, session: &mut Session) -> Outcome {
         self.execute(action, session)
@@ -272,7 +271,7 @@ impl Engine {
                 register,
             } => self.do_paste(before, ripple, register, session),
             // `i` means two different things by context: on a text track it
-            // edits the subtitle under the playhead (spec §8), anywhere else
+            // edits the subtitle under the playhead (spec 8), anywhere else
             // it inserts media.
             Action::InsertMedia => match text_clip_under_playhead(session) {
                 Some((clip, text)) => Outcome::EditText { clip, text },
@@ -684,7 +683,7 @@ impl Engine {
     }
 
     /// `+` / `-`: adjust gain on the selection, or on the clip under the
-    /// playhead when nothing is selected (spec §6.1).
+    /// playhead when nothing is selected (spec 6.1).
     ///
     /// A selection spanning several clips is one `Sequence`, so one `u`
     /// undoes the whole adjustment rather than one clip of it.
@@ -727,7 +726,7 @@ impl Engine {
         run(session.exec(&EditCommand::Sequence(cmds)))
     }
 
-    /// Toggle mute or solo on the track the playhead is on (spec §6.1).
+    /// Toggle mute or solo on the track the playhead is on (spec 6.1).
     ///
     /// Mute and solo are independent flags: soloing a muted track leaves it
     /// muted, because silencing something is a stronger statement than
@@ -764,7 +763,7 @@ impl Engine {
     }
 
     /// `gx` and `dax`: put a default transition on the nearest cut, or take
-    /// the one there away (spec §6.2).
+    /// the one there away (spec 6.2).
     ///
     /// "Nearest cut" rather than "the cut under the playhead": a transition
     /// straddles its cut, so demanding the playhead sit exactly on it would

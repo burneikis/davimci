@@ -1,5 +1,5 @@
-//! Key sequence parser and mode state machine (plan.md Phase 4, spec §3,
-//! §4, §6, §11).
+//! Key sequence parser and mode state machine (plan.md Phase 4, spec 3,
+//! spec 4, 6, 11).
 //!
 //! Three layers, kept deliberately separate:
 //!
@@ -12,15 +12,11 @@
 //! - [`engine`] - gives the parsed [`action::Action`] meaning against a live
 //!   [`davimci_cmd::Session`], using [`davimci_motion`] to resolve targets and
 //!   [`davimci_cmd`] to apply them. Transport is dispatched separately from
-//!   the undo log, per spec §3.2.1.
+//!   the undo log, per spec 3.2.1.
 //!
-//! Known simplifications, tracked against later phases rather than spec
-//! gaps: `i`/`a`/`r` need the Phase 5 media picker and currently report
-//! [`engine::Outcome::NotImplemented`]; `gx`/`dax` wait on Phase 9f
-//! transitions the same way; `<`/`>` jump-point edge trims are not yet
-//! wired to a command. Visual-mode track-object narrowing (typing `it`/`at`
-//! *while* a selection is live) is not implemented - operators in a
-//! `VISUAL*` mode act on the selection as a whole.
+//! Two known gaps: `<`/`>` jump-point edge trims parse but have no command
+//! yet, and typing `it`/`at` while a visual selection is live does not narrow
+//! it - operators in a `VISUAL*` mode act on the selection as a whole.
 
 pub mod action;
 pub mod engine;

@@ -1,4 +1,4 @@
-//! Key tokens (spec §3.2.1, §11).
+//! Key tokens (spec 3.2.1, 11).
 //!
 //! A [`Key`] is one physical keypress, already stripped of platform detail -
 //! a frontend translates `winit`/terminal events into these and nothing
