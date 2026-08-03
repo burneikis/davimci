@@ -37,6 +37,9 @@ pub struct ViewInputs<'a> {
     pub waveforms: Option<&'a Waveforms>,
     /// Decoded clip thumbnails, when the host has published any.
     pub thumbnails: Option<&'a Thumbnails>,
+    /// How wide one thumbnail is drawn, in columns - the frontend's
+    /// [`crate::Surface`] hint. Zero draws no filmstrip.
+    pub thumbnail_columns: u32,
 }
 
 impl Default for ViewInputs<'_> {
@@ -53,6 +56,7 @@ impl Default for ViewInputs<'_> {
             recording: None,
             waveforms: None,
             thumbnails: None,
+            thumbnail_columns: 0,
         }
     }
 }
@@ -98,9 +102,11 @@ pub struct ClipView {
     pub selected: bool,
     pub offline: bool,
     pub linked: bool,
-    /// A picture of the clip's first visible frame, once the host has
-    /// decoded one. Shared, so assembling a view does not copy pixels.
-    pub thumbnail: Option<Thumbnail>,
+    /// The clip's filmstrip: a picture per sample point, with the column it
+    /// belongs at. Only the samples the host has decoded are here, so a
+    /// strip fills in as it arrives and an undecoded clip is simply plain.
+    /// Shared pixels, so assembling a view copies nothing.
+    pub thumbnails: Vec<(u32, Thumbnail)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -220,10 +226,14 @@ impl ViewState {
                             selected: selected_clip(t.id, c.start, c.end()),
                             offline: c.is_offline(),
                             linked: c.group.is_some(),
-                            thumbnail: inputs
-                                .thumbnails
-                                .and_then(|t| t.get(c.id, c.source_in))
-                                .cloned(),
+                            thumbnails: inputs.thumbnails.map_or_else(Vec::new, |store| {
+                                strip_samples(&viewport, c, inputs.thumbnail_columns)
+                                    .into_iter()
+                                    .filter_map(|(column, source)| {
+                                        store.get(c.id, source).map(|t| (column, t.clone()))
+                                    })
+                                    .collect()
+                            }),
                         })
                     })
                     .collect(),
@@ -385,6 +395,44 @@ fn track_waveform(
         let from = into_source(start);
         let to = into_source(end.min(clip.end()));
         out[column as usize] = waveform.level(ms(from), ms(to));
+    }
+    out
+}
+
+/// Where a clip's filmstrip is sampled: one point every `every` columns,
+/// from the clip's first visible column, as `(column, source frame)`.
+///
+/// Sample points are anchored to the clip's own start rather than to the
+/// screen, so scrolling slides the strip instead of re-cutting it - which
+/// would otherwise make every scroll a screenful of fresh decodes.
+#[must_use]
+pub fn strip_samples(
+    viewport: &Viewport,
+    clip: &davimci_core::Clip,
+    every: u32,
+) -> Vec<(u32, Frame)> {
+    let mut out = Vec::new();
+    if every == 0 {
+        return out;
+    }
+    let Some((first, last)) = column_span(viewport, clip.start, clip.end()) else {
+        return out;
+    };
+    // The strip is laid out from the clip's start, even when that is off
+    // screen, so a sample keeps its frame as the view scrolls.
+    let head = viewport.column_of_unclamped(clip.start);
+    let mut column = head;
+    while column + (every as i64) <= i64::from(first) {
+        column += i64::from(every);
+    }
+    while column <= i64::from(last) {
+        if column >= i64::from(first) {
+            let at = viewport.frame_at_column_signed(column);
+            let at = at.max(clip.start).min(Frame(clip.end().get() - 1));
+            let source = Frame(clip.source_in.get() + (at.get() - clip.start.get()));
+            out.push((column as u32, source));
+        }
+        column += i64::from(every);
     }
     out
 }

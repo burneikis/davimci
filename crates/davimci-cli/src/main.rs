@@ -226,6 +226,9 @@ fn run_session(ws: Workspace, script: &str, ticks: u32) -> Result<()> {
         Surface {
             columns: 100,
             rows: 6,
+            // A scripted session draws nothing, so it decodes no
+            // thumbnails either.
+            thumbnail_columns: 0,
         },
         script,
     );

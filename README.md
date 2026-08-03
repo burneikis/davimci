@@ -125,7 +125,7 @@ it is linked dynamically, since davimci is GPL-3.0 over LGPL-2.1 MLT.
 | GUI input translation: window keys to `davimci-keys` tokens | implemented, tested |
 | `:` line: drawn as typed, caret, history, completion suggestions | implemented, tested |
 | Relative jump-point numbers on every ruler tick | implemented, tested |
-| Clip thumbnails as a filmstrip, decoded by the host while idle | implemented, tested |
+| Clip filmstrips: a picture per sample point, decoded by the host while idle | implemented, tested |
 | Batched input: a held key costs one seek, not one per repeat | implemented, tested |
 | Media picker and INSERT-mode subtitle editing (state, not widgets) | implemented, tested |
 | Editor assembly: workspace + backend + presenter + transport behind one `Host` | implemented, tested |
@@ -211,8 +211,10 @@ the host is asked for one picture); the `:` line is visible while it is typed,
 with a caret and with the matching commands listed above it; clip labels are
 drawn over the waveform rather than under it; the ruler numbers its major
 jump points relative to the playhead, so `3l` lands on the tick marked 3; and
-video clips carry a thumbnail filmstrip, decoded one picture per tick while
-the transport is stopped and invalidated when a clip is trimmed or slipped.
+video clips carry a thumbnail filmstrip - a picture every thumbnail-width,
+each of the media at that point - decoded one per tick while the transport is
+stopped, anchored to the clip so scrolling slides the strip rather than
+re-cutting it.
 
 Also fixed from the window: playback could not be restarted once it had run to
 the end of the timeline - reaching the end leaves MLT's producer at speed

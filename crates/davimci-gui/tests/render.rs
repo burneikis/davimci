@@ -18,7 +18,7 @@ fn the_normal_view_paints_a_stable_draw_list() {
     let list = paint_view(&view, &layout(800, 600), &Chrome::default());
     assert_eq!(
         summarise(&list),
-        "Background=2 Clip=5 ClipLabel=5 Playhead=1 Ruler=1 RulerNumber=3 Status=1 StatusLine=1 \
+        "Background=2 Clip=5 ClipLabel=5 Playhead=1 Ruler=1 RulerNumber=2 Status=1 StatusLine=1 \
 TickMajor=5 TickMinor=3 TrackHeader=3 TrackLane=2 TrackLaneFocused=1 TrackName=3"
     );
 }
@@ -327,7 +327,10 @@ fn a_clip_thumbnail_tiles_across_the_clip_and_stays_inside_it() {
     // lane height and the clip holds several of them.
     let thumb = davimci_app::Thumbnail::new(2, 8, vec![255u8; 2 * 8 * 4], davimci_core::Frame(0));
     let clip = view.tracks[0].clips[1].clone();
-    view.tracks[0].clips[1].thumbnail = Some(thumb);
+    // Two sample points across the clip, as the app would place them.
+    let (first, last) = clip.columns;
+    view.tracks[0].clips[1].thumbnails =
+        vec![(first, thumb.clone()), (first + (last - first) / 2, thumb)];
     let l = layout(800, 600);
     let list = paint_view(&view, &l, &Chrome::default());
     let images = list.images();
@@ -350,9 +353,14 @@ fn a_clip_thumbnail_tiles_across_the_clip_and_stays_inside_it() {
             "a tile spilled onto the next clip: {rect:?}"
         );
     }
-    // The strip covers the clip: the last tile ends at its edge.
-    let covered: i32 = images.iter().map(|(r, _, _)| r.width as i32).sum();
-    assert_eq!(covered, right - left, "the strip left a gap");
+    // Each picture is drawn at the column the app placed it at.
+    let want: Vec<i32> = view.tracks[0].clips[1]
+        .thumbnails
+        .iter()
+        .map(|(c, _)| l.tracks.x + *c as i32)
+        .collect();
+    let got: Vec<i32> = images.iter().map(|(r, _, _)| r.x).collect();
+    assert_eq!(got, want, "a picture drifted from its sample point");
 }
 
 /// A lane with no analysis draws nothing rather than a flat line, so

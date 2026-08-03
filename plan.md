@@ -855,12 +855,26 @@ Six more defects, all found the same way - by using the window:
   Starting playback *from* the end is now refused with a sentence rather than
   reported as playback (spec §3.2.1).
 
-Also added here: clip thumbnails (spec §15.2), drawn as a filmstrip repeated
-across the clip rather than one picture at its head. The picture is decoded by
-the host - `Editor` pulls one per tick, only while the transport is stopped,
-and puts the playhead back afterwards - and the shell caches one GPU texture
-per clip, keyed by in-point, so a redraw is not an upload. A tile cut off at
-the clip's edge is cropped, never squashed.
+Also added here: clip thumbnails (spec §15.2), drawn as a filmstrip - a
+picture every thumbnail-width, each of the media at that point. Two earlier
+attempts were wrong and both were caught by looking at the window: one picture
+at the clip's head is not a strip, and the same picture repeated is not a
+filmstrip either. The sample points are `view::strip_samples`, anchored to the
+clip's start so scrolling slides the strip rather than re-cutting it, and both
+the request path and the paint path read them - so nothing is decoded that
+would not be drawn and nothing drawn is missing because it was never asked
+for. How wide a picture is drawn is the one part a frontend knows and the app
+does not, so it rides in on `Surface::thumbnail_columns`.
+
+`Editor` decodes one picture per tick, only while the transport is stopped,
+and restores the decoder's position with a bare seek rather than a repaint -
+recomposing there would decode the playhead's frame again on every tick a
+strip was filling in. The shell caches one GPU texture per (clip, source
+frame), so a redraw is not an upload.
+
+Ruler numbers were clipped to their last digit: the layout sized the box to
+its glyphs and the shell then padded the text inside it. `TEXT_PADDING` is one
+constant now, used by both.
 
 ### Phase 8b - export
 

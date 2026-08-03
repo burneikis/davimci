@@ -473,11 +473,14 @@ impl Editor {
         // rather than putting an error in the status line: the media may be
         // offline, which the clip's own colour already says.
         if let Ok(frame) = decoded {
-            let thumb = crate::thumbnail::downscale(&frame, THUMBNAIL_HEIGHT, req.source_in);
+            let thumb = crate::thumbnail::downscale(&frame, THUMBNAIL_HEIGHT, req.source);
             self.pending_thumbnails.push((req.clip, thumb));
         }
-        // Put the decoder back where the user left it.
-        self.show_playhead(session);
+        // Put the decoder back where the user left it. A seek, not a
+        // repaint: the composed preview frame is cached and a thumbnail pull
+        // never touched it, so recomposing here would decode the playhead's
+        // frame again on every tick a strip is filling in.
+        let _ = self.backend.seek(session.timeline().playhead().frame);
     }
 
     /// Pull and compose the frame at the playhead. Only meaningful when the

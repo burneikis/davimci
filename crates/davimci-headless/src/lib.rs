@@ -115,6 +115,7 @@ mod tests {
             Surface {
                 columns: 40,
                 rows: 2,
+                ..Surface::default()
             },
             "lls",
         );

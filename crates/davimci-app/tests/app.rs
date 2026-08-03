@@ -34,6 +34,7 @@ impl Frontend for Recorder {
         Surface {
             columns: 30,
             rows: 1,
+            ..Surface::default()
         }
     }
 
@@ -101,6 +102,7 @@ fn motion_scrolls_the_viewport_to_follow_the_playhead() {
     app.resize(Surface {
         columns: 20,
         rows: 2,
+        ..Surface::default()
     });
     let mut host = NullHost;
     for k in Key::parse_str("lll") {
@@ -117,6 +119,7 @@ fn track_focus_change_scrolls_vertically() {
     app.resize(Surface {
         columns: 20,
         rows: 1,
+        ..Surface::default()
     });
     let mut host = NullHost;
     app.key(Key::Char('j'), &mut host);
@@ -238,6 +241,7 @@ fn a_burst_of_repeated_keys_seeks_once_and_still_moves_every_step() {
     app.resize(Surface {
         columns: 300,
         rows: 4,
+        ..Surface::default()
     });
     let mut fe = Recorder {
         // 8 repeats of `l` in one poll, then quit.
@@ -280,12 +284,16 @@ impl Host for ThumbHost {
 }
 
 #[test]
-fn thumbnails_are_asked_for_per_visible_video_clip_and_drawn_when_they_arrive() {
+fn a_clip_is_sampled_across_its_width_and_each_picture_is_drawn_where_it_belongs() {
     let mut app = App::new(Session::new(timeline()));
     app.resize(Surface {
         columns: 300,
         rows: 4,
+        // One picture every 20 columns, so a clip wants several.
+        thumbnail_columns: 20,
     });
+    // Zoomed in, so a clip is wide enough to hold several pictures.
+    app.set_zoom(davimci_motion::Zoom::MAX);
     let mut host = ThumbHost::default();
     app.event(Event::Tick, &mut host);
 
@@ -296,40 +304,70 @@ fn thumbnails_are_asked_for_per_visible_video_clip_and_drawn_when_they_arrive() 
             .all(|r| app.session().timeline().find_clip(r.clip).is_some()),
         "asked about a clip that is not in the timeline"
     );
-    // Nearest the playhead first: the host may only afford one per tick.
-    let first = host.asked[0];
-    assert!(
-        host.asked
-            .iter()
-            .all(|r| r.at.get().abs_diff(0) >= first.at.get()),
-        "requests are not ordered outwards from the playhead"
-    );
     // Audio lanes are never asked about - there is nothing to picture.
-    let audio = davimci_core::testing::track_id(app.session().timeline(), "A1");
     let audio_clips = davimci_core::testing::clip_ids(app.session().timeline(), "A1");
-    let _ = audio;
     assert!(
         host.asked.iter().all(|r| !audio_clips.contains(&r.clip)),
         "an audio clip was asked for a picture"
     );
 
-    // Publish one, and it reaches the view.
-    let clip = first.clip;
-    host.publish = vec![(
-        clip,
-        davimci_app::Thumbnail::new(2, 2, vec![255u8; 16], first.source_in),
-    )];
+    // A clip is sampled more than once, at different source frames: a
+    // filmstrip is the media changing, not one frame repeated.
+    let first = host.asked[0];
+    let for_clip: Vec<_> = host.asked.iter().filter(|r| r.clip == first.clip).collect();
+    assert!(
+        for_clip.len() > 1,
+        "a clip was asked for one picture, not a strip"
+    );
+    let sources: std::collections::BTreeSet<u64> =
+        for_clip.iter().map(|r| r.source.get()).collect();
+    assert_eq!(sources.len(), for_clip.len(), "the same frame twice");
+    assert!(
+        for_clip.iter().all(|r| r.at
+            >= app
+                .session()
+                .timeline()
+                .find_clip(r.clip)
+                .expect("clip")
+                .1
+                .start),
+        "a sample landed before the clip it pictures"
+    );
+
+    // Nearest the playhead first: the host may only afford one per tick.
+    assert!(
+        host.asked.iter().all(|r| r.at.get() >= first.at.get()),
+        "requests are not ordered outwards from the playhead"
+    );
+
+    // Publish two of them, and both reach the view at their own columns.
+    host.publish = for_clip
+        .iter()
+        .take(2)
+        .map(|r| {
+            (
+                r.clip,
+                davimci_app::Thumbnail::new(2, 2, vec![255u8; 16], r.source),
+            )
+        })
+        .collect();
     app.event(Event::Tick, &mut host);
     let drawn = app
         .view()
         .tracks
         .iter()
         .flat_map(|t| t.clips.clone())
-        .find(|c| c.id == clip)
+        .find(|c| c.id == first.clip)
         .expect("the clip is on screen");
+    assert_eq!(drawn.thumbnails.len(), 2, "a decoded picture is not drawn");
+    let columns: Vec<u32> = drawn.thumbnails.iter().map(|(c, _)| *c).collect();
     assert!(
-        drawn.thumbnail.is_some(),
-        "a decoded thumbnail is not drawn"
+        columns[0] < columns[1],
+        "pictures are not in timeline order: {columns:?}"
+    );
+    assert_ne!(
+        drawn.thumbnails[0].1.source, drawn.thumbnails[1].1.source,
+        "two columns of the strip show the same source frame"
     );
 }
 
@@ -438,6 +476,7 @@ fn first_import_fits_the_clip_in_the_viewport_width() {
     app.resize(Surface {
         columns: 30,
         rows: 4,
+        ..Surface::default()
     });
     let mut host = ImportHost;
     app.key(Key::parse_str("a")[0], &mut host);
@@ -455,6 +494,7 @@ fn a_later_import_leaves_the_viewport_alone() {
     app.resize(Surface {
         columns: 30,
         rows: 4,
+        ..Surface::default()
     });
     let before = app.viewport();
     let mut host = ImportHost;
@@ -532,6 +572,7 @@ fn clicking_the_timeline_moves_the_playhead_without_touching_the_undo_log() {
     app.resize(Surface {
         columns: 50,
         rows: 3,
+        ..Surface::default()
     });
     let undo_before = app.session().history().len();
     app.event(
@@ -563,6 +604,7 @@ fn clicking_a_lane_focuses_that_track() {
     app.resize(Surface {
         columns: 50,
         rows: 3,
+        ..Surface::default()
     });
     let want = app.session().timeline().tracks()[1].id;
     app.event(
@@ -583,6 +625,7 @@ fn a_click_past_the_end_clamps_to_the_last_frame() {
     app.resize(Surface {
         columns: 50,
         rows: 3,
+        ..Surface::default()
     });
     let duration = app.session().timeline().duration();
     app.event(

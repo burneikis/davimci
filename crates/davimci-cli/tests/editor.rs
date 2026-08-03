@@ -237,6 +237,7 @@ fn a_scripted_session_runs_end_to_end_through_the_headless_frontend() {
         Surface {
             columns: 60,
             rows: 4,
+            ..Surface::default()
         },
         "ll<Right>s",
     );
@@ -561,18 +562,24 @@ fn an_edit_during_playback_pauses_before_reprojecting() {
 #[test]
 fn a_tick_decodes_one_thumbnail_and_leaves_the_playhead_where_it_was() {
     let (mut app, mut editor) = editor();
+    // A frontend that draws thumbnails says how wide one is; without that
+    // the app asks for none.
+    app.resize(davimci_app::Surface {
+        columns: 300,
+        rows: 4,
+        thumbnail_columns: 40,
+    });
     let before = app.session().timeline().playhead();
     // First tick asks, second decodes what was asked for.
     app.event(Event::Tick, &mut editor);
     app.event(Event::Tick, &mut editor);
-    let drawn = app
+    let drawn: usize = app
         .view()
         .tracks
         .iter()
-        .flat_map(|t| t.clips.clone())
-        .filter(|c| c.thumbnail.is_some())
-        .count();
-    assert_eq!(drawn, 1, "exactly one thumbnail per tick");
+        .map(|t| t.clips.iter().map(|c| c.thumbnails.len()).sum::<usize>())
+        .sum();
+    assert_eq!(drawn, 1, "exactly one picture per tick");
     assert_eq!(
         app.session().timeline().playhead(),
         before,

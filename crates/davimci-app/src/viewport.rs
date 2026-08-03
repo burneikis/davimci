@@ -126,6 +126,25 @@ impl Viewport {
         u32::try_from(delta / self.frames_per_column()).ok()
     }
 
+    /// Column a frame lands in, counting off the left edge - negative for a
+    /// frame scrolled past. Needed where a layout is anchored to something
+    /// off screen, such as a clip's filmstrip.
+    #[must_use]
+    pub fn column_of_unclamped(&self, frame: Frame) -> i64 {
+        let fpc = self.frames_per_column() as i64;
+        let delta = frame.get() as i64 - self.start.get() as i64;
+        delta.div_euclid(fpc.max(1))
+    }
+
+    /// First frame shown in a column that may be off the left edge. Clamped
+    /// at zero, since there are no frames before the timeline starts.
+    #[must_use]
+    pub fn frame_at_column_signed(&self, column: i64) -> Frame {
+        let fpc = self.frames_per_column() as i64;
+        let at = self.start.get() as i64 + column.saturating_mul(fpc);
+        Frame(at.max(0) as u64)
+    }
+
     /// First frame shown in `column`. The inverse of [`Viewport::column_of`]
     /// up to the frames-per-column quantum, which is what makes a click land
     /// on a frame.

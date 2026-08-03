@@ -14,7 +14,7 @@ use davimci_core::Frame;
 /// A frame smaller than the target is used as it is rather than magnified:
 /// blowing up a quarter-res pull would look worse than a small picture.
 #[must_use]
-pub fn downscale(frame: &VideoFrame, height: u32, source_in: Frame) -> Thumbnail {
+pub fn downscale(frame: &VideoFrame, height: u32, source: Frame) -> Thumbnail {
     let src_w = frame.width.max(1);
     let src_h = frame.height.max(1);
     let out_h = height.max(1).min(src_h);
@@ -35,7 +35,7 @@ pub fn downscale(frame: &VideoFrame, height: u32, source_in: Frame) -> Thumbnail
             }
         }
     }
-    Thumbnail::new(out_w, out_h, rgba, source_in)
+    Thumbnail::new(out_w, out_h, rgba, source)
 }
 
 #[cfg(test)]
@@ -56,7 +56,7 @@ mod tests {
         let t = downscale(&frame(320, 180, 200), 36, Frame(7));
         assert_eq!((t.width, t.height), (64, 36));
         assert!(t.is_well_formed());
-        assert_eq!(t.source_in, Frame(7));
+        assert_eq!(t.source, Frame(7));
         assert!(t.rgba.iter().all(|b| *b == 200));
     }
 

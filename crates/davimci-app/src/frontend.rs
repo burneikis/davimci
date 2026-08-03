@@ -19,6 +19,15 @@ use crate::view::ViewState;
 pub struct Surface {
     pub columns: u32,
     pub rows: usize,
+    /// How many columns wide one thumbnail is drawn, which decides how often
+    /// a clip is sampled for its filmstrip (spec §15.2).
+    ///
+    /// The frontend knows this and the app does not - it depends on lane
+    /// height and the picture's aspect - but *which* frames get sampled is a
+    /// view decision, so the frontend reports the width and the app picks
+    /// the frames. Zero means "no thumbnails", which is how a terminal or a
+    /// test opts out.
+    pub thumbnail_columns: u32,
 }
 
 impl Default for Surface {
@@ -26,6 +35,7 @@ impl Default for Surface {
         Self {
             columns: 80,
             rows: 4,
+            thumbnail_columns: 0,
         }
     }
 }

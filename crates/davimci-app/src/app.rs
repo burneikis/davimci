@@ -187,6 +187,9 @@ pub struct App {
     jobs: JobList,
     waveforms: Waveforms,
     thumbnails: Thumbnails,
+    /// How wide the frontend draws one thumbnail, in columns; zero means it
+    /// draws none (spec §15.2).
+    thumbnail_columns: u32,
     /// The `:` line's buffer, history and completion vocabulary. Owned here
     /// rather than in a frontend so every host shows the same line, with the
     /// same completions, as it is typed.
@@ -224,6 +227,7 @@ impl App {
             jobs: JobList::default(),
             waveforms: Waveforms::default(),
             thumbnails: Thumbnails::default(),
+            thumbnail_columns: 0,
             command: CommandLine::new(crate::cmdline::default_candidates()),
             command_open: false,
             pending_pick: None,
@@ -295,6 +299,7 @@ impl App {
     }
 
     pub fn resize(&mut self, surface: Surface) {
+        self.thumbnail_columns = surface.thumbnail_columns;
         self.viewport.resize(surface.columns, surface.rows);
         self.follow();
     }
@@ -358,6 +363,7 @@ impl App {
             recording: self.session.macros().recording(),
             waveforms: (!self.waveforms.is_empty()).then_some(&self.waveforms),
             thumbnails: (!self.thumbnails.is_empty()).then_some(&self.thumbnails),
+            thumbnail_columns: self.thumbnail_columns,
         };
         ViewState::build(&self.session, self.viewport, &self.jump_cfg, &inputs)
     }
@@ -739,10 +745,13 @@ impl App {
     /// distance from the playhead, so a host that decodes one per tick fills
     /// the screen outwards from where the user is looking.
     fn ask_for_thumbnails(&mut self, host: &mut dyn Host) {
+        if self.thumbnail_columns == 0 {
+            return;
+        }
         let tl = self.session.timeline();
         let (from, to) = self.viewport.visible_range();
         let playhead = tl.playhead().frame;
-        let mut visible: Vec<ClipId> = Vec::new();
+        let mut keep: Vec<(ClipId, Frame)> = Vec::new();
         let mut wanted: Vec<(u64, ThumbnailRequest)> = Vec::new();
         for track in tl
             .tracks()
@@ -756,29 +765,36 @@ impl App {
                 .iter()
                 .filter(|c| c.end() > from && c.start < to)
             {
-                visible.push(clip.id);
-                if self.thumbnails.get(clip.id, clip.source_in).is_some() {
-                    continue;
+                // The same sample points the view draws, so nothing is
+                // decoded that would not be shown and nothing shown is
+                // missing because it was never asked for.
+                for (column, source) in
+                    crate::view::strip_samples(&self.viewport, clip, self.thumbnail_columns)
+                {
+                    keep.push((clip.id, source));
+                    if self.thumbnails.get(clip.id, source).is_some() {
+                        continue;
+                    }
+                    let at = self.viewport.frame_at_column(column);
+                    let at = at.max(clip.start).min(Frame(clip.end().get() - 1));
+                    wanted.push((
+                        at.get().abs_diff(playhead.get()),
+                        ThumbnailRequest {
+                            clip: clip.id,
+                            at,
+                            source,
+                        },
+                    ));
                 }
-                // Inside the clip, and inside the viewport: a clip whose
-                // head is scrolled off is pictured where it is visible.
-                let at = clip.start.max(from).min(Frame(clip.end().get() - 1));
-                let distance = at.get().abs_diff(playhead.get());
-                wanted.push((
-                    distance,
-                    ThumbnailRequest {
-                        clip: clip.id,
-                        at,
-                        source_in: clip.source_in,
-                    },
-                ));
             }
         }
-        // Pixels for clips that are gone are pixels nobody will ever draw.
-        self.thumbnails.retain(&visible);
+        // Pixels nobody would draw are pixels nobody should be holding.
+        self.thumbnails.retain(&keep);
         if wanted.is_empty() {
             return;
         }
+        // Outwards from the playhead: a host that decodes one per tick fills
+        // in where the user is looking first.
         wanted.sort_by_key(|(d, _)| *d);
         let requests: Vec<ThumbnailRequest> = wanted.into_iter().map(|(_, r)| r).collect();
         host.request_thumbnails(&requests);

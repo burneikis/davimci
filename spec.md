@@ -832,6 +832,10 @@ Anything beyond this is measured before it is optimized.
 The editor's view state is defined once and every frontend renders it; no
 frontend decides any of the following for itself.
 
+Text is laid out with room for the padding a frontend puts inside a text box:
+a label sized to its glyphs alone loses its last character, which is how a
+two-digit ruler number ends up drawn as one digit.
+
 ### 15.1 Status line
 
 `-- MODE (scope) --`, where scope is the focused track's name in `NORMAL`,
@@ -867,16 +871,23 @@ order.
 - **Clip labels are readable.** A clip's label is drawn over whatever fills
   its lane - envelope, thumbnail or plain colour - never under it.
 
-- **Thumbnails:** a video clip shows a picture of its first visible frame,
-  repeated across the clip's whole width at the picture's own aspect ratio -
-  a filmstrip, not a stamp. The strip never crosses the clip's edge: the last
-  tile is cropped there rather than squashed into what is left. Thumbnails
-  are decoded by the host, not the frontend: the app asks for the visible
-  clips that have none, nearest the playhead first, and the host decodes what
-  it can afford - never while the transport is running, since the preview
-  needs the decoder more. A thumbnail belongs to a clip's in-point, so
-  trimming or slipping a clip drops the picture until a new one arrives, and
-  a clip with no picture is drawn plain rather than black.
+- **Thumbnails:** a video clip is drawn as a **filmstrip** - a picture every
+  thumbnail-width across the clip, each of the media *at that point*, so a
+  strip shows the shot changing rather than one frame stamped repeatedly.
+  Sample points are anchored to the clip's start, not to the screen, so
+  scrolling slides the strip instead of re-cutting it. The strip never
+  crosses the clip's edge: a tile cut off there is cropped, never squashed
+  into what is left.
+
+  A frontend reports how wide it draws one thumbnail, since that depends on
+  lane height and aspect; *which* frames are sampled is decided above the
+  frontends, like everything else in the view. Pictures are decoded by the
+  host: the app asks for the samples it would draw, nearest the playhead
+  first, and the host decodes what it can afford - never while the transport
+  is running, since the preview needs the decoder more. A picture is
+  identified by the source frame it shows, so a slip or a trim leaves the
+  strip to refill rather than showing the wrong frames, and a clip with no
+  pictures yet is drawn plain rather than black.
 
 ### 15.3 Command line
 

@@ -9,6 +9,10 @@ use davimci_app::{Surface, ViewState};
 
 use crate::paint::{Chrome, DrawList, Fill, PickerView, Rect, TextRole, status_text};
 
+/// Left padding a shell leaves inside a text box, in pixels. Layout has to
+/// allow for it: a box sized to its glyphs alone loses its last character.
+pub const TEXT_PADDING: u32 = 4;
+
 /// Fixed metrics. A theme may change these; nothing else may.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Metrics {
@@ -182,6 +186,10 @@ impl Layout {
         Surface {
             columns: self.tracks.width.max(1),
             rows: (self.tracks.height / self.metrics.row_height.max(1)).max(1) as usize,
+            // How wide one thumbnail lands: a lane's height at the assumed
+            // 16:9 of the picture. The app samples a clip that often, so
+            // the strip tiles without gaps or overlap.
+            thumbnail_columns: (self.metrics.row_height.max(1) * 16 / 9).max(1),
         }
     }
 
@@ -300,34 +308,35 @@ pub fn paint(view: &ViewState, layout: &Layout, chrome: &Chrome) -> DrawList {
                 Fill::Clip
             };
             d.rect(rect, fill);
-            // A filmstrip: the picture is repeated across the whole clip,
-            // at its own aspect ratio, so a long clip reads as film rather
-            // than as one stamp on a coloured bar. The last tile is
-            // truncated at the clip's edge rather than spilling onto the
-            // neighbour it is not a picture of.
-            if let Some(thumb) = &clip.thumbnail
-                && rect.width > 4
-                && rect.height > 4
-            {
+            // A filmstrip: one picture per sample point, each of the media
+            // at *that* point, so a long clip reads as the shot changing
+            // rather than as one frame stamped over and over. The app chose
+            // the sample columns; a tile is cropped at the clip's edge
+            // rather than spilling onto the neighbour it is not a picture
+            // of.
+            let end = rect.x.saturating_add(rect.width as i32);
+            for (column, thumb) in &clip.thumbnails {
+                if rect.width <= 4 || rect.height <= 4 {
+                    break;
+                }
                 let height = rect.height;
                 let tile = (thumb.width * height / thumb.height.max(1)).max(1);
-                let mut x = rect.x;
-                let end = rect.x.saturating_add(rect.width as i32);
-                while x < end {
-                    let width = tile.min((end - x) as u32);
-                    d.image(
-                        Rect {
-                            x,
-                            y: rect.y,
-                            width,
-                            height,
-                        },
-                        clip.id,
-                        thumb.clone(),
-                        tile,
-                    );
-                    x = x.saturating_add(tile as i32);
+                let x = layout.tracks.x.saturating_add(*column as i32).max(rect.x);
+                if x >= end {
+                    continue;
                 }
+                let width = tile.min((end - x) as u32);
+                d.image(
+                    Rect {
+                        x,
+                        y: rect.y,
+                        width,
+                        height,
+                    },
+                    clip.id,
+                    thumb.clone(),
+                    tile,
+                );
             }
         }
 
@@ -445,7 +454,10 @@ fn paint_relative_numbers(d: &mut DrawList, layout: &Layout, view: &ViewState) {
     let mut last_end: i64 = i64::MIN;
     for tick in &view.ticks {
         let text = tick.relative.unsigned_abs().to_string();
-        let width = text.len() as u32 * cw;
+        // Room for the digits themselves plus the padding a shell puts
+        // inside a text box: a number drawn into a box its own width is a
+        // number with its last digit clipped off.
+        let width = text.len() as u32 * cw + TEXT_PADDING;
         let x = i64::from(layout.ruler.x) + i64::from(tick.column) + 2;
         if x < last_end {
             continue;

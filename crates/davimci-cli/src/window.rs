@@ -236,5 +236,6 @@ pub fn initial_surface() -> Surface {
     Surface {
         columns: 1200,
         rows: 6,
+        thumbnail_columns: 0,
     }
 }

@@ -13,6 +13,7 @@ use egui::{
 };
 
 use crate::input::{Modifiers, RawKey};
+use crate::layout::TEXT_PADDING;
 use crate::paint::{DrawList, Fill, Paint, Rect, TextRole};
 use davimci_app::Severity;
 
@@ -78,12 +79,12 @@ fn to_egui(rect: Rect) -> EguiRect {
 ///
 /// A draw list is rebuilt every frame, so uploading its thumbnails every
 /// frame would spend the GPU on pictures that did not change. The cache is
-/// keyed by clip and invalidated by the thumbnail's own in-point, which is
-/// what changes when a clip is trimmed or slipped.
+/// keyed by clip *and* source frame, because a clip's filmstrip is several
+/// different pictures of it (spec §15.2).
 #[derive(Default)]
 pub struct ThumbnailTextures {
     textures:
-        std::collections::HashMap<davimci_core::ClipId, (davimci_core::Frame, egui::TextureHandle)>,
+        std::collections::HashMap<(davimci_core::ClipId, davimci_core::Frame), egui::TextureHandle>,
 }
 
 impl std::fmt::Debug for ThumbnailTextures {
@@ -101,9 +102,7 @@ impl ThumbnailTextures {
         clip: davimci_core::ClipId,
         thumb: &davimci_app::Thumbnail,
     ) -> egui::TextureHandle {
-        if let Some((source_in, tex)) = self.textures.get(&clip)
-            && *source_in == thumb.source_in
-        {
+        if let Some(tex) = self.textures.get(&(clip, thumb.source)) {
             return tex.clone();
         }
         let image = egui::ColorImage::from_rgba_unmultiplied(
@@ -111,19 +110,22 @@ impl ThumbnailTextures {
             &thumb.rgba,
         );
         let tex = ctx.load_texture(
-            format!("davimci-thumb-{}", clip.get()),
+            format!("davimci-thumb-{}-{}", clip.get(), thumb.source.get()),
             image,
             egui::TextureOptions::LINEAR,
         );
-        self.textures.insert(clip, (thumb.source_in, tex.clone()));
+        self.textures.insert((clip, thumb.source), tex.clone());
         tex
     }
 
-    /// Forget textures for clips the list no longer draws.
+    /// Forget textures for pictures the list no longer draws.
     pub fn retain(&mut self, list: &DrawList) {
-        let live: Vec<davimci_core::ClipId> =
-            list.images().into_iter().map(|(_, clip, _)| clip).collect();
-        self.textures.retain(|clip, _| live.contains(clip));
+        let live: Vec<(davimci_core::ClipId, davimci_core::Frame)> = list
+            .images()
+            .into_iter()
+            .map(|(_, clip, thumb)| (clip, thumb.source))
+            .collect();
+        self.textures.retain(|key, _| live.contains(key));
     }
 }
 
@@ -180,7 +182,8 @@ fn draw_ops(list: &DrawList, ui: &Ui, origin: Pos2, modal: bool, thumbs: &mut Th
                 // rectangle; status and command lines are left-aligned in
                 // theirs. Either way the text never escapes its box.
                 painter.with_clip_rect(r).text(
-                    r.left_center() + Vec2::new(4.0, 0.0),
+                    r.left_center()
+                        + Vec2::new(f32::from(u16::try_from(TEXT_PADDING).unwrap_or(4)), 0.0),
                     Align2::LEFT_CENTER,
                     text,
                     FontId::monospace(size),
