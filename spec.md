@@ -273,9 +273,9 @@ of tracks the verb may touch:
 | `at` | the clip's extent | every track the clip's link group reaches; identical to `it` for an unlinked clip |
 | `is` | the VISUAL selection; fails outside VISUAL | focused track only |
 
-Until transitions exist (§6.2), `ac` resolves to the same range as `ic`; it
-widens automatically once a transition can be attached, with no change at the
-call site.
+`ac` resolves to the same range as `ic` until a transition is attached to one
+of the clip's cuts (§6.2); it then widens to cover the whole overlap, with no
+change at the call site.
 
 This directly answers the "edit single tracks at a time, or grouped tracks"
 requirement: **the object you delete/select determines whether the operation
@@ -367,14 +367,33 @@ Transitions occupy the overlap between two adjacent clips and are what `ac`
 | Key / command | Action |
 |---|---|
 | `gx` | Create a default transition at the nearest cut (default: 12-frame crossfade / dissolve) |
-| `:transition <name> [duration]` | Create a named transition at the nearest cut |
-| `dax` | Delete the transition at the nearest cut |
-| `:set transition.duration <frames>` | Adjust the transition under the playhead |
+| `:transition <name> [frames]` | Create a named transition at the nearest cut |
+| `dax` | Delete the transition under the playhead |
+| `:transition none` | The same deletion from command mode |
+
+A transition belongs to the *incoming* clip: it is attached to the cut at that
+clip's start, so deleting the clip deletes the transition with it, and an edit
+that takes the cut away - a ripple over a neighbour, a trim that opens a gap -
+resolves the transition rather than orphaning it.
+
+The overlap is centred on the cut: for a `d`-frame transition the incoming
+clip starts `d/2` frames early and the outgoing clip runs the remaining frames
+past its out-point, with the odd frame going after the cut. Both come from
+handle frames, so **nothing on the timeline moves**: no clip changes position
+or duration, and the track length is identical before and after.
 
 Creating a transition consumes handle frames from both clips; if either clip
-lacks sufficient handles, the operation fails with a clear error rather than
-silently shortening the result. Transition types are extensible from Lua and
-map onto MLT transitions.
+lacks sufficient handles - or the overlap would be longer than the clips it
+joins, or would run into the transition on a neighbouring cut - the operation
+fails with a clear error rather than silently shortening the result.
+
+Re-running `:transition` on a cut that already has one replaces it, which is
+how a transition's type or duration is changed.
+
+Transition types map onto MLT transitions: a video track composites, an audio
+track always cross-fades whatever the type is named, and a type this build
+does not know renders as a plain dissolve so that a project made elsewhere
+still opens. Types are extensible from Lua.
 
 ---
 
@@ -737,7 +756,7 @@ The project, config directory, Lua module namespace, and project-local file all 
 | `t`/`<`/`>`/`T` | ripple trim / trim edge / slip |
 | `f` + motion | audio fade |
 | `+`/`-` | gain adjust |
-| `gx` | create transition at nearest cut |
+| `gx`/`dax` | create / delete transition at nearest cut |
 | `zi`/`zo`/`z0` | zoom in / out / reset to default zoom (§15.2) |
 | `:export`, `:render` | export via command mode |
 | `:w`, `:q`, `:wq`, `:e` | project lifecycle (see §12) |

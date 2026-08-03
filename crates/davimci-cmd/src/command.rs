@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 
 use davimci_core::{
     Clip, ClipId, ClipProps, ConformState, CoreError, Edge, Frame, GroupId, Register,
-    TimelineProps, TrackId,
+    TimelineProps, TrackId, Transition,
 };
 use davimci_core::{Timeline, TrackKind};
 
@@ -186,6 +186,13 @@ pub enum EditCommand {
         muted: bool,
         solo: bool,
     },
+    /// Attach or remove the transition on the cut at a clip's start
+    /// (`gx`, `:transition`, `dax`, spec §6.2). `None` deletes.
+    SetTransition {
+        track: TrackId,
+        clip: ClipId,
+        transition: Option<Transition>,
+    },
     /// Point a clip's media at another file (`:relink`, spec §12). The
     /// `offline` flag is decided by the caller, which is the only layer that
     /// may touch the filesystem.
@@ -224,6 +231,7 @@ pub const VARIANT_NAMES: &[&str] = &[
     "SetProps",
     "SetClipText",
     "SetTrackFlags",
+    "SetTransition",
     "Relink",
     "Sequence",
 ];
@@ -254,6 +262,7 @@ impl EditCommand {
             Self::SetProps { .. } => "SetProps",
             Self::SetClipText { .. } => "SetClipText",
             Self::SetTrackFlags { .. } => "SetTrackFlags",
+            Self::SetTransition { .. } => "SetTransition",
             Self::Relink { .. } => "Relink",
             Self::Sequence(_) => "Sequence",
         }
@@ -355,6 +364,12 @@ impl Command for EditCommand {
                 (true, _) => format!("mute {track}"),
                 (false, true) => format!("solo {track}"),
                 (false, false) => format!("unmute {track}"),
+            },
+            Self::SetTransition {
+                clip, transition, ..
+            } => match transition {
+                Some(t) => format!("add a {}-frame {} at {clip}", t.duration.get(), t.kind),
+                None => format!("remove the transition at {clip}"),
             },
             Self::Relink { clip, path, .. } => format!("relink {clip} to {path}"),
             Self::Sequence(v) => match v.len() {
@@ -769,6 +784,22 @@ impl Command for EditCommand {
                         track: *track,
                         muted: previous.0,
                         solo: previous.1,
+                    },
+                })
+            }
+
+            Self::SetTransition {
+                track,
+                clip,
+                transition,
+            } => {
+                let previous = tl.set_transition(*track, *clip, transition.clone())?;
+                Ok(Effect {
+                    applied: self.clone(),
+                    inverse: Self::SetTransition {
+                        track: *track,
+                        clip: *clip,
+                        transition: previous,
                     },
                 })
             }
@@ -1205,6 +1236,60 @@ mod tests {
         );
     }
 
+    /// Spec §6.2: creating and deleting a transition is a command like any
+    /// other, so `u` puts the cut back exactly as it was.
+    #[test]
+    fn transitions_round_trip_as_commands() {
+        let mut tl =
+            davimci_core::testing::media_fixture(&[(0, 100, 20, 400), (100, 100, 20, 400)]);
+        let track = tl.tracks()[0].id;
+        let right = tl.tracks()[0].clips()[1].id;
+        roundtrip(
+            &mut tl,
+            &EditCommand::SetTransition {
+                track,
+                clip: right,
+                transition: Some(Transition::dissolve()),
+            },
+        );
+        // And deleting one, which is the same command with `None`.
+        EditCommand::SetTransition {
+            track,
+            clip: right,
+            transition: Some(Transition::dissolve()),
+        }
+        .apply(&mut tl)
+        .unwrap();
+        roundtrip(
+            &mut tl,
+            &EditCommand::SetTransition {
+                track,
+                clip: right,
+                transition: None,
+            },
+        );
+    }
+
+    /// A user error leaves the timeline byte-identical and never enters the
+    /// undo log (Phase 0 policy).
+    #[test]
+    fn a_transition_without_handles_is_refused_before_it_mutates() {
+        let mut tl = fixture(&[("V1", &[(0, 100, "a"), (100, 100, "b")])]);
+        let track = track_id(&tl, "V1");
+        let right = clip_ids(&tl, "V1")[1];
+        let before = tl.clone();
+        // Generated clips have unbounded handles, so the failure here has to
+        // come from the overlap outrunning the clips themselves.
+        let err = EditCommand::SetTransition {
+            track,
+            clip: right,
+            transition: Some(Transition::new("dissolve", Frame(400))),
+        }
+        .apply(&mut tl);
+        assert!(err.is_err());
+        assert_eq!(tl, before);
+    }
+
     #[test]
     fn mute_and_solo_round_trip_as_commands() {
         // Spec §6.1: track state, but undoable like any other mutation.
@@ -1481,6 +1566,11 @@ mod tests {
                 track,
                 muted: true,
                 solo: false,
+            },
+            EditCommand::SetTransition {
+                track,
+                clip,
+                transition: Some(Transition::dissolve()),
             },
             EditCommand::Relink {
                 clip,

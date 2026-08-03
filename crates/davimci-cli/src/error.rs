@@ -31,6 +31,9 @@ pub enum CliError {
     #[error("nothing in this timeline points at {0}")]
     NoClipUsesPath(String),
 
+    #[error("there is no {what} near the playhead")]
+    NoTransitionTarget { what: &'static str },
+
     #[error("there is no clip under the playhead to replace")]
     NothingToReplace,
 
@@ -98,6 +101,7 @@ impl Classify for CliError {
             | Self::NoSuchBuffer(_)
             | Self::NothingToRelink
             | Self::NoClipUsesPath(_)
+            | Self::NoTransitionTarget { .. }
             | Self::ExportBusy { .. }
             | Self::NothingToReplace
             | Self::NoClipUnderPlayhead(_)

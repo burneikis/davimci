@@ -8,7 +8,9 @@ use std::path::PathBuf;
 
 use davimci_analysis::{FfprobeProber, ImportOptions, Prober};
 use davimci_cmd::EditCommand;
-use davimci_core::{Selection, TimelineProps};
+use davimci_core::{
+    DEFAULT_TRANSITION, DEFAULT_TRANSITION_FRAMES, Frame, Selection, TimelineProps, Transition,
+};
 
 use crate::autosave::OnRecovery;
 use crate::error::CliError;
@@ -59,6 +61,14 @@ pub enum ExCommand {
     Normalize { target_db: f32 },
     /// `:duck <track> <db>` (§6.1). Needs analysis, so the editor runs it.
     Duck { track: String, db: f32 },
+    /// `:transition <name> [frames]` (§6.2), on the cut nearest the playhead.
+    /// `:transition none` deletes the one that is there. Re-running it on a
+    /// cut that already has one replaces it, which is how a transition's type
+    /// or duration is changed.
+    Transition {
+        kind: Option<String>,
+        frames: Option<u64>,
+    },
 }
 
 /// Default target for `:normalize`, in dBFS RMS. Conservative on purpose:
@@ -208,6 +218,33 @@ pub fn parse(line: &str) -> Result<ExCommand, CliError> {
                 usage: "<track> <db>".into(),
             }),
         },
+        "transition" => {
+            let usage = "<name|none> [frames]";
+            let bad = || CliError::Usage {
+                cmd: "transition".into(),
+                usage: usage.into(),
+            };
+            let frames = |s: &str| s.parse::<u64>().map_err(|_| bad());
+            match args.as_slice() {
+                [] => Ok(ExCommand::Transition {
+                    kind: Some(DEFAULT_TRANSITION.to_string()),
+                    frames: None,
+                }),
+                ["none"] => Ok(ExCommand::Transition {
+                    kind: None,
+                    frames: None,
+                }),
+                [name] => Ok(ExCommand::Transition {
+                    kind: Some((*name).to_string()),
+                    frames: None,
+                }),
+                [name, n] => Ok(ExCommand::Transition {
+                    kind: Some((*name).to_string()),
+                    frames: Some(frames(n)?),
+                }),
+                _ => Err(bad()),
+            }
+        }
         "presets" => Ok(ExCommand::Presets),
         "cancel" => Ok(ExCommand::CancelRender),
         "new" => Ok(ExCommand::New),
@@ -263,6 +300,7 @@ pub fn vocabulary() -> Vec<String> {
         "normalize",
         "normalise",
         "duck",
+        "transition",
         "new",
         "ls",
         "buffers",
@@ -401,6 +439,9 @@ impl Workspace {
             ExCommand::Normalize { .. } | ExCommand::Duck { .. } => {
                 Err(CliError::AnalysisNotReady("this command"))
             }
+            // A transition is an undoable edit on the timeline and needs
+            // neither backend nor analysis, so it runs here (spec §6.2).
+            ExCommand::Transition { kind, frames } => self.transition(kind.as_deref(), *frames),
             ExCommand::Relink { old, new } => self.relink(old.as_deref(), new),
         }
     }
@@ -455,6 +496,47 @@ impl Workspace {
 
     /// `:relink` (Phase 0 offline-media policy): point clips at a file that
     /// moved. One undoable command, so a mistaken relink is `u` away.
+    /// `:transition [name] [frames]` on the cut nearest the playhead.
+    ///
+    /// Deleting looks for the transition *under* the playhead first, because
+    /// the overlap straddles its cut and the user is usually standing in it;
+    /// creating always takes the nearest cut (spec §6.2).
+    fn transition(
+        &mut self,
+        kind: Option<&str>,
+        frames: Option<u64>,
+    ) -> Result<ExOutcome, CliError> {
+        let tl = self.current().timeline();
+        let head = tl.playhead();
+        let found = match kind {
+            Some(_) => tl.nearest_cut(head.track, head.frame),
+            None => tl
+                .transition_at(head.track, head.frame)
+                .map(|(clip, _)| (clip, head.frame)),
+        };
+        let Some((clip, _)) = found else {
+            return Err(CliError::NoTransitionTarget {
+                what: if kind.is_some() {
+                    "cut to put a transition on"
+                } else {
+                    "transition to remove"
+                },
+            });
+        };
+        let transition =
+            kind.map(|k| Transition::new(k, Frame(frames.unwrap_or(DEFAULT_TRANSITION_FRAMES))));
+        let described = transition
+            .as_ref()
+            .map(|t| format!("{}-frame {} added", t.duration.get(), t.kind))
+            .unwrap_or_else(|| "transition removed".to_string());
+        self.exec(&EditCommand::SetTransition {
+            track: head.track,
+            clip,
+            transition,
+        })?;
+        Ok(ExOutcome::msg(described))
+    }
+
     fn relink(&mut self, old: Option<&str>, new: &str) -> Result<ExOutcome, CliError> {
         // The new file's existence decides the offline flag - this is the
         // only layer that may ask the filesystem.

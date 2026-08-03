@@ -358,3 +358,60 @@ fn i_edits_text_on_a_subtitle_track_and_picks_media_elsewhere() {
         other => panic!("expected a text edit, got {other:?}"),
     }
 }
+
+/// Spec §6.2: `gx` puts a default dissolve on the nearest cut, `dax` takes it
+/// away, and `u` undoes either as one step.
+#[test]
+fn gx_and_dax_add_and_remove_a_transition_at_the_nearest_cut() {
+    let mut s = Session::new(davimci_core::testing::media_fixture(&[
+        (0, 100, 20, 400),
+        (100, 100, 20, 400),
+    ]));
+    let mut e = Engine::new();
+    let right = s.timeline().tracks()[0].clips()[1].id;
+    let has = |s: &Session| {
+        s.timeline()
+            .find_clip(right)
+            .is_some_and(|(_, c)| c.transition_in.is_some())
+    };
+
+    let out = feed(&mut e, &mut s, "gx");
+    assert!(matches!(out.last(), Some(Outcome::Applied(_))), "{out:?}");
+    assert!(has(&s), "the cut nearest frame zero gets the transition");
+
+    // From inside the overlap rather than exactly on the cut.
+    let out = feed(&mut e, &mut s, "dax");
+    assert!(matches!(out.last(), Some(Outcome::Applied(_))), "{out:?}");
+    assert!(!has(&s));
+
+    assert!(matches!(
+        e.feed(Key::parse_str("u")[0], &mut s).outcome,
+        Outcome::Applied(_)
+    ));
+    assert!(has(&s), "one undo puts the transition back");
+}
+
+/// A cut whose clips have no handles is refused with a sentence, and nothing
+/// enters the undo log (Phase 0 policy).
+#[test]
+fn gx_without_handles_reports_why_and_changes_nothing() {
+    let mut s = Session::new(davimci_core::testing::media_fixture(&[
+        (0, 100, 0, 100),
+        (100, 100, 0, 100),
+    ]));
+    let mut e = Engine::new();
+    let before = s.timeline().clone();
+    let out = feed(&mut e, &mut s, "gx");
+    let Some(Outcome::Error(msg)) = out.last() else {
+        panic!("expected a refusal, got {out:?}");
+    };
+    assert!(msg.contains("handle"), "{msg}");
+    assert_eq!(s.timeline(), &before);
+}
+
+#[test]
+fn dax_on_a_track_with_no_transition_says_so() {
+    let (mut e, mut s) = scene();
+    let out = feed(&mut e, &mut s, "dax");
+    assert!(matches!(out.last(), Some(Outcome::Error(_))), "{out:?}");
+}

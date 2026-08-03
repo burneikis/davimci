@@ -80,7 +80,7 @@ impl Timeline {
         right.group = None;
         t.clips_mut().insert(idx + 1, right);
 
-        self.debug_assert_invariants();
+        self.settle();
         Ok(id)
     }
 
@@ -153,7 +153,7 @@ impl Timeline {
         let left = &mut t.clips_mut()[idx - 1];
         left.duration = Frame(left.duration.get() + dur.get());
         left.props.fade_out = fade_out;
-        self.debug_assert_invariants();
+        self.settle();
         Ok(absorbed)
     }
 
@@ -207,7 +207,7 @@ impl Timeline {
             copy.start = Frame(at.get() + c.start.get());
             t.insert_sorted(copy);
         }
-        self.debug_assert_invariants();
+        self.settle();
         Ok(())
     }
 
@@ -255,7 +255,7 @@ impl Timeline {
         self.split_if_inside(track, end);
         let t = self.require_track_mut(track)?;
         t.clips_mut().retain(|c| c.end() <= start || c.start >= end);
-        self.debug_assert_invariants();
+        self.settle();
         Ok(yanked)
     }
 
@@ -274,7 +274,7 @@ impl Timeline {
                 c.start = Frame(c.start.get() - span);
             }
         }
-        self.debug_assert_invariants();
+        self.settle();
         Ok(yanked)
     }
 
@@ -320,7 +320,7 @@ impl Timeline {
         let mut clip = clip;
         clip.start = at;
         t.insert_sorted(clip);
-        self.debug_assert_invariants();
+        self.settle();
         Ok(id)
     }
 
@@ -340,7 +340,7 @@ impl Timeline {
         let mut clip = clip;
         clip.start = at;
         t.insert_sorted(clip);
-        self.debug_assert_invariants();
+        self.settle();
         Ok(id)
     }
 
@@ -389,7 +389,7 @@ impl Timeline {
         for c in fresh {
             t.insert_sorted(c);
         }
-        self.debug_assert_invariants();
+        self.settle();
         Ok(ids)
     }
 
@@ -423,7 +423,7 @@ impl Timeline {
             }
             return Err(e);
         }
-        self.debug_assert_invariants();
+        self.settle();
         Ok(())
     }
 

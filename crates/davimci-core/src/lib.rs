@@ -12,6 +12,7 @@ pub mod selection;
 pub mod time;
 pub mod timeline;
 pub mod track;
+pub mod transition;
 pub mod trim;
 
 #[cfg(test)]
@@ -29,4 +30,5 @@ pub use selection::Selection;
 pub use time::{Fps, Frame, Resolution, TimelineProps};
 pub use timeline::{Mark, Marker, Playhead, Register, Timeline};
 pub use track::{Track, TrackKind};
+pub use transition::{DEFAULT_TRANSITION, DEFAULT_TRANSITION_FRAMES, Transition};
 pub use trim::Edge;

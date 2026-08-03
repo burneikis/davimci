@@ -65,6 +65,9 @@ pub enum CoreError {
     #[error("cannot slide this clip: {reason}")]
     CannotSlide { reason: String },
 
+    #[error("cannot place a transition here: {reason}")]
+    CannotTransition { reason: String },
+
     #[error("cannot link these clips: {reason}")]
     CannotLink { reason: String },
 
@@ -121,6 +124,7 @@ impl Classify for CoreError {
             | Self::NothingToSplit { .. }
             | Self::NoCutAt { .. }
             | Self::CannotSlide { .. }
+            | Self::CannotTransition { .. }
             | Self::CannotLink { .. }
             | Self::CannotJoin { .. }
             | Self::DuplicateClip(_)
@@ -233,6 +237,9 @@ mod tests {
             },
             CoreError::CannotLink {
                 reason: "misaligned".into(),
+            },
+            CoreError::CannotTransition {
+                reason: "not enough handle frames".into(),
             },
             CoreError::CannotJoin {
                 frame: 10,

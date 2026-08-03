@@ -6,6 +6,7 @@ use crate::clip::Clip;
 use crate::error::CoreError;
 use crate::id::{ClipId, TrackId};
 use crate::time::Frame;
+use crate::transition::Transition;
 
 /// Track types from spec §5.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -99,6 +100,139 @@ impl Track {
 
     pub(crate) fn clips_mut(&mut self) -> &mut Vec<Clip> {
         &mut self.clips
+    }
+
+    // -- transitions (spec §6.2) -----------------------------------------
+
+    /// Whether the clip at `index` starts on a cut, i.e. the previous clip
+    /// ends exactly where it begins. A transition needs two clips to join.
+    #[must_use]
+    pub fn abuts_previous(&self, index: usize) -> bool {
+        index > 0
+            && self
+                .clips
+                .get(index - 1)
+                .zip(self.clips.get(index))
+                .is_some_and(|(prev, c)| prev.end() == c.start)
+    }
+
+    /// Whether a transition of this length can be built on the cut at
+    /// `index`, and why not when it cannot.
+    ///
+    /// The overlap is made of handle frames, so this is where spec §6.2's
+    /// "fails with a clear error rather than silently shortening" lives: the
+    /// answer is computed before anything is written.
+    pub fn check_transition(&self, index: usize, t: &Transition) -> Result<(), CoreError> {
+        let reject = |reason: String| Err(CoreError::CannotTransition { reason });
+        if t.kind.trim().is_empty() {
+            return reject("a transition needs a type".into());
+        }
+        if t.duration == Frame::ZERO {
+            return reject("a transition cannot be zero frames long".into());
+        }
+        if !self.abuts_previous(index) {
+            return reject("there is no cut here: a transition joins two abutting clips".into());
+        }
+        let (Some(prev), Some(clip)) = (self.clips.get(index - 1), self.clips.get(index)) else {
+            return reject("there is no cut here: a transition joins two abutting clips".into());
+        };
+        let (head, tail) = (t.head(), t.tail());
+        // Room already taken by the transitions on the *other* cuts of these
+        // two clips. Without this an overlap could swallow a neighbouring
+        // one and the projection would emit a negative-length entry.
+        let taken_before = prev.transition_in.as_ref().map_or(0, Transition::tail);
+        let taken_after = self
+            .clips
+            .get(index + 1)
+            .filter(|next| next.start == clip.end())
+            .and_then(|next| next.transition_in.as_ref())
+            .map_or(0, Transition::head);
+        if head + taken_before > prev.duration.get() || tail + taken_after > clip.duration.get() {
+            return reject(format!(
+                "a {}-frame transition would run into the next one",
+                t.duration.get()
+            ));
+        }
+        // The overlap has to fit inside both clips as well as inside their
+        // handles, or it would reach across a neighbouring cut.
+        if head > prev.duration.get() || tail > clip.duration.get() {
+            return reject(format!(
+                "a {}-frame transition is longer than the clips it joins",
+                t.duration.get()
+            ));
+        }
+        let short = |have: u64, need: u64| need.saturating_sub(have);
+        let missing = short(prev.tail_handle().unwrap_or(u64::MAX), tail)
+            .max(short(clip.head_handle().unwrap_or(u64::MAX), head));
+        if missing > 0 {
+            return reject(format!(
+                "not enough handle frames for a {}-frame transition (short by {missing})",
+                t.duration.get()
+            ));
+        }
+        Ok(())
+    }
+
+    /// Forget transitions whose cut no longer exists or no longer fits.
+    ///
+    /// Every edit primitive ends here (via `Timeline::settle`): a ripple that
+    /// removes a neighbour must resolve the transition rather than orphan it
+    /// on a cut that is gone (plan.md Phase 9f).
+    pub(crate) fn prune_transitions(&mut self) {
+        let stale: Vec<usize> = (0..self.clips.len())
+            .filter(|&i| {
+                self.clips[i]
+                    .transition_in
+                    .as_ref()
+                    .is_some_and(|t| self.check_transition(i, t).is_err())
+            })
+            .collect();
+        for i in stale {
+            self.clips[i].transition_in = None;
+        }
+    }
+
+    /// The clip range plus any transition attached to either of its cuts -
+    /// the `ac` text object (spec §4.1).
+    #[must_use]
+    pub fn transition_range(&self, id: ClipId) -> Option<(Frame, Frame)> {
+        let i = self.index_of(id)?;
+        let clip = self.clips.get(i)?;
+        let start = clip
+            .transition_in
+            .as_ref()
+            .map_or(clip.start, |t| t.span(clip.start).0);
+        let end = self
+            .clips
+            .get(i + 1)
+            .filter(|next| next.start == clip.end())
+            .and_then(|next| next.transition_in.as_ref())
+            .map_or(clip.end(), |t| t.span(clip.end()).1);
+        Some((start, end))
+    }
+
+    /// Index of the incoming clip of the cut nearest `frame`, if the track
+    /// has one. Ties go to the cut at or after the playhead, which is where
+    /// `gx` puts a transition when the playhead sits exactly on a cut.
+    #[must_use]
+    pub fn nearest_cut(&self, frame: Frame) -> Option<usize> {
+        (1..self.clips.len())
+            .filter(|&i| self.abuts_previous(i))
+            .min_by_key(|&i| {
+                let cut = self.clips[i].start.get();
+                (cut.abs_diff(frame.get()), cut < frame.get())
+            })
+    }
+
+    /// Index of the incoming clip whose transition covers `frame`.
+    #[must_use]
+    pub fn transition_at(&self, frame: Frame) -> Option<usize> {
+        (0..self.clips.len()).find(|&i| {
+            self.clips[i]
+                .transition_in
+                .as_ref()
+                .is_some_and(|t| t.covers(self.clips[i].start, frame))
+        })
     }
 
     /// Whether `[start, end)` is free of clips, ignoring `ignore`.

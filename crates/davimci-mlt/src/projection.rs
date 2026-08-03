@@ -7,7 +7,7 @@
 //! diffs two of them so an edit becomes playlist mutations rather than a
 //! rebuild (spec §10.1).
 
-use davimci_core::{Clip, ClipId, Frame, Timeline, TimelineProps, TrackId, TrackKind};
+use davimci_core::{Clip, ClipId, Frame, Timeline, TimelineProps, TrackId, TrackKind, Transition};
 
 /// What an entry plays.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,11 +93,44 @@ impl ClipEntry {
     }
 }
 
+/// The overlap between two clips, projected (spec §6.2).
+///
+/// MLT has no "transition inside a playlist": a transition composites two
+/// *tracks*. So the overlap becomes one playlist entry that is itself a
+/// two-track tractor - the outgoing clip running into its tail handle, the
+/// incoming clip starting early out of its head handle, and the transition
+/// planted between them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransitionEntry {
+    /// The incoming clip, which is what owns the transition in the model and
+    /// what the diff aligns this entry on.
+    pub clip: ClipId,
+    /// Registry name, e.g. `dissolve`.
+    pub kind: String,
+    /// MLT transition service.
+    pub service: String,
+    pub props: Vec<(String, String)>,
+    /// The outgoing clip's tail, `a_track`.
+    pub from: Box<ClipEntry>,
+    /// The incoming clip's head, `b_track`.
+    pub to: Box<ClipEntry>,
+}
+
+impl TransitionEntry {
+    /// Frames the overlap occupies on the timeline. Both sides are the same
+    /// length by construction; a mismatch would desynchronise the playlist.
+    #[must_use]
+    pub fn length(&self) -> u64 {
+        self.from.length()
+    }
+}
+
 /// One playlist slot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Entry {
     Blank { length: Frame },
     Clip(Box<ClipEntry>),
+    Transition(Box<TransitionEntry>),
 }
 
 impl Entry {
@@ -106,14 +139,19 @@ impl Entry {
         match self {
             Self::Blank { length } => length.get(),
             Self::Clip(c) => c.length(),
+            Self::Transition(t) => t.length(),
         }
     }
 
     /// Filters on this entry; a blank has none.
+    ///
+    /// A transition's filters live on its two inner entries, not on the
+    /// tractor: gain and fades are clip properties and have to be applied to
+    /// the clip they belong to before the two are composited.
     #[must_use]
     pub fn filters(&self) -> &[FilterSpec] {
         match self {
-            Self::Blank { .. } => &[],
+            Self::Blank { .. } | Self::Transition(_) => &[],
             Self::Clip(c) => &c.filters,
         }
     }
@@ -123,7 +161,14 @@ impl Entry {
         match self {
             Self::Blank { .. } => None,
             Self::Clip(c) => Some(c.clip),
+            Self::Transition(t) => Some(t.clip),
         }
+    }
+
+    /// Whether this entry is the overlap belonging to `clip`'s head cut.
+    #[must_use]
+    pub fn is_transition(&self) -> bool {
+        matches!(self, Self::Transition(_))
     }
 }
 
@@ -191,15 +236,34 @@ impl Projection {
             .tracks()
             .iter()
             .map(|track| {
+                let clips = track.clips();
                 let mut entries = Vec::new();
                 let mut cursor = Frame::ZERO;
-                for clip in track.clips() {
+                for (i, clip) in clips.iter().enumerate() {
                     if clip.start > cursor {
                         entries.push(Entry::Blank {
                             length: clip.start.saturating_sub(cursor),
                         });
                     }
-                    entries.push(Entry::Clip(Box::new(project_clip(clip, track.kind))));
+                    // The overlap is made of handle frames on both sides, so
+                    // it eats into this clip's head and the previous clip's
+                    // tail; the entries around it are shortened to match and
+                    // the timeline length is unchanged (spec §6.2).
+                    let incoming = attached(track, i);
+                    let outgoing = attached(track, i + 1);
+                    // The previous entry has already been shortened by this
+                    // transition's head: it saw it as its own `outgoing`.
+                    if let Some((prev, t)) = clips.get(i.wrapping_sub(1)).zip(incoming) {
+                        entries.push(Entry::Transition(Box::new(project_transition(
+                            prev, clip, t, track.kind,
+                        ))));
+                    }
+                    let mut entry = project_clip(clip, track.kind);
+                    entry.in_point =
+                        Frame(entry.in_point.get() + incoming.map_or(0, Transition::tail));
+                    entry.out_point =
+                        Frame(entry.out_point.get() - outgoing.map_or(0, Transition::head));
+                    entries.push(Entry::Clip(Box::new(entry)));
                     cursor = clip.end();
                 }
                 TrackProjection {
@@ -215,6 +279,22 @@ impl Projection {
             props: timeline.props,
             tracks,
         }
+    }
+
+    /// The incoming clip of every projected transition (spec §6.2).
+    ///
+    /// The backend owns one nested tractor per transition and uses this to
+    /// know which ones a patch has left behind.
+    #[must_use]
+    pub fn transition_clips(&self) -> std::collections::BTreeSet<ClipId> {
+        self.tracks
+            .iter()
+            .flat_map(|t| &t.entries)
+            .filter_map(|e| match e {
+                Entry::Transition(t) => Some(t.clip),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Indexes of the tracks whose audio has to be summed into the mix.
@@ -296,6 +376,46 @@ impl Projection {
 fn soloed_out(timeline: &Timeline, track: TrackId) -> bool {
     let any_solo = timeline.tracks().iter().any(|t| t.solo);
     any_solo && !timeline.tracks().iter().any(|t| t.id == track && t.solo)
+}
+
+/// The transition on the cut at `index`, if it is one this build can build.
+///
+/// Defensive on purpose: a projection must never emit a negative-length
+/// entry, so anything the model would refuse is simply not projected.
+fn attached(track: &davimci_core::Track, index: usize) -> Option<&Transition> {
+    let t = track.clips().get(index)?.transition_in.as_ref()?;
+    track.check_transition(index, t).ok().map(|()| t)
+}
+
+/// The overlap as a two-track tractor: outgoing tail against incoming head.
+fn project_transition(
+    prev: &Clip,
+    clip: &Clip,
+    t: &Transition,
+    kind: TrackKind,
+) -> TransitionEntry {
+    let head = t.head();
+    let last = t.duration.get() - 1;
+
+    // The outgoing clip runs `tail` frames past its out-point.
+    let mut from = project_clip(prev, kind);
+    from.in_point = Frame(prev.source_out().get() - head);
+    from.out_point = Frame(from.in_point.get() + last);
+
+    // The incoming clip starts `head` frames before its in-point.
+    let mut to = project_clip(clip, kind);
+    to.in_point = Frame(clip.source_in.get() - head);
+    to.out_point = Frame(to.in_point.get() + last);
+
+    let spec = crate::transitions::spec(&t.kind, kind);
+    TransitionEntry {
+        clip: clip.id,
+        kind: t.kind.clone(),
+        service: spec.service,
+        props: spec.props,
+        from: Box::new(from),
+        to: Box::new(to),
+    }
 }
 
 fn project_clip(clip: &Clip, kind: TrackKind) -> ClipEntry {
@@ -494,6 +614,77 @@ mod tests {
         assert_eq!(c.in_point, Frame(0));
         assert_eq!(c.out_point, Frame(0), "a one-frame clip is in=out=0");
         assert_eq!(c.length(), 1);
+    }
+
+    /// The load-bearing property of spec §6.2: the overlap is made of handle
+    /// frames, so planting one changes no clip's position and no track's
+    /// length - it only moves the in and out points around the cut.
+    #[test]
+    fn a_transition_borrows_handles_and_keeps_the_track_length() {
+        let mut tl =
+            davimci_core::testing::media_fixture(&[(0, 100, 20, 400), (100, 100, 20, 400)]);
+        let track = tl.tracks()[0].id;
+        let right = tl.tracks()[0].clips()[1].id;
+        let before: u64 = Projection::of(&tl).tracks[0]
+            .entries
+            .iter()
+            .map(Entry::length)
+            .sum();
+
+        tl.set_transition(track, right, Some(davimci_core::Transition::dissolve()))
+            .unwrap();
+        let p = Projection::of(&tl);
+        let entries = &p.tracks[0].entries;
+        assert_eq!(entries.len(), 3, "clip, overlap, clip");
+        let total: u64 = entries.iter().map(Entry::length).sum();
+        assert_eq!(
+            total, before,
+            "a transition never changes the timeline length"
+        );
+        assert_eq!(entries[0].length(), 94, "the outgoing clip gives up six");
+        assert_eq!(entries[1].length(), 12);
+        assert_eq!(entries[2].length(), 94, "the incoming clip gives up six");
+
+        let Entry::Transition(t) = &entries[1] else {
+            panic!("expected the overlap");
+        };
+        assert_eq!(
+            t.clip, right,
+            "the overlap is identified by the clip it enters"
+        );
+        assert_eq!(t.service, "luma");
+        // The outgoing side runs into its tail handle, the incoming side
+        // starts early out of its head handle.
+        assert_eq!(
+            (t.from.in_point, t.from.out_point),
+            (Frame(114), Frame(125))
+        );
+        assert_eq!((t.to.in_point, t.to.out_point), (Frame(14), Frame(25)));
+    }
+
+    #[test]
+    fn an_audio_track_cross_fades_rather_than_wiping() {
+        let mut tl =
+            davimci_core::testing::media_fixture(&[(0, 100, 20, 400), (100, 100, 20, 400)]);
+        // Move both clips onto an audio track by projecting A1 instead: the
+        // service choice is the track's medium, not the transition's name.
+        let track = tl.tracks()[0].id;
+        let right = tl.tracks()[0].clips()[1].id;
+        tl.set_transition(
+            track,
+            right,
+            Some(davimci_core::Transition::new("wipe_left", Frame(12))),
+        )
+        .unwrap();
+        let video = Projection::of(&tl);
+        let Entry::Transition(t) = &video.tracks[0].entries[1] else {
+            panic!("expected the overlap");
+        };
+        assert_eq!(t.service, "luma");
+        assert_eq!(
+            crate::transitions::spec("wipe_left", TrackKind::Audio).service,
+            "mix"
+        );
     }
 
     #[test]

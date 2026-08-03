@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::id::{ClipId, GroupId};
 use crate::time::{Fps, Frame};
+use crate::transition::Transition;
 
 /// A reference to media on disk, already conformed to the timeline rate.
 ///
@@ -117,6 +118,11 @@ pub struct Clip {
     /// Per-clip linkage group (spec §5). `None` means unlinked.
     pub group: Option<GroupId>,
     pub props: ClipProps,
+    /// Transition on the cut at this clip's start (spec §6.2). It belongs to
+    /// the incoming clip so that deleting that clip deletes the transition
+    /// with it, rather than leaving one attached to a cut that is gone.
+    #[serde(default)]
+    pub transition_in: Option<Transition>,
 }
 
 impl Clip {
@@ -133,6 +139,7 @@ impl Clip {
             source_in: Frame::ZERO,
             group: None,
             props: ClipProps::default(),
+            transition_in: None,
         }
     }
 
@@ -155,6 +162,7 @@ impl Clip {
             source_in,
             group: None,
             props: ClipProps::default(),
+            transition_in: None,
         }
     }
 

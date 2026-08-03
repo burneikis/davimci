@@ -12,6 +12,7 @@ use crate::error::CoreError;
 use crate::id::{ClipId, GroupId, IdGen, TrackId};
 use crate::time::{Frame, TimelineProps};
 use crate::track::{Track, TrackKind};
+use crate::transition::Transition;
 
 /// A named point on the timeline (spec §3.2 jump-point source).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -131,7 +132,7 @@ impl Timeline {
             return Err(CoreError::DuplicateTrack(name));
         }
         self.tracks.push(Track::new(id, name, kind));
-        self.debug_assert_invariants();
+        self.settle();
         Ok(())
     }
 
@@ -167,7 +168,7 @@ impl Timeline {
             // The playhead cannot focus a track that is gone.
             self.playhead.track = self.tracks[0].id;
         }
-        self.debug_assert_invariants();
+        self.settle();
         Ok((name, kind))
     }
 
@@ -347,7 +348,7 @@ impl Timeline {
         {
             c.group = group;
         }
-        self.debug_assert_invariants();
+        self.settle();
         Ok(())
     }
 
@@ -389,7 +390,7 @@ impl Timeline {
         {
             c.props = props;
         }
-        self.debug_assert_invariants();
+        self.settle();
         Ok(())
     }
 
@@ -419,7 +420,7 @@ impl Timeline {
         {
             previous = c.text.replace(text).unwrap_or_default();
         }
-        self.debug_assert_invariants();
+        self.settle();
         Ok(previous)
     }
 
@@ -446,6 +447,58 @@ impl Timeline {
             t.solo = solo;
         }
         Ok(())
+    }
+
+    // -- transitions (spec §6.2) -----------------------------------------
+
+    /// Attach a transition to the cut at `clip`'s start, or remove one.
+    ///
+    /// Returns what was there before, so the command layer can invert
+    /// exactly. Validate-then-mutate: a cut without the handle frames to
+    /// build the overlap is refused and the timeline is untouched.
+    pub fn set_transition(
+        &mut self,
+        track: TrackId,
+        clip: ClipId,
+        transition: Option<Transition>,
+    ) -> Result<Option<Transition>, CoreError> {
+        let t = self.require_track(track)?;
+        let index = t
+            .index_of(clip)
+            .ok_or_else(|| CoreError::NoSuchClip(clip.to_string()))?;
+        if let Some(new) = &transition {
+            t.check_transition(index, new)?;
+        }
+        let mut previous = None;
+        if let Some(t) = self.track_mut(track)
+            && let Some(c) = t.clip_mut(clip)
+        {
+            previous = std::mem::replace(&mut c.transition_in, transition);
+        }
+        self.settle();
+        Ok(previous)
+    }
+
+    /// The cut nearest `frame` on `track`, as `(incoming clip, cut frame)`.
+    ///
+    /// This is what `gx` and `dax` act on (spec §6.2).
+    #[must_use]
+    pub fn nearest_cut(&self, track: TrackId, frame: Frame) -> Option<(ClipId, Frame)> {
+        let t = self.track(track)?;
+        let i = t.nearest_cut(frame)?;
+        t.clips().get(i).map(|c| (c.id, c.start))
+    }
+
+    /// The transition under `frame`, else the one on the nearest cut.
+    #[must_use]
+    pub fn transition_at(&self, track: TrackId, frame: Frame) -> Option<(ClipId, &Transition)> {
+        let t = self.track(track)?;
+        let i = t.transition_at(frame).or_else(|| {
+            t.nearest_cut(frame)
+                .filter(|&i| t.clips().get(i).is_some_and(|c| c.transition_in.is_some()))
+        })?;
+        let c = t.clips().get(i)?;
+        c.transition_in.as_ref().map(|tr| (c.id, tr))
     }
 
     /// Flag a clip's media offline, or bring it back (Phase 0 policy).
@@ -504,7 +557,7 @@ impl Timeline {
             previous = (std::mem::replace(&mut m.path, path), m.offline);
             m.offline = offline;
         }
-        self.debug_assert_invariants();
+        self.settle();
         Ok(previous)
     }
 
@@ -591,6 +644,18 @@ impl Timeline {
         if let Err(e) = self.check_invariants() {
             crate::assert_invariant!(false, "{e}");
         }
+    }
+
+    /// Drop transitions a mutation has invalidated, then check invariants.
+    ///
+    /// Every mutating primitive ends here. A transition lives on a cut, and
+    /// an edit can take that cut away (spec §6.2, plan.md Phase 9f): the
+    /// transition goes with it rather than being left pointing at nothing.
+    pub(crate) fn settle(&mut self) {
+        for t in &mut self.tracks {
+            t.prune_transitions();
+        }
+        self.debug_assert_invariants();
     }
 
     /// Debug-only invariant check, called after every mutating primitive.
@@ -839,6 +904,145 @@ mod tests {
         bad.transform.scale = 0.0;
         assert!(tl.set_clip_props(track, clip, bad).is_err());
         assert_ne!(tl, before);
+    }
+
+    /// Spec §6.2: the overlap is built from handle frames, so a cut between
+    /// two clips that have none is refused outright rather than shortened.
+    #[test]
+    fn a_transition_needs_handles_on_both_sides() {
+        // Two abutting clips, each with 20 frames of head and tail handle.
+        let mut tl = crate::testing::media_fixture(&[(0, 100, 20, 140), (100, 100, 20, 140)]);
+        let track = tl.tracks()[0].id;
+        let right = tl.tracks()[0].clips()[1].id;
+        let before = tl.clone();
+
+        assert!(
+            tl.set_transition(track, right, Some(Transition::new("dissolve", Frame(80))))
+                .is_err(),
+            "40 frames of handle each way cannot make an 80-frame overlap"
+        );
+        assert_eq!(tl, before, "a refused transition changes nothing");
+
+        assert_eq!(
+            tl.set_transition(track, right, Some(Transition::dissolve())),
+            Ok(None)
+        );
+        let (_, c) = tl.find_clip(right).unwrap();
+        assert_eq!(
+            c.transition_in.as_ref().map(|t| t.duration),
+            Some(Frame(12))
+        );
+        assert_eq!(c.duration, Frame(100), "a transition moves no clip");
+        tl.assert_invariants();
+
+        // Removing reports what was there, so the command layer can invert.
+        let previous = tl.set_transition(track, right, None).unwrap();
+        assert_eq!(previous.map(|t| t.kind), Some("dissolve".to_string()));
+    }
+
+    #[test]
+    fn a_transition_needs_a_cut_not_a_gap() {
+        let mut tl = crate::testing::media_fixture(&[(0, 100, 20, 400), (150, 100, 20, 400)]);
+        let track = tl.tracks()[0].id;
+        let ids: Vec<ClipId> = tl.tracks()[0].clips().iter().map(|c| c.id).collect();
+        // The first clip has no predecessor; the second is across a gap.
+        assert!(
+            tl.set_transition(track, ids[0], Some(Transition::dissolve()))
+                .is_err()
+        );
+        assert!(
+            tl.set_transition(track, ids[1], Some(Transition::dissolve()))
+                .is_err()
+        );
+    }
+
+    /// Regression (plan.md Phase 9f): rippling away a neighbour used to leave
+    /// a transition attached to a cut that no longer existed.
+    #[test]
+    fn removing_a_neighbour_takes_its_transition_with_it() {
+        let mut tl = crate::testing::media_fixture(&[
+            (0, 100, 20, 400),
+            (100, 100, 20, 400),
+            (200, 100, 20, 400),
+        ]);
+        let track = tl.tracks()[0].id;
+        let ids: Vec<ClipId> = tl.tracks()[0].clips().iter().map(|c| c.id).collect();
+        tl.set_transition(track, ids[1], Some(Transition::dissolve()))
+            .unwrap();
+        tl.set_transition(track, ids[2], Some(Transition::dissolve()))
+            .unwrap();
+
+        tl.ripple_delete_clip(track, ids[0]).unwrap();
+
+        assert!(
+            tl.find_clip(ids[1])
+                .is_some_and(|(_, c)| c.transition_in.is_none()),
+            "the outgoing clip is gone, so its transition is too"
+        );
+        assert!(
+            tl.find_clip(ids[2])
+                .is_some_and(|(_, c)| c.transition_in.is_some()),
+            "a transition on an untouched cut survives"
+        );
+        tl.assert_invariants();
+    }
+
+    #[test]
+    fn the_nearest_cut_is_what_gx_and_dax_act_on() {
+        let mut tl = crate::testing::media_fixture(&[
+            (0, 100, 20, 400),
+            (100, 100, 20, 400),
+            (200, 100, 20, 400),
+        ]);
+        let track = tl.tracks()[0].id;
+        let ids: Vec<ClipId> = tl.tracks()[0].clips().iter().map(|c| c.id).collect();
+        assert_eq!(tl.nearest_cut(track, Frame(10)), Some((ids[1], Frame(100))));
+        assert_eq!(
+            tl.nearest_cut(track, Frame(190)),
+            Some((ids[2], Frame(200)))
+        );
+        assert_eq!(
+            tl.nearest_cut(track, Frame(100)),
+            Some((ids[1], Frame(100))),
+            "sitting on a cut picks that cut"
+        );
+
+        assert_eq!(tl.transition_at(track, Frame(100)), None);
+        tl.set_transition(track, ids[1], Some(Transition::dissolve()))
+            .unwrap();
+        assert_eq!(
+            tl.transition_at(track, Frame(96))
+                .map(|(id, t)| (id, t.duration)),
+            Some((ids[1], Frame(12)))
+        );
+    }
+
+    /// Spec §4.1: `ac` is the clip plus its adjoining transitions, and equals
+    /// `ic` until one is attached.
+    #[test]
+    fn ac_widens_to_cover_adjoining_transitions() {
+        let mut tl = crate::testing::media_fixture(&[
+            (0, 100, 20, 400),
+            (100, 100, 20, 400),
+            (200, 100, 20, 400),
+        ]);
+        let track = tl.tracks()[0].id;
+        let ids: Vec<ClipId> = tl.tracks()[0].clips().iter().map(|c| c.id).collect();
+        let range = |tl: &Timeline| {
+            tl.track(track)
+                .and_then(|t| t.transition_range(ids[1]))
+                .unwrap()
+        };
+        assert_eq!(range(&tl), (Frame(100), Frame(200)));
+        tl.set_transition(track, ids[1], Some(Transition::dissolve()))
+            .unwrap();
+        tl.set_transition(track, ids[2], Some(Transition::new("dissolve", Frame(7))))
+            .unwrap();
+        assert_eq!(
+            range(&tl),
+            (Frame(94), Frame(204)),
+            "six frames before the head cut, four past the tail cut"
+        );
     }
 
     #[test]

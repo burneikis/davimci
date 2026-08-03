@@ -231,8 +231,8 @@ and never mutate, so a verb can validate before building a command. The
 jump-point set is memoised behind a fingerprint of everything it reads, so a
 stale hit is not representable. Predicate motions go through the
 `PredicateIndex` trait and report `Pending` until Phase 5 implements it;
-`ac` currently resolves to the same range as `ic` and widens on its own once
-Phase 9f adds transitions (spec §4.1).
+`ac` resolves to the same range as `ic` until a cut carries a transition, and
+widens to cover the overlap once one does (spec §4.1, Phase 9f).
 
 ---
 
@@ -278,8 +278,7 @@ meaning"). Playhead motion and marks are intentionally outside the undo log -
 since navigation was never meant to be a `Command`.
 
 Known gaps, tracked against later phases rather than left silent: `i`/`a`/`r`
-need the Phase 5 media picker; `gx`/`dax` wait on Phase 9f transitions;
-`<`/`>` jump-point edge trims parse but are not wired to a command yet;
+need the Phase 5 media picker; `<`/`>` jump-point edge trims parse but are not wired to a command yet;
 visual-mode text-object narrowing (typing `it`/`at` while a selection is
 live, spec §6) is not implemented - operators in a `VISUAL*` mode act on the
 whole selection instead.
@@ -437,8 +436,8 @@ Amendments made during implementation:
   guarantee.
 
 Not yet wired: nothing calls this from a frontend, because there is no
-frontend. Transitions are absent until Phase 9f, so the projection plants no
-MLT transitions yet, and the export preset registry that would exercise
+frontend. Transitions arrive in Phase 9f, so the projection plants only the
+audio `mix` transitions here, and the export preset registry that would exercise
 `RenderSettings` properly arrives in Phase 8b.
 
 ---
@@ -1135,6 +1134,8 @@ which belongs with the rest of playback rather than here.
 
 ## Phase 9f - Transitions (`davimci-core` + `davimci-mlt`)
 
+Status: implemented, apart from the Lua-side registry named below.
+
 Deliverables (spec §6.2):
 - Transition objects occupying a clip overlap; `gx`, `:transition`, `dax`.
 - Handle-frame validation with a clear failure when handles are insufficient
@@ -1148,6 +1149,32 @@ Testing:
 - Ripple-with-transition tests: deleting a neighbour resolves the transition
   sanely rather than orphaning it.
 - Golden MLT XML projection for each transition type.
+
+Amendments made during implementation:
+
+- A transition is **a property of the incoming clip**, not a third object laid
+  over two others. Tracks stay non-overlapping - the invariant every motion,
+  ripple and projection rests on - and the overlap is materialised out of
+  handle frames at projection time. Deleting a clip therefore deletes its
+  transition for free, and `Timeline::settle` (the chokepoint every mutating
+  primitive already ended at) drops any transition an edit has invalidated,
+  which is what "resolves rather than orphans" comes down to.
+- MLT composites *tracks*, not playlist entries, so the overlap projects as
+  `Entry::Transition`: a nested two-track tractor holding the outgoing tail
+  and the incoming head with the transition planted across them. The diff
+  keys it by the incoming clip but distinctly from that clip's own entry, so
+  planting one is an insert plus two resizes rather than a rebuild.
+- The name-to-service registry lives in `davimci-mlt` because service names
+  are MLT's, not the model's. An unknown name degrades to a dissolve rather
+  than failing a render, so a project using a Lua-defined type still opens in
+  a build without it.
+- `:set transition.duration <frames>` is not a separate command: there is no
+  `:set` family yet, and re-running `:transition <name> <frames>` on the same
+  cut replaces what is there, which covers it. spec §6.2 says so.
+
+Remaining: the Lua side of the registry. `transitions::spec` is the seam it
+needs, and adding it means a `RenderBackend` method so `davimci-lua` can
+register a type without knowing MLT exists.
 
 ---
 

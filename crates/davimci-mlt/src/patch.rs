@@ -51,12 +51,17 @@ pub enum Patch {
 enum Key {
     Blank,
     Clip(ClipId),
+    /// A transition is identified by the clip it comes *into*, and must not
+    /// be confused with that clip's own entry: they sit next to each other in
+    /// the playlist and share an id (spec §6.2).
+    Transition(ClipId),
 }
 
 fn key(e: &Entry) -> Key {
-    match e.clip_id() {
-        Some(id) => Key::Clip(id),
-        None => Key::Blank,
+    match (e.clip_id(), e.is_transition()) {
+        (Some(id), true) => Key::Transition(id),
+        (Some(id), false) => Key::Clip(id),
+        (None, _) => Key::Blank,
     }
 }
 
@@ -217,6 +222,45 @@ mod tests {
         // `b` leaves; `c` keeps its identity and only its position changes,
         // which a playlist expresses by the removal alone.
         assert_eq!(patches[0].ops, vec![TrackOp::Remove { index: 1 }]);
+    }
+
+    /// Spec §6.2 / plan.md Phase 9f: the overlap is its own playlist entry,
+    /// so planting one is an insert next to two resizes - not a rebuild - and
+    /// rippling a neighbour away removes it rather than orphaning it.
+    #[test]
+    fn a_transition_patches_in_and_out_without_a_rebuild() {
+        let mut tl = davimci_core::testing::media_fixture(&[
+            (0, 100, 20, 400),
+            (100, 100, 20, 400),
+            (200, 100, 20, 400),
+        ]);
+        let track = track_id(&tl, "V1");
+        let ids = clip_ids(&tl, "V1");
+        let before = proj(&tl);
+        tl.set_transition(track, ids[1], Some(davimci_core::Transition::dissolve()))
+            .unwrap();
+        let after = proj(&tl);
+        let Patch::Tracks(patches) = diff(&before, &after) else {
+            panic!("expected playlist ops, not a rebuild");
+        };
+        let mut entries = before.tracks[0].entries.clone();
+        apply_ops(&mut entries, &patches[0].ops);
+        assert_eq!(entries, after.tracks[0].entries);
+        assert!(after.tracks[0].entries.iter().any(Entry::is_transition));
+
+        // Rippling away the outgoing clip takes the overlap with it.
+        let before = after;
+        tl.ripple_delete_clip(track, ids[0]).unwrap();
+        let after = proj(&tl);
+        assert!(
+            !after.tracks[0].entries.iter().any(Entry::is_transition),
+            "the cut is gone, so the overlap is too"
+        );
+        if let Patch::Tracks(patches) = diff(&before, &after) {
+            let mut entries = before.tracks[0].entries.clone();
+            apply_ops(&mut entries, &patches[0].ops);
+            assert_eq!(entries, after.tracks[0].entries);
+        }
     }
 
     #[test]

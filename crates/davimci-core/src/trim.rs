@@ -93,7 +93,7 @@ impl Timeline {
         for c in t.clips_mut().iter_mut().skip(idx + 1) {
             c.start = shift(c.start, ripple)?;
         }
-        self.debug_assert_invariants();
+        self.settle();
         Ok(())
     }
 
@@ -125,7 +125,7 @@ impl Timeline {
         r.start = right_start;
         r.source_in = right_in;
         r.duration = right_dur;
-        self.debug_assert_invariants();
+        self.settle();
         Ok(())
     }
 
@@ -150,7 +150,7 @@ impl Timeline {
         if let Some(c) = t.clip_mut(clip) {
             c.source_in = new_in;
         }
-        self.debug_assert_invariants();
+        self.settle();
         Ok(())
     }
 
@@ -190,7 +190,7 @@ impl Timeline {
         n.start = next_start;
         n.source_in = next_in;
         n.duration = next_dur;
-        self.debug_assert_invariants();
+        self.settle();
         Ok(())
     }
 }

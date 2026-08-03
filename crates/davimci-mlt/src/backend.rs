@@ -6,7 +6,7 @@
 //! (plan.md Phase 6), which is what lets the GUI draw overlays on the video
 //! and lets the TUI reuse the same path.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::ffi::c_void;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -15,7 +15,7 @@ use davimci_backend::{
     BackendError, PreviewScale, RenderBackend, RenderJob, RenderProgress, RenderState, SourceInfo,
     VideoFrame,
 };
-use davimci_core::{Fps, Frame, Resolution, Timeline, TimelineProps};
+use davimci_core::{ClipId, Fps, Frame, Resolution, Timeline, TimelineProps};
 use davimci_mlt_sys as sys;
 
 use crate::cache::FrameCache;
@@ -39,6 +39,18 @@ struct Graph {
     /// does: dropping one while the tractor still points at it would be a
     /// use-after-free.
     _mixes: Vec<Transition>,
+    /// Clip-to-clip transitions (spec §6.2), each a nested tractor with its
+    /// own planted transition. Kept for the same reason as `_mixes`, and
+    /// keyed by the incoming clip so a patch that removes one can drop it
+    /// rather than leaking a tractor per edit.
+    nested: BTreeMap<ClipId, Nested>,
+}
+
+/// One projected transition, alive for as long as the graph that plays it.
+#[derive(Debug)]
+struct Nested {
+    _tractor: Tractor,
+    _transition: Transition,
 }
 
 /// Frames lifted from the preview consumer, plus the size to lift them at.
@@ -176,8 +188,10 @@ impl MltBackend {
     fn build_graph(&self, projection: &Projection) -> Result<Graph> {
         let mut tractor = Tractor::new().map_err(BackendError::from)?;
         let mut playlists = Vec::with_capacity(projection.tracks.len());
+        let mut nested = BTreeMap::new();
         for (i, track) in projection.tracks.iter().enumerate() {
-            let pl = self.build_playlist(track)?;
+            let (pl, ns) = self.build_playlist(track)?;
+            nested.extend(ns);
             tractor
                 .set_track(i as i32, &pl.as_producer())
                 .map_err(BackendError::from)?;
@@ -218,31 +232,85 @@ impl MltBackend {
             playlists,
             root,
             _mixes: mixes,
+            nested,
         })
     }
 
-    fn build_playlist(&self, track: &TrackProjection) -> Result<Playlist> {
+    fn build_playlist(&self, track: &TrackProjection) -> Result<(Playlist, Vec<(ClipId, Nested)>)> {
         let mut pl = Playlist::new(&self.profile).map_err(BackendError::from)?;
         pl.properties()
             .set("davimci.track", &track.name)
             .map_err(BackendError::from)?;
+        let mut nested = Vec::new();
         for entry in &track.entries {
-            self.append_entry(&mut pl, entry)?;
+            if let Some(n) = self.append_entry(&mut pl, entry)?
+                && let Some(id) = entry.clip_id()
+            {
+                nested.push((id, n));
+            }
         }
-        Ok(pl)
+        Ok((pl, nested))
     }
 
-    fn append_entry(&self, pl: &mut Playlist, entry: &Entry) -> Result<()> {
+    fn append_entry(&self, pl: &mut Playlist, entry: &Entry) -> Result<Option<Nested>> {
         match entry {
-            Entry::Blank { length } => pl
-                .append_blank(length.get() as i32)
-                .map_err(BackendError::from),
+            Entry::Blank { length } => {
+                pl.append_blank(length.get() as i32)
+                    .map_err(BackendError::from)?;
+                Ok(None)
+            }
             Entry::Clip(c) => {
                 let producer = self.build_producer(c)?;
                 pl.append(&producer, c.in_point.get() as i32, c.out_point.get() as i32)
-                    .map_err(BackendError::from)
+                    .map_err(BackendError::from)?;
+                Ok(None)
+            }
+            Entry::Transition(t) => {
+                let (producer, nested) = self.build_transition(t)?;
+                pl.append(&producer, 0, t.length().saturating_sub(1) as i32)
+                    .map_err(BackendError::from)?;
+                Ok(Some(nested))
             }
         }
+    }
+
+    /// Build the overlap between two clips as a two-track tractor.
+    ///
+    /// MLT composites tracks, not playlist entries, so a transition inside a
+    /// playlist has to be a nested tractor: the outgoing clip's tail on track
+    /// 0, the incoming clip's head on track 1, and the transition planted
+    /// across them (spec §6.2).
+    fn build_transition(
+        &self,
+        entry: &crate::projection::TransitionEntry,
+    ) -> Result<(Producer, Nested)> {
+        let from = self.build_producer(&entry.from)?;
+        let to = self.build_producer(&entry.to)?;
+        let mut tractor = Tractor::new().map_err(BackendError::from)?;
+        tractor.set_track(0, &from).map_err(BackendError::from)?;
+        tractor.set_track(1, &to).map_err(BackendError::from)?;
+        let transition =
+            Transition::new(&self.profile, &entry.service).map_err(BackendError::from)?;
+        {
+            let mut p = transition.properties();
+            for (k, v) in &entry.props {
+                p.set(k, v).map_err(BackendError::from)?;
+            }
+            p.set("davimci.transition", &entry.kind)
+                .map_err(BackendError::from)?;
+        }
+        tractor
+            .plant(&transition, 0, 1)
+            .map_err(BackendError::from)?;
+        tractor.refresh();
+        let producer = tractor.as_producer();
+        Ok((
+            producer,
+            Nested {
+                _tractor: tractor,
+                _transition: transition,
+            },
+        ))
     }
 
     fn build_producer(&self, entry: &ClipEntry) -> Result<Producer> {
@@ -357,14 +425,25 @@ impl MltBackend {
     fn apply_op(&mut self, track: usize, op: &TrackOp, live: &mut Vec<Entry>) -> Result<()> {
         // Build producers before borrowing the playlist: `build_producer`
         // needs `&self` and the playlist borrow is exclusive.
+        let mut keep = None;
         let built = match op {
             TrackOp::Insert { entry, .. } | TrackOp::Update { entry, .. } => match entry {
                 Entry::Clip(c) => Some(self.build_producer(c)?),
+                Entry::Transition(t) => {
+                    let (producer, nested) = self.build_transition(t)?;
+                    keep = Some((t.clip, nested));
+                    Some(producer)
+                }
                 Entry::Blank { .. } => None,
             },
             TrackOp::Remove { .. } => None,
         };
         let graph = self.require_graph()?;
+        // The nested tractor has to outlive the patch that planted it; the
+        // graph is what owns it, exactly as it owns the audio mixes.
+        if let Some((id, n)) = keep {
+            graph.nested.insert(id, n);
+        }
         let pl = graph
             .playlists
             .get_mut(track)
@@ -424,7 +503,10 @@ fn insert_entry(
                 c.out_point.get() as i32,
             )
             .map_err(BackendError::from),
-        (Entry::Clip(_), None) => Err(BackendError::Projection {
+        (Entry::Transition(t), Some(p)) => pl
+            .insert(index as i32, p, 0, t.length().saturating_sub(1) as i32)
+            .map_err(BackendError::from),
+        (Entry::Clip(_) | Entry::Transition(_), None) => Err(BackendError::Projection {
             reason: "a clip entry reached the graph without a producer".into(),
         }),
     }
@@ -569,6 +651,12 @@ impl RenderBackend for MltBackend {
                 Patch::Tracks(patches) => {
                     self.invalidate_frames();
                     self.apply_patch(&patches, &prev)?;
+                    // Transitions the patch removed are no longer played by
+                    // any playlist, so the graph stops owning them.
+                    let live = next.transition_clips();
+                    if let Some(g) = self.graph.as_mut() {
+                        g.nested.retain(|id, _| live.contains(id));
+                    }
                 }
             },
             _ => {

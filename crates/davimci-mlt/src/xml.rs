@@ -7,7 +7,7 @@
 
 use std::fmt::Write as _;
 
-use crate::projection::{Entry, FilterSpec, Projection, TrackProjection};
+use crate::projection::{ClipEntry, Entry, FilterSpec, Projection, TrackProjection};
 
 /// Serialise a projection as MLT XML.
 #[must_use]
@@ -21,41 +21,16 @@ pub fn to_xml(p: &Projection) -> String {
 
     for (ti, track) in p.tracks.iter().enumerate() {
         for (ei, entry) in track.entries.iter().enumerate() {
-            if let Entry::Clip(c) = entry {
-                let _ = writeln!(
-                    out,
-                    "  <producer id=\"p{ti}_{ei}\" in=\"{}\" out=\"{}\">",
-                    c.in_point.get(),
-                    c.out_point.get()
-                );
-                prop(&mut out, "mlt_service", c.resource.service());
-                prop(&mut out, "resource", &c.resource.resource());
-                if let crate::projection::Resource::Text(t) = &c.resource {
-                    prop(&mut out, "text", t);
+            match entry {
+                Entry::Clip(c) => write_producer(&mut out, &format!("p{ti}_{ei}"), c),
+                // A transition's two sides are producers of their own,
+                // planted inside a nested tractor further down.
+                Entry::Transition(t) => {
+                    write_producer(&mut out, &format!("p{ti}_{ei}a"), &t.from);
+                    write_producer(&mut out, &format!("p{ti}_{ei}b"), &t.to);
+                    write_transition_tractor(&mut out, ti, ei, t);
                 }
-                if let crate::projection::Resource::Offline { path } = &c.resource {
-                    prop(&mut out, "davimci.offline", path);
-                }
-                // One track per stream (spec §7): without these a
-                // multi-stream file would decode its default stream on
-                // every track.
-                match c.stream {
-                    Some(crate::projection::StreamSelect::Audio(s)) => {
-                        prop(&mut out, "audio_index", &s.to_string());
-                        prop(&mut out, "video_index", "-1");
-                    }
-                    Some(crate::projection::StreamSelect::Video(s)) => {
-                        prop(&mut out, "video_index", &s.to_string());
-                        prop(&mut out, "audio_index", "-1");
-                    }
-                    None => {}
-                }
-                prop(&mut out, "davimci.clip", &c.clip.to_string());
-                prop(&mut out, "davimci.label", &c.label);
-                for f in &c.filters {
-                    write_filter(&mut out, f);
-                }
-                out.push_str("  </producer>\n");
+                Entry::Blank { .. } => {}
             }
         }
     }
@@ -121,9 +96,91 @@ fn write_playlist(out: &mut String, ti: usize, track: &TrackProjection) {
                     c.out_point.get()
                 );
             }
+            Entry::Transition(t) => {
+                let _ = writeln!(
+                    out,
+                    "    <entry producer=\"x{ti}_{ei}\" in=\"0\" out=\"{}\"/>",
+                    t.length().saturating_sub(1)
+                );
+            }
         }
     }
     out.push_str("  </playlist>\n");
+}
+
+fn write_producer(out: &mut String, id: &str, c: &ClipEntry) {
+    let _ = writeln!(
+        out,
+        "  <producer id=\"{id}\" in=\"{}\" out=\"{}\">",
+        c.in_point.get(),
+        c.out_point.get()
+    );
+    prop(out, "mlt_service", c.resource.service());
+    prop(out, "resource", &c.resource.resource());
+    if let crate::projection::Resource::Text(t) = &c.resource {
+        prop(out, "text", t);
+    }
+    if let crate::projection::Resource::Offline { path } = &c.resource {
+        prop(out, "davimci.offline", path);
+    }
+    // One track per stream (spec §7): without these a multi-stream file
+    // would decode its default stream on every track.
+    match c.stream {
+        Some(crate::projection::StreamSelect::Audio(s)) => {
+            prop(out, "audio_index", &s.to_string());
+            prop(out, "video_index", "-1");
+        }
+        Some(crate::projection::StreamSelect::Video(s)) => {
+            prop(out, "video_index", &s.to_string());
+            prop(out, "audio_index", "-1");
+        }
+        None => {}
+    }
+    prop(out, "davimci.clip", &c.clip.to_string());
+    prop(out, "davimci.label", &c.label);
+    for f in &c.filters {
+        write_filter(out, f);
+    }
+    out.push_str("  </producer>\n");
+}
+
+/// The overlap: a two-track tractor with the transition planted across it.
+///
+/// MLT composites tracks, not playlist entries, so an in-playlist transition
+/// has to be its own little tractor (spec §6.2).
+fn write_transition_tractor(
+    out: &mut String,
+    ti: usize,
+    ei: usize,
+    t: &crate::projection::TransitionEntry,
+) {
+    let last = t.length().saturating_sub(1);
+    let _ = writeln!(out, "  <tractor id=\"x{ti}_{ei}\" in=\"0\" out=\"{last}\">");
+    let _ = writeln!(out, "    <track producer=\"p{ti}_{ei}a\"/>");
+    let _ = writeln!(out, "    <track producer=\"p{ti}_{ei}b\"/>");
+    let _ = writeln!(out, "    <transition id=\"t{ti}_{ei}\">");
+    let _ = writeln!(
+        out,
+        "      <property name=\"mlt_service\">{}</property>",
+        escape(&t.service)
+    );
+    let _ = writeln!(out, "      <property name=\"a_track\">0</property>");
+    let _ = writeln!(out, "      <property name=\"b_track\">1</property>");
+    let _ = writeln!(
+        out,
+        "      <property name=\"davimci.transition\">{}</property>",
+        escape(&t.kind)
+    );
+    for (k, v) in &t.props {
+        let _ = writeln!(
+            out,
+            "      <property name=\"{}\">{}</property>",
+            escape(k),
+            escape(v)
+        );
+    }
+    out.push_str("    </transition>\n");
+    out.push_str("  </tractor>\n");
 }
 
 fn write_filter(out: &mut String, f: &FilterSpec) {
@@ -211,6 +268,17 @@ mod tests {
         let layout = p.route_audio().expect("three audio tracks");
         assert_eq!(layout.total_channels, 6);
         insta::assert_snapshot!(to_xml(&p));
+    }
+
+    /// Golden shape for spec §6.2: the overlap is a nested two-track tractor
+    /// with the transition planted across it.
+    #[test]
+    fn golden_transition_between_two_clips() {
+        let mut tl = media_fixture(&[(0, 100, 20, 400), (100, 100, 20, 400)]);
+        let (track, right) = (tl.tracks()[0].id, tl.tracks()[0].clips()[1].id);
+        tl.set_transition(track, right, Some(davimci_core::Transition::dissolve()))
+            .unwrap();
+        insta::assert_snapshot!(to_xml(&Projection::of(&tl)));
     }
 
     #[test]

@@ -23,7 +23,10 @@ its one gap is now closed: the visual selection reaches the host, so the
 audio commands act on what is selected rather than on the playhead's clip.
 Phase 9e:
 `<Space>m`/`<Space>s`, `+`/`-`, `f`, `:gain`, `:fade`, `:normalize`,
-`:duck`. Phase 9f (transitions) and 9d (TUI) are what remain of the plan.
+`:duck`. Phase 9f (transitions) landed too: `gx`, `dax`, `:transition`, an
+`ac` object that widens over the overlap, and a nested-tractor projection that
+patches in and out without rebuilding the graph. Phase 9d (TUI) and the Lua
+side of the transition registry are what remain of the plan.
 Workspace builds; `just test` and `just lint` are green, and
 `just fixtures && just test-slow` passes against generated media, including
 real decode, preview, and export through MLT.
@@ -146,11 +149,15 @@ it is linked dynamically, since davimci is GPL-3.0 over LGPL-2.1 MLT.
 | Click-to-seek, and `i` opening the subtitle editor on a text clip | implemented, tested |
 | Varispeed shuttle (`H`/`L`) through backend rate control | implemented, tested |
 | Undo history persisted across save and reopen (format v2) | implemented, tested |
-| Transitions (9f), TUI frontend (9d) | not started |
+| Transitions: `gx`, `dax`, `:transition`, handle validation, MLT projection | implemented, tested |
+| Lua-registered transition types (9f), TUI frontend (9d) | not started |
 | Everything else | placeholder crates |
 
-Caveats worth knowing: `ac` resolves to the same range as `ic` until
-transitions land in Phase 9f, and `gx`/`dax` wait on the same phase. `<`/`>`
+Caveats worth knowing: transition types are the built-in set (`dissolve`, the
+wipes, `iris`); a name this build does not know renders as a dissolve, and
+registering new ones from Lua is not wired up. There is no `:set` family, so
+a transition's type or duration is changed by re-running `:transition` on the
+same cut rather than by `:set transition.duration`. `<`/`>`
 jump-point edge trims are parsed but not yet wired to a command; visual-mode
 track-object narrowing (typing `it`/`at` while a selection is live) is not
 implemented - operators in a `VISUAL*` mode act on the whole selection. The
@@ -195,8 +202,10 @@ layout is known and no wider than stereo, and at most eight of them; anything
 else is decided before the render and reported as "audio tracks mixed to one
 stream: <reason>" rather than found in the file afterwards.
 
-In `davimci-mlt`: transitions other than the audio `mix` are not projected
-until Phase 9f.
+In `davimci-mlt`: a clip-to-clip transition projects as a nested two-track
+tractor inside the playlist, since MLT composites tracks rather than playlist
+entries. The overlap is built from handle frames and centred on the cut, so
+planting one moves no clip and leaves the track length identical.
 `just sanitize` runs clean (ASan/LSan, nightly + `rust-src` via `rustup`) with
 a narrow, documented suppression file for MLT's own module-init and
 blank-producer state; the refcount guarantees ultimately rest on the wrapper

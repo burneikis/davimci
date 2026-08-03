@@ -556,3 +556,56 @@ fn a_project_file_is_recognised_by_its_content_not_its_name() {
         .unwrap();
     assert_eq!(ws.current().timeline().dump(), "V1:[a 0-60]\nA1: -\n");
 }
+
+// -- transitions (spec §6.2) --------------------------------------------
+
+#[test]
+fn transition_command_adds_replaces_and_removes_at_the_nearest_cut() {
+    let dir = Scratch::new("transition");
+    let mut ws = Workspace::new(dir.path()).without_autosave();
+    let tl = media_fixture(&[(0, 100, 20, 400), (100, 100, 20, 400)]);
+    let right = tl.tracks()[0].clips()[1].id;
+    seeded(&mut ws, tl);
+
+    let at = |ws: &Workspace| {
+        ws.current()
+            .timeline()
+            .find_clip(right)
+            .and_then(|(_, c)| c.transition_in.clone())
+    };
+
+    ws.run("transition", OnRecovery::Discard).unwrap();
+    assert_eq!(
+        at(&ws).map(|t| (t.kind, t.duration.get())),
+        Some(("dissolve".into(), 12))
+    );
+
+    // Re-running replaces, which is how a type or duration is changed.
+    ws.run("transition wipe_left 20", OnRecovery::Discard)
+        .unwrap();
+    assert_eq!(
+        at(&ws).map(|t| (t.kind, t.duration.get())),
+        Some(("wipe_left".into(), 20))
+    );
+
+    ws.run("transition none", OnRecovery::Discard).unwrap();
+    assert_eq!(at(&ws), None);
+    // Nothing left to remove is a user error with a sentence, not a panic.
+    assert!(ws.run("transition none", OnRecovery::Discard).is_err());
+}
+
+#[test]
+fn a_transition_longer_than_the_handles_is_refused_intact() {
+    let dir = Scratch::new("transition-handles");
+    let mut ws = Workspace::new(dir.path()).without_autosave();
+    seeded(
+        &mut ws,
+        media_fixture(&[(0, 100, 5, 110), (100, 100, 5, 110)]),
+    );
+    let before = ws.current().timeline().clone();
+    let err = ws
+        .run("transition dissolve 40", OnRecovery::Discard)
+        .unwrap_err();
+    assert!(err.to_string().contains("handle"), "{err}");
+    assert_eq!(ws.current().timeline(), &before);
+}

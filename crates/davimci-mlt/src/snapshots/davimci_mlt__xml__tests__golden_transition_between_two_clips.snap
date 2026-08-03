@@ -1,0 +1,60 @@
+---
+source: crates/davimci-mlt/src/xml.rs
+expression: "to_xml(&Projection::of(&tl))"
+---
+<?xml version="1.0" encoding="utf-8"?>
+<mlt LC_NUMERIC="C" version="7" producer="tractor0">
+  <profile description="davimci" width="1920" height="1080" progressive="1" sample_aspect_num="1" sample_aspect_den="1" display_aspect_num="1920" display_aspect_den="1080" frame_rate_num="60" frame_rate_den="1" colorspace="709"/>
+  <producer id="p0_0" in="20" out="113">
+    <property name="mlt_service">avformat</property>
+    <property name="resource">/media/0.mkv</property>
+    <property name="davimci.clip">c3</property>
+    <property name="davimci.label">m0</property>
+  </producer>
+  <producer id="p0_1a" in="114" out="125">
+    <property name="mlt_service">avformat</property>
+    <property name="resource">/media/0.mkv</property>
+    <property name="davimci.clip">c3</property>
+    <property name="davimci.label">m0</property>
+  </producer>
+  <producer id="p0_1b" in="14" out="25">
+    <property name="mlt_service">avformat</property>
+    <property name="resource">/media/1.mkv</property>
+    <property name="davimci.clip">c4</property>
+    <property name="davimci.label">m1</property>
+  </producer>
+  <tractor id="x0_1" in="0" out="11">
+    <track producer="p0_1a"/>
+    <track producer="p0_1b"/>
+    <transition id="t0_1">
+      <property name="mlt_service">luma</property>
+      <property name="a_track">0</property>
+      <property name="b_track">1</property>
+      <property name="davimci.transition">dissolve</property>
+    </transition>
+  </tractor>
+  <producer id="p0_2" in="26" out="119">
+    <property name="mlt_service">avformat</property>
+    <property name="resource">/media/1.mkv</property>
+    <property name="davimci.clip">c4</property>
+    <property name="davimci.label">m1</property>
+  </producer>
+  <playlist id="playlist0" davimci.track="V1">
+    <entry producer="p0_0" in="20" out="113"/>
+    <entry producer="x0_1" in="0" out="11"/>
+    <entry producer="p0_2" in="26" out="119"/>
+  </playlist>
+  <playlist id="playlist1" davimci.track="A1">
+  </playlist>
+  <tractor id="tractor0">
+    <track producer="playlist0" hide="0"/>
+    <track producer="playlist1" hide="1"/>
+    <transition id="mix0">
+      <property name="mlt_service">mix</property>
+      <property name="a_track">0</property>
+      <property name="b_track">1</property>
+      <property name="always_active">1</property>
+      <property name="sum">1</property>
+    </transition>
+  </tractor>
+</mlt>

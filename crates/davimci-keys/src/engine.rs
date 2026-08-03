@@ -10,7 +10,10 @@
 use std::collections::HashMap;
 
 use davimci_cmd::{EditCommand, Session};
-use davimci_core::{ClipId, ClipProps, Frame, Register, Selection, Timeline, TrackId};
+use davimci_core::{
+    ClipId, ClipProps, DEFAULT_TRANSITION, DEFAULT_TRANSITION_FRAMES, Frame, Register, Selection,
+    Timeline, TrackId, Transition,
+};
 use davimci_motion::{
     BuiltinMotion, JumpConfig, Motion as MotionTrait, MotionCtx, Object as ObjectTrait, Resolved,
     Scope, TextObject, TimeRange, Zoom,
@@ -332,9 +335,8 @@ impl Engine {
             Action::GainAdjust(step) => self.do_gain(step, session),
             Action::ToggleMute => self.do_track_flags(session, true),
             Action::ToggleSolo => self.do_track_flags(session, false),
-            Action::CreateTransition | Action::DeleteTransition => {
-                Outcome::NotImplemented("transitions land in Phase 9f")
-            }
+            Action::CreateTransition => self.do_transition(session, true),
+            Action::DeleteTransition => self.do_transition(session, false),
             Action::PlayPause => Outcome::Transport(TransportCmd::PlayPause),
             Action::Shuttle { forward } => Outcome::Transport(if forward {
                 TransportCmd::ShuttleForward
@@ -757,6 +759,46 @@ impl Engine {
         };
         match run(session.exec(&cmd)) {
             Outcome::Applied(_) => Outcome::Applied(format!("{name} {state}")),
+            other => other,
+        }
+    }
+
+    /// `gx` and `dax`: put a default transition on the nearest cut, or take
+    /// the one there away (spec §6.2).
+    ///
+    /// "Nearest cut" rather than "the cut under the playhead": a transition
+    /// straddles its cut, so demanding the playhead sit exactly on it would
+    /// make `dax` unusable from inside the transition it deletes.
+    fn do_transition(&mut self, session: &mut Session, create: bool) -> Outcome {
+        let playhead = session.timeline().playhead();
+        let track = playhead.track;
+        let found = if create {
+            session.timeline().nearest_cut(track, playhead.frame)
+        } else {
+            session
+                .timeline()
+                .transition_at(track, playhead.frame)
+                .map(|(clip, _)| (clip, playhead.frame))
+        };
+        let Some((clip, _)) = found else {
+            return Outcome::Error(if create {
+                "there is no cut on this track to put a transition on".to_string()
+            } else {
+                "there is no transition here to delete".to_string()
+            });
+        };
+        let transition = create.then(Transition::dissolve);
+        let cmd = EditCommand::SetTransition {
+            track,
+            clip,
+            transition,
+        };
+        match run(session.exec(&cmd)) {
+            Outcome::Applied(_) if create => Outcome::Applied(format!(
+                "{}-frame {DEFAULT_TRANSITION} added",
+                DEFAULT_TRANSITION_FRAMES
+            )),
+            Outcome::Applied(_) => Outcome::Applied("transition removed".to_string()),
             other => other,
         }
     }

@@ -24,6 +24,7 @@ pub mod error;
 pub mod ffi;
 pub mod patch;
 pub mod projection;
+pub mod transitions;
 pub mod xml;
 
 pub use backend::MltBackend;

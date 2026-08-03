@@ -5,9 +5,9 @@
 //! is track-local or follows link groups.
 //!
 //! - `ic` inner clip - the clip's own content, no transition, focused track.
-//! - `ac` a clip - the clip plus its adjoining transitions. Transitions land
-//!   in Phase 9f, so today `ac` equals `ic`; the range widens once they exist
-//!   without any caller changing.
+//! - `ac` a clip - the clip plus its adjoining transitions. It equals `ic`
+//!   until a transition is attached to one of the clip's cuts, and widens to
+//!   cover the overlap once one is (spec §6.2).
 //! - `it` inner track - the clip's extent, focused track only, link groups
 //!   deliberately ignored.
 //! - `at` a track group - the clip's extent across every track its link
@@ -45,9 +45,23 @@ impl Object for TextObject {
                 let range = seg.ok_or(MotionError::NoSegment)?;
                 Ok(Resolved::Range(range, Scope::single(track)))
             }
-            Self::InnerClip | Self::AClip | Self::InnerTrack => {
+            Self::InnerClip | Self::InnerTrack => {
                 let (range, _) = clip_extent(tl, track)?;
                 Ok(Resolved::Range(range, Scope::single(track)))
+            }
+            // `ac` covers the overlaps as well, so `dac` takes the clip and
+            // the transitions that die with it rather than leaving handles
+            // composited against nothing.
+            Self::AClip => {
+                let (range, _) = clip_extent(tl, track)?;
+                let widened = tl
+                    .track(track)
+                    .and_then(|t| {
+                        let clip = t.clip_at(tl.playhead().frame)?;
+                        t.transition_range(clip.id)
+                    })
+                    .map_or(range, |(start, end)| TimeRange::new(start, end));
+                Ok(Resolved::Range(widened, Scope::single(track)))
             }
             Self::ATrack => {
                 let (range, group) = clip_extent(tl, track)?;
