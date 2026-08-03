@@ -1,1 +1,4 @@
 - allow plugins that render smth / a window. e.g. something like which-key
+- thumbnails in timeline
+- relative jump numbers
+- audio while shuttling
