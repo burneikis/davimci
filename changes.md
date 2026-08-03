@@ -611,3 +611,49 @@ Amendments made during implementation:
 Still open: the Lua side of the registry. `transitions::spec` is the seam it
 needs, and adding it means a `RenderBackend` method so `davimci-lua` can
 register a type without knowing MLT exists.
+---
+
+## Wiring the Lua config into the binary
+
+Status: complete. `davimci-lua` was finished and tested against the spec's own
+snippets, but nothing depended on it: no user config had ever been loaded by
+the editor. This is the seam that closed that.
+
+Amendments made during implementation:
+- `Host::plugin` no longer returns a status string. A plugin's requests split
+  in two: the ones only the host can answer (an export, an import, a
+  registered motion, a re-analysis) run in `davimci-cli`, and the ones that
+  are *edits* come back as `PluginEffects` - a list of `davimci_keys::Action`
+  - for the app to run through the key engine. That is what keeps spec 9.9
+  literally true: a plugin edit takes the same write path a keystroke does,
+  because it *is* the same path. Undo, `.`-repeat and macros needed no
+  special case.
+- Requests queued outside a callback are drained on the tick, through a new
+  `Host::plugin_tick`. An event handler that asks for an edit therefore edits
+  on the following tick, never inside the notification that an edit happened;
+  re-entering the command layer from within `timeline_changed` was the
+  alternative and it is not one.
+- The v1 event list is derived rather than announced. Insertions and
+  deletions come from diffing the clip set the editor last saw, so undo, a
+  macro replay and a plugin edit all report the same thing; splits are read
+  off `Session::last_edit`, because a diff cannot tell a split from an
+  insertion. `ModeChanged` needed a new `Host` hook - the app owns the mode
+  FSM, so it was the only layer that could report it - and `Mode::name`
+  reads the same table `map()` parses, the other way round, so the two
+  cannot drift.
+- Lua presets are translated into `davimci-backend`'s registry at startup
+  rather than consulted lazily, so `:presets` and Tab completion list what
+  the config defined, and a pairing `davimci-lua` accepts but the backend
+  cannot build is a load-time notice rather than a render-time surprise.
+- The project-local trust prompt asks on the terminal and refuses when there
+  is nobody to ask. The plan wanted the app's modal path; there is no modal
+  path in `davimci-app` yet, and inventing one for a question asked once at
+  startup would have put a frontend concern in the core.
+- Nothing about the editor is conditional on Lua: a build always has a
+  `Plugins`, and a runtime that cannot even start costs the user their
+  plugins rather than their editor.
+
+Still open: a text object registered from Lua is loaded and listed, but the
+key grammar has no way to name one - `TextObject` is a closed enum. That is
+grammar work rather than wiring, so it moved to the remaining-key-grammar
+item in `plan.md`.

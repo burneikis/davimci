@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use davimci_app::{App, Event, Surface};
 use davimci_backend::RenderBackend;
-use davimci_cli::{Editor, ExCommand, ExOutcome, OnRecovery, Workspace};
+use davimci_cli::{AskOnTerminal, Editor, ExCommand, ExOutcome, OnRecovery, Plugins, Workspace};
 use davimci_core::{Classify, Fps, Resolution};
 use davimci_headless::HeadlessFrontend;
 use davimci_present::{Host as PresentHost, Presenter};
@@ -126,12 +126,7 @@ fn needs_backend(line: &str) -> bool {
 /// window. Ticks until any export finishes, because a script that returned
 /// before the file was written would be useless.
 fn run_commands_with_editor(ws: Workspace, commands: &[String]) -> Result<()> {
-    let session = ws.current_session();
-    let (backend, presenter) = engine_for(&session);
-    let mut editor = Editor::new(ws, backend, presenter);
-    let mut app = App::new(session);
-    app.set_command_candidates(davimci_cli::excmd::vocabulary());
-    editor.prime(app.session());
+    let (mut app, mut editor) = assemble(ws);
 
     for line in commands {
         app.event(Event::Command(line.clone()), &mut editor);
@@ -170,15 +165,41 @@ fn run_commands_with_editor(ws: Workspace, commands: &[String]) -> Result<()> {
 /// Open the editor window.
 #[cfg(feature = "window")]
 fn run_window(ws: Workspace) -> Result<()> {
-    let session = ws.current_session();
-    let (backend, presenter) = engine_for(&session);
-    let mut editor = davimci_cli::Editor::new(ws, backend, presenter);
-    let mut app = App::new(session);
-    app.set_command_candidates(davimci_cli::excmd::vocabulary());
-    editor.prime(app.session());
+    let (app, editor) = assemble(ws);
     davimci_cli::Window::new(app, editor)
         .run()
         .map_err(|e| anyhow::anyhow!("the window could not open: {e}"))
+}
+
+/// Load user config and assemble the editor around it.
+///
+/// The config is loaded before the `App` exists because it decides what the
+/// keymap is: a user binding has to be in the table the grammar consults,
+/// not layered on afterwards by whoever remembers to (spec 9.2).
+fn assemble(ws: Workspace) -> (App, Editor) {
+    let root = ws.root().to_path_buf();
+    let mut plugins = Plugins::load(
+        davimci_lua::ConfigPaths::from_env().as_ref(),
+        &root,
+        &AskOnTerminal,
+    );
+    let notices = plugins.take_notices();
+    let keymap = plugins.keymap();
+    let jump = plugins.timeline_config().jump;
+
+    let session = ws.current_session();
+    let (backend, presenter) = engine_for(&session);
+    let mut editor = Editor::new(ws, backend, presenter).with_plugins(plugins);
+    let mut app = App::with_keymap(session, keymap);
+    app.set_jump_config(jump);
+    app.set_command_candidates(davimci_cli::excmd::vocabulary());
+    // A config that failed to load says so on the status line and the editor
+    // starts anyway: one broken plugin is not a reason to refuse to open.
+    for notice in notices {
+        app.notify(notice);
+    }
+    editor.prime(app.session());
+    (app, editor)
 }
 
 /// Build the render backend and presenter for a session.
@@ -215,12 +236,7 @@ fn engine_for(session: &davimci_cmd::Session) -> (Box<dyn RenderBackend>, Presen
 /// place. `--ticks` runs presentation ticks afterwards so playback started
 /// with `<Space><Space>` actually advances.
 fn run_session(ws: Workspace, script: &str, ticks: u32) -> Result<()> {
-    let session = ws.current_session();
-    let (backend, presenter) = engine_for(&session);
-    let mut editor = Editor::new(ws, backend, presenter);
-    let mut app = App::new(session);
-    app.set_command_candidates(davimci_cli::excmd::vocabulary());
-    editor.prime(app.session());
+    let (mut app, mut editor) = assemble(ws);
 
     let mut frontend = HeadlessFrontend::script(
         Surface {

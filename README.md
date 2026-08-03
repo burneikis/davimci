@@ -14,13 +14,13 @@ remappable keys, and hookable events.
 davimci opens a window, edits video, and exports a multi-audio MKV. Keys drive
 the command layer, edits reproject the MLT graph, motions seek and present,
 playback and shuttle run off the audio clock, and the timeline is painted from
-shared view state with waveforms and filmstrips.
+shared view state with waveforms and filmstrips. User Lua config is loaded at
+startup: keymaps, callbacks, custom motions, export presets and event handlers
+all reach the running editor, and a plugin edit is an ordinary undo step.
 
-Not yet done: the Lua config is written and tested but not yet loaded by the
-binary, so no user config takes effect. Also missing are the `:set` family,
-`<Space>l` (loop selection), `:analyze`, edge trims with `<`/`>`, sidecar and
-embedded subtitle export, Lua-registered transition types, and the TUI
-frontend. `plan.md` has the remaining work in dependency order; `todo.md` has
+Not yet done: the `:set` family, `<Space>l` (loop selection), `:analyze`, edge
+trims with `<`/`>`, text objects registered from Lua, sidecar and embedded
+subtitle export, Lua-registered transition types, and the TUI frontend. `plan.md` has the remaining work in dependency order; `todo.md` has
 the smaller gaps.
 
 ## Usage

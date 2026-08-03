@@ -17,6 +17,21 @@ pub enum Mode {
 }
 
 impl Mode {
+    /// The name a config spells this mode with (spec 9.2), and the one a
+    /// `ModeChanged` event carries (spec 9.8). The same table `map()` parses,
+    /// read the other way, so the two cannot drift.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::Visual => "visual",
+            Self::VisualLine => "visual-line",
+            Self::VisualBlock => "visual-block",
+            Self::Insert => "insert",
+            Self::Command => "command",
+        }
+    }
+
     #[must_use]
     pub fn is_visual(self) -> bool {
         matches!(self, Mode::Visual | Mode::VisualLine | Mode::VisualBlock)

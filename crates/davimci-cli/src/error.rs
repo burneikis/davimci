@@ -58,6 +58,11 @@ pub enum CliError {
     #[error("the export could not start: {reason}")]
     ExportFailed { reason: String },
 
+    /// A `BeforeExport` handler vetoed the render (spec 9.8). A user error:
+    /// nothing was written and nothing was mutated.
+    #[error("the export was refused: {reason}")]
+    ExportRefused { reason: String },
+
     #[error(transparent)]
     Preset(#[from] davimci_backend::PresetError),
 
@@ -109,6 +114,7 @@ impl Classify for CliError {
             | Self::AnalysisNotReady(_)
             | Self::NothingToExport
             | Self::NoExportRunning
+            | Self::ExportRefused { .. }
             | Self::Preset(_) => ErrorClass::User,
             // A failed export leaves the timeline untouched and editable.
             Self::ExportFailed { .. } => ErrorClass::Recoverable,

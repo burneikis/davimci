@@ -55,35 +55,7 @@ The architectural rules these rest on are in `AGENTS.md`.
 
 ---
 
-## 1. Wire the Lua config into the binary
-
-The largest remaining gap, and the reason it is first: `davimci-lua` is
-complete and tested against the spec's own snippets, but no other crate
-depends on it, so no user config has ever been loaded by the editor. Every
-later item is easier to expose once this seam exists.
-
-Deliverables:
-- `davimci-cli` loads `~/.config/davimci/` at startup and reports each notice
-  from `Runtime::load_config` on the status line rather than failing.
-- User keymaps reach `davimci-keys` before the default table is consulted;
-  a `Plugin(u32)` outcome routes back through `Runtime::invoke`.
-- `Runtime::take_requests` is drained on each tick and every request runs
-  through `Session`, so a plugin edit is one undoable command like any other.
-- Lua-registered motions, text objects and export presets are visible to the
-  engine and to `:export`.
-- Events dispatch for the v1 list, with `BeforeExport` able to cancel.
-- Project-local `.davimci.lua` trust prompt goes through the app's modal path.
-
-Testing:
-- A headless session with a fixture config: a mapped key produces the edit
-  the config asked for, and `u` undoes it in one step.
-- A throwing callback disables itself, puts one notice on the status line,
-  and leaves the session editable.
-- The Lua-defined export preset reaches a real `:export`.
-
----
-
-## 2. The `:set` family
+## 1. The `:set` family
 
 Spec 8, 6.2, 7.1 and 15.5 all reach for `:set`, and none of them can be
 finished without it. It is one command with a typed property registry, not
@@ -107,7 +79,7 @@ Testing:
 
 ---
 
-## 3. Transport loop
+## 2. Transport loop
 
 Deliverables:
 - `<Space>l` loops the live selection, which already rides the `Host` seam.
@@ -123,23 +95,29 @@ Testing:
 
 ---
 
-## 4. Remaining key grammar
+## 3. Remaining key grammar
 
-Two actions parse today but reach no command.
+Two actions parse today but reach no command, and the object table cannot yet
+name anything a config defined.
 
 Deliverables:
 - `<`/`>` jump-point edge trims map onto the existing ripple-trim command,
   with the jump-point set deciding the edge.
 - Typing `it`/`at` while a `VISUAL*` selection is live narrows it to a track
   rather than being ignored (spec 6).
+- `TextObject` gains a named variant so a Lua-registered object (spec 9.4)
+  is typeable: the grammar carries the name, and the host resolves it through
+  `Runtime::run_object` the way it already resolves a registered motion.
 
 Testing:
 - Golden key strings for both, and a landing-position table for `<`/`>` at a
   clip boundary, at timeline start, and with a count prefix.
+- A fixture config registers `ic`/`ac`, and `dic` deletes the range the
+  config returned.
 
 ---
 
-## 5. `:analyze`
+## 4. `:analyze`
 
 The analyser re-runs itself when a track's audible signature changes, which
 covers the reason the command exists, but spec 12 lists it and it is not
@@ -155,7 +133,7 @@ Testing:
 
 ---
 
-## 6. Undo history across crash recovery
+## 5. Undo history across crash recovery
 
 A saved project carries its undo tree (format v2). A recovered autosave does
 not: the autosave log is a flat list, so recovery replays into a fresh tree.
@@ -172,7 +150,7 @@ Testing:
 
 ---
 
-## 7. Subtitle export selection
+## 6. Subtitle export selection
 
 `SubtitleSelection` is parsed and validated in presets, but the renderer only
 ever burns text in. Spec 8 asks for sidecar and embedded too.
@@ -189,7 +167,7 @@ Testing:
 
 ---
 
-## 8. Lua-registered transition types
+## 7. Lua-registered transition types
 
 Deliverables:
 - A `RenderBackend` method exposing the transition registry so `davimci-lua`
@@ -205,7 +183,7 @@ Testing:
 
 ---
 
-## 9. TUI frontend (`davimci-tui`, `--features tui`)
+## 8. TUI frontend (`davimci-tui`, `--features tui`)
 
 Explicitly a nice-to-have. Ships only if it stays thin; cut without regret
 otherwise.
@@ -229,7 +207,7 @@ Testing:
 
 ---
 
-## 10. Integration and hardening
+## 9. Integration and hardening
 
 Deliverables:
 - A scripted-session file format - keystrokes plus assertions - usable as both

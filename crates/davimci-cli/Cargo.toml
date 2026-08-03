@@ -26,6 +26,7 @@ davimci-analysis.workspace = true
 davimci-app.workspace = true
 davimci-backend.workspace = true
 davimci-keys.workspace = true
+davimci-lua.workspace = true
 davimci-present.workspace = true
 davimci-headless.workspace = true
 davimci-gui.workspace = true

@@ -16,6 +16,7 @@ use crate::error::AppError;
 use crate::frontend::{Event, Frontend, Response, Surface};
 use crate::job::{JobList, JobUpdate};
 use crate::message::{Message, MessageQueue};
+use crate::plugin::PluginEffects;
 use crate::thumbnail::{Thumbnail, ThumbnailRequest, Thumbnails};
 use crate::view::{CommandLineView, ViewInputs, ViewState};
 use crate::viewport::Viewport;
@@ -61,10 +62,29 @@ pub trait Host {
         let _ = session;
     }
 
-    /// Invoke Lua callback `id` and execute whatever it asks for.
-    fn plugin(&mut self, id: u32, session: &mut Session) -> Result<Option<String>, AppError> {
+    /// Invoke Lua callback `id` and report what it asked for.
+    ///
+    /// The host runs the requests only it can answer - an export, an import,
+    /// a registered motion - and hands back the ones that are edits. The app
+    /// runs those through the key engine, so a plugin edit takes the same
+    /// write path a keystroke does and there is no second one (spec 9.9).
+    fn plugin(&mut self, id: u32, session: &mut Session) -> Result<PluginEffects, AppError> {
         let _ = (id, session);
-        Ok(None)
+        Ok(PluginEffects::default())
+    }
+
+    /// Requests Lua queued outside a keymap callback - from an event handler,
+    /// or from a callback that queued more after it returned. Drained on
+    /// every [`Event::Tick`] so a plugin edit is never left sitting.
+    fn plugin_tick(&mut self, session: &mut Session) -> PluginEffects {
+        let _ = session;
+        PluginEffects::default()
+    }
+
+    /// The mode changed, for the `ModeChanged` event (spec 9.8). The app owns
+    /// the mode FSM, so this is the only place a host can learn of it.
+    fn mode_changed(&mut self, from: Mode, to: Mode) {
+        let _ = (from, to);
     }
 
     /// One pass of whatever the host drives off the clock: pacing a preview
@@ -593,6 +613,11 @@ impl App {
             }
             Event::Tick => {
                 host.tick(&mut self.session);
+                // Anything Lua queued since the last tick - an event handler
+                // that asked for an edit, most often. Run before the view is
+                // assembled so the edit and its status line land together.
+                let effects = host.plugin_tick(&mut self.session);
+                self.apply_plugin(effects, host);
                 // Jobs report on the clock, not on the edit: an export runs
                 // in the background and the status line has to keep up.
                 for update in host.jobs() {
@@ -638,6 +663,7 @@ impl App {
                 if change.from == Mode::Command {
                     self.close_command_line();
                 }
+                host.mode_changed(change.from, change.to);
             }
             Outcome::Invalid => self.messages.push(Message::warning(
                 "That key sequence is not bound to anything.".to_string(),
@@ -680,8 +706,7 @@ impl App {
                 return Response::OpenCommandLine;
             }
             Outcome::Plugin(id) => match host.plugin(id, &mut self.session) {
-                Ok(Some(msg)) => self.messages.push(Message::info(msg)),
-                Ok(None) => {}
+                Ok(effects) => self.apply_plugin(effects, host),
                 Err(e) => self.messages.push(Message::error(e.to_string())),
             },
             Outcome::NotImplemented(what) => self
@@ -697,6 +722,19 @@ impl App {
         }
         self.follow();
         Response::Continue
+    }
+
+    /// Run what a plugin asked for. Each action goes through the key engine,
+    /// so it is validated, undoable and `.`-repeatable exactly as the same
+    /// action typed by hand would be (spec 9.9).
+    fn apply_plugin(&mut self, effects: PluginEffects, host: &mut dyn Host) {
+        for message in effects.messages {
+            self.messages.push(message);
+        }
+        for action in effects.actions {
+            let outcome = self.engine.execute_action(action, &mut self.session);
+            self.apply_outcome(outcome, host);
+        }
     }
 
     /// The vocabulary Tab completes against. The app does not own the ex

@@ -13,13 +13,15 @@
 
 use davimci_analysis::{FfprobeProber, ImportOptions, Placement, Prober};
 use davimci_app::{
-    AppError, Host, JobState, JobUpdate, Message, Thumbnail, ThumbnailRequest, Waveform,
+    AppError, Host, JobState, JobUpdate, Message, PluginEffects, Thumbnail, ThumbnailRequest,
+    Waveform,
 };
 use davimci_backend::{PreviewScale, RenderBackend};
 use davimci_cmd::{EditCommand, Session};
-use davimci_core::{Frame, Selection, TrackId};
+use davimci_core::{ClipId, Frame, Selection, TrackId};
 use davimci_keys::MediaIntent;
 use davimci_keys::engine::TransportCmd;
+use davimci_lua::{MotionAnswer, MotionEnv, Request, Sample, TrackData};
 use davimci_present::{Presentation, Presenter};
 
 use crate::analyse::Analyser;
@@ -27,6 +29,7 @@ use crate::autosave::OnRecovery;
 use crate::error::CliError;
 use crate::excmd::{ExCommand, ExOutcome};
 use crate::export::{ExportEvent, Exporter};
+use crate::plugins::Plugins;
 use crate::transport::{Transport, TransportState};
 use crate::workspace::Workspace;
 
@@ -68,6 +71,20 @@ pub struct Editor {
     /// How picked media is inspected. Injected so the picker path is
     /// testable without ffprobe on the machine.
     prober: Box<dyn Prober>,
+    /// The Lua runtime and everything user config registered into it.
+    plugins: Plugins,
+    /// Requests an event handler queued, waiting for the next tick. They are
+    /// not run where the event fires: an edit must not happen inside the
+    /// notification that an edit happened.
+    queued_requests: Vec<Request>,
+    /// Messages the plugin layer produced outside a callback.
+    plugin_messages: Vec<Message>,
+    /// The preset and output of the running export, for `AfterExport`.
+    last_export: Option<(String, String)>,
+    /// Which clips existed at the last notification, so an edit can be
+    /// reported as `ClipInserted`/`ClipDeleted` (spec 9.8) without every
+    /// command having to describe itself twice.
+    known_clips: std::collections::BTreeSet<(TrackId, ClipId)>,
     quit: bool,
 }
 
@@ -105,8 +122,39 @@ impl Editor {
             thumbnail_queue: None,
             started_jobs: Vec::new(),
             prober: Box::new(FfprobeProber),
+            plugins: Plugins::empty(),
+            queued_requests: Vec::new(),
+            plugin_messages: Vec::new(),
+            last_export: None,
+            known_clips: std::collections::BTreeSet::new(),
             quit: false,
         }
+    }
+
+    /// Adopt a loaded Lua runtime, and with it the user's export presets.
+    ///
+    /// Presets are installed rather than consulted lazily so `:presets` and
+    /// Tab completion list what the config defined, and a preset the backend
+    /// cannot build is reported now rather than at render time (spec 9.5).
+    #[must_use]
+    pub fn with_plugins(mut self, mut plugins: Plugins) -> Self {
+        let (presets, problems) = plugins.presets();
+        for preset in presets {
+            self.exporter.presets_mut().define(preset);
+        }
+        self.notices.extend(problems);
+        self.notices.extend(plugins.take_notices());
+        self.plugins = plugins;
+        self
+    }
+
+    #[must_use]
+    pub fn plugins(&self) -> &Plugins {
+        &self.plugins
+    }
+
+    pub fn plugins_mut(&mut self) -> &mut Plugins {
+        &mut self.plugins
     }
 
     #[must_use]
@@ -152,12 +200,18 @@ impl Editor {
         session: &Session,
     ) -> Option<Result<String, CliError>> {
         match cmd {
-            ExCommand::Export { path, preset } => Some(self.exporter.start(
-                self.backend.as_mut(),
-                path,
-                preset.as_deref(),
-                session.timeline(),
-            )),
+            ExCommand::Export { path, preset } => {
+                let name = preset.clone().unwrap_or_else(|| self.preset_for(path));
+                if let Some(reason) = self.before_export(&name, &path.display().to_string()) {
+                    return Some(Err(CliError::ExportRefused { reason }));
+                }
+                Some(self.exporter.start(
+                    self.backend.as_mut(),
+                    path,
+                    preset.as_deref(),
+                    session.timeline(),
+                ))
+            }
             ExCommand::Render { preset } => {
                 let container = match self.exporter.presets().get(preset) {
                     Ok(p) => p.container,
@@ -169,6 +223,9 @@ impl Editor {
                     self.workspace.current().path().map(std::path::Path::new),
                     container,
                 );
+                if let Some(reason) = self.before_export(preset, &out.display().to_string()) {
+                    return Some(Err(CliError::ExportRefused { reason }));
+                }
                 Some(self.exporter.start(
                     self.backend.as_mut(),
                     &out,
@@ -372,6 +429,8 @@ impl Editor {
                 self.job_updates.push(JobUpdate::Progress { id, permille });
             }
             ExportEvent::Finished { id, message } => {
+                let (preset, output) = self.last_export.clone().unwrap_or_default();
+                self.fire(&davimci_lua::Event::AfterExport { preset, output });
                 self.finish_job(id, JobState::Done, message, false);
             }
             ExportEvent::Cancelled { id, message } => {
@@ -428,6 +487,21 @@ impl Editor {
     /// Project the timeline and show the frame under the playhead. Called
     /// once at startup so the first paint is not black.
     pub fn prime(&mut self, session: &Session) {
+        // The clip set is adopted, not diffed: nothing was inserted by
+        // opening a project, so nothing should be reported as inserted.
+        self.known_clips = session
+            .timeline()
+            .tracks()
+            .iter()
+            .flat_map(|t| t.clips().iter().map(move |c| (t.id, c.id)))
+            .collect();
+        let path = self
+            .workspace
+            .current()
+            .path()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
+        self.fire(&davimci_lua::Event::ProjectLoaded { path });
         self.timeline_changed(session);
         self.playhead_moved(session);
     }
@@ -504,6 +578,226 @@ impl Editor {
     }
 }
 
+/// The plugin seam: events out, requests in.
+impl Editor {
+    /// Fire an event at its handlers, keeping whatever edits they asked for
+    /// until the next tick. Returns the veto, for a cancellable event.
+    fn fire(&mut self, event: &davimci_lua::Event) -> Option<String> {
+        let mut dispatch = self.plugins.dispatch(event);
+        self.queued_requests.append(&mut dispatch.requests);
+        for failure in &dispatch.failures {
+            self.notices.push(Message::error(failure.message.clone()));
+        }
+        let (_, messages) = self.plugins.take_requests();
+        self.plugin_messages.extend(messages);
+        dispatch.cancelled
+    }
+
+    /// The `BeforeExport` veto (spec 9.8): the only event in v1 that can
+    /// stop what it is reporting.
+    fn before_export(&mut self, preset: &str, output: &str) -> Option<String> {
+        self.last_export = Some((preset.to_string(), output.to_string()));
+        self.fire(&davimci_lua::Event::BeforeExport {
+            preset: preset.to_string(),
+            output: output.to_string(),
+        })
+    }
+
+    /// The preset `:export <path>` would infer, so the event payload names
+    /// the same preset the render will use.
+    fn preset_for(&self, path: &std::path::Path) -> String {
+        let ext = path
+            .extension()
+            .map(|e| e.to_string_lossy().to_string())
+            .unwrap_or_default();
+        self.exporter.presets().for_extension(&ext).name.clone()
+    }
+
+    /// Turn Lua requests into effects the app can run.
+    ///
+    /// Everything that needs the backend, the prober or the analysis is done
+    /// here; everything that is an *edit* is handed back as an action, so it
+    /// goes through the key engine and lands in the undo log as one step,
+    /// exactly as the same action typed by hand would (spec 9.9).
+    fn run_requests(&mut self, requests: Vec<Request>, session: &mut Session) -> PluginEffects {
+        let mut effects = PluginEffects::default();
+        effects.messages.append(&mut self.plugin_messages);
+        for request in requests {
+            match request {
+                Request::Edit(action) => effects.act(action),
+                Request::Message(text) => effects.say(Message::info(text)),
+                Request::Export { preset } => {
+                    let container = match self.exporter.presets().get(&preset) {
+                        Ok(p) => p.container,
+                        Err(e) => {
+                            effects.say(Message::error(e.to_string()));
+                            continue;
+                        }
+                    };
+                    let out = crate::export::default_output(
+                        self.workspace.current().path().map(std::path::Path::new),
+                        container,
+                    );
+                    if let Some(reason) = self.before_export(&preset, &out.display().to_string()) {
+                        effects.say(Message::error(reason));
+                        continue;
+                    }
+                    match self.exporter.start(
+                        self.backend.as_mut(),
+                        &out,
+                        Some(&preset),
+                        session.timeline(),
+                    ) {
+                        Ok(msg) => effects.say(Message::info(msg)),
+                        Err(e) => effects.say(Message::error(e.to_string())),
+                    }
+                }
+                Request::Import { path } => {
+                    match self.import_picked(
+                        std::path::Path::new(&path),
+                        MediaIntent::Insert,
+                        session,
+                    ) {
+                        Ok(msg) => effects.say(Message::info(msg)),
+                        Err(e) => effects.say(Message::error(e.to_string())),
+                    }
+                }
+                Request::Analyze { track } => {
+                    let n = self.analyser.reanalyse();
+                    effects.say(Message::info(match track {
+                        Some(name) => format!("re-analysing {name}"),
+                        None => format!("re-analysing {n} track(s)"),
+                    }));
+                }
+                Request::Motion { name, opts } => {
+                    let env = self.motion_env(session);
+                    match self.plugins.run_motion(&name, &opts, &env) {
+                        // A motion is a pure query: it answers a frame and
+                        // the editor moves, so a plugin never touches the
+                        // playhead itself (spec 9.9).
+                        Ok(MotionAnswer::Found(frame)) => {
+                            let track = session.timeline().playhead().track;
+                            if let Err(e) = session.set_playhead(Frame(frame), track) {
+                                effects.say(Message::error(e.to_string()));
+                            }
+                        }
+                        Ok(MotionAnswer::NoMatch) => effects.say(Message::warning(format!(
+                            "the motion '{name}' found nothing from here"
+                        ))),
+                        Ok(MotionAnswer::Pending) => effects.say(Message::warning(format!(
+                            "analysis is still running; the motion '{name}' cannot be resolved yet"
+                        ))),
+                        Err(e) => effects.say(Message::error(e.to_string())),
+                    }
+                }
+            }
+        }
+        effects
+    }
+
+    /// The snapshot a registered motion runs against (spec 9.3).
+    ///
+    /// A track with no analysis to wait for is reported as analysed: only an
+    /// audio track whose measurement has not landed answers "not yet".
+    fn motion_env(&self, session: &Session) -> MotionEnv {
+        let tl = session.timeline();
+        let head = tl.playhead();
+        let focused = tl
+            .track(head.track)
+            .map(|t| t.name.clone())
+            .unwrap_or_default();
+        let mut env = MotionEnv::new(head.frame.get(), focused);
+        let fps = tl.props.fps;
+        for track in tl.tracks() {
+            let analysis = self.analyser.analysis(track.id);
+            let mut data = TrackData {
+                kind: match track.kind {
+                    davimci_core::TrackKind::Video => "video",
+                    davimci_core::TrackKind::Audio => "audio",
+                    davimci_core::TrackKind::Text => "text",
+                    davimci_core::TrackKind::Overlay => "overlay",
+                }
+                .to_string(),
+                analysed: analysis.is_some() || track.kind != davimci_core::TrackKind::Audio,
+                ..TrackData::default()
+            };
+            if let Some(a) = analysis {
+                data.samples = a
+                    .hops
+                    .iter()
+                    .enumerate()
+                    .map(|(i, hop)| Sample {
+                        frame: frame_of_ms(a.hop_start_ms(i), fps),
+                        rms_db: f64::from(hop.rms_db),
+                        peak_db: f64::from(hop.peak_db),
+                    })
+                    .collect();
+            }
+            data.clip_bounds = track
+                .clips()
+                .iter()
+                .flat_map(|c| [c.start.get(), c.end().get()])
+                .collect();
+            env = env.with_track(track.name.clone(), data);
+        }
+        env
+    }
+
+    /// Report what an edit did, as the v1 events (spec 9.8).
+    ///
+    /// Insertions and deletions are diffed rather than read off the command,
+    /// so undo, a macro replay and a plugin edit all report the same thing;
+    /// a split is read off the command, because a diff cannot tell one from
+    /// an insertion.
+    fn report_edit(&mut self, session: &Session) {
+        let tl = session.timeline();
+        let now: std::collections::BTreeSet<(TrackId, ClipId)> = tl
+            .tracks()
+            .iter()
+            .flat_map(|t| t.clips().iter().map(move |c| (t.id, c.id)))
+            .collect();
+        let name = |id: TrackId| tl.track(id).map_or_else(String::new, |t| t.name.clone());
+        let mut events: Vec<davimci_lua::Event> = Vec::new();
+        for (track, clip) in now.difference(&self.known_clips) {
+            events.push(davimci_lua::Event::ClipInserted {
+                clip: clip.0,
+                track: name(*track),
+            });
+        }
+        for (track, clip) in self.known_clips.difference(&now) {
+            events.push(davimci_lua::Event::ClipDeleted {
+                clip: clip.0,
+                track: name(*track),
+            });
+        }
+        for (track, frame) in session.last_edit().map(splits).unwrap_or_default() {
+            events.push(davimci_lua::Event::SplitPerformed {
+                frame: frame.get(),
+                track: name(track),
+            });
+        }
+        self.known_clips = now;
+        for event in &events {
+            self.fire(event);
+        }
+    }
+}
+
+/// Every split inside a command, including the implicit ones a ripple edit
+/// expands into.
+fn splits(command: &EditCommand) -> Vec<(TrackId, Frame)> {
+    match command {
+        EditCommand::Split { track, frame, .. } => vec![(*track, *frame)],
+        EditCommand::Sequence(inner) => inner.iter().flat_map(splits).collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// A source millisecond as a timeline frame.
+fn frame_of_ms(ms: u64, fps: davimci_core::Fps) -> u64 {
+    ms.saturating_mul(u64::from(fps.num)) / (1000 * u64::from(fps.den).max(1))
+}
+
 impl Host for Editor {
     fn import_media(
         &mut self,
@@ -518,6 +812,32 @@ impl Host for Editor {
 
     fn jobs(&mut self) -> Vec<JobUpdate> {
         std::mem::take(&mut self.job_updates)
+    }
+
+    fn plugin(&mut self, id: u32, session: &mut Session) -> Result<PluginEffects, AppError> {
+        let (requests, messages) = self.plugins.invoke(id);
+        self.plugin_messages.extend(messages);
+        Ok(self.run_requests(requests, session))
+    }
+
+    fn plugin_tick(&mut self, session: &mut Session) -> PluginEffects {
+        let (mut requests, messages) = self.plugins.take_requests();
+        self.plugin_messages.extend(messages);
+        // Whatever an event handler queued since the last tick runs first:
+        // it was asked for earlier.
+        let mut queued = std::mem::take(&mut self.queued_requests);
+        queued.append(&mut requests);
+        if queued.is_empty() && self.plugin_messages.is_empty() {
+            return PluginEffects::default();
+        }
+        self.run_requests(queued, session)
+    }
+
+    fn mode_changed(&mut self, from: davimci_keys::Mode, to: davimci_keys::Mode) {
+        self.fire(&davimci_lua::Event::ModeChanged {
+            from: from.name().to_string(),
+            to: to.name().to_string(),
+        });
     }
 
     fn waveforms(&mut self) -> Vec<(TrackId, Waveform)> {
@@ -680,6 +1000,7 @@ impl Host for Editor {
     }
 
     fn timeline_changed(&mut self, session: &Session) {
+        self.report_edit(session);
         self.project(session);
         // Analysis follows the timeline: a new audio track is queued, and a
         // gain or fade change invalidates what was measured before it
@@ -688,6 +1009,15 @@ impl Host for Editor {
     }
 
     fn playhead_moved(&mut self, session: &Session) {
+        let head = session.timeline().playhead();
+        let track = session
+            .timeline()
+            .track(head.track)
+            .map_or_else(String::new, |t| t.name.clone());
+        self.fire(&davimci_lua::Event::PlayheadMoved {
+            frame: head.frame.get(),
+            track,
+        });
         self.show_playhead(session);
     }
 

@@ -5,3 +5,4 @@
 - refactor all for clean code
 - write docs, guide for the codebase and how to learn it
 - plugin support for gui windows
+- ask for `.davimci.lua` trust in the window rather than on the terminal, once the app has a modal path

@@ -492,6 +492,7 @@ dependencies = [
  "davimci-gui",
  "davimci-headless",
  "davimci-keys",
+ "davimci-lua",
  "davimci-mlt",
  "davimci-present",
  "davimci-tui",

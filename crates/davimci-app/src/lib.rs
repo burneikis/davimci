@@ -16,6 +16,7 @@ pub mod error;
 pub mod frontend;
 pub mod job;
 pub mod message;
+pub mod plugin;
 pub mod thumbnail;
 pub mod view;
 pub mod viewport;
@@ -31,6 +32,7 @@ pub use error::AppError;
 pub use frontend::{Event, Frontend, Response, Surface};
 pub use job::{Job, JobList, JobState, JobUpdate};
 pub use message::{Message, MessageQueue, Severity};
+pub use plugin::PluginEffects;
 pub use thumbnail::{Thumbnail, ThumbnailRequest, Thumbnails};
 pub use view::{
     ClipView, CommandLineView, PlayheadView, SelectionView, Tick, TrackView, ViewInputs, ViewState,
