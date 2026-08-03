@@ -18,7 +18,7 @@ fn the_normal_view_paints_a_stable_draw_list() {
     let list = paint_view(&view, &layout(800, 600), &Chrome::default());
     assert_eq!(
         summarise(&list),
-        "Background=2 Clip=5 ClipLabel=5 Playhead=1 Ruler=1 RulerNumber=2 Status=1 StatusLine=1 \
+        "Background=2 Clip=5 ClipLabel=5 Playhead=1 Ruler=1 RulerNumber=3 Status=1 StatusLine=1 \
 TickMajor=5 TickMinor=3 TrackHeader=3 TrackLane=2 TrackLaneFocused=1 TrackName=3"
     );
 }
@@ -284,26 +284,75 @@ fn clip_labels_are_painted_over_the_waveform() {
     );
 }
 
-/// A decoded thumbnail is drawn inside its clip, never wider than it
-/// (idea.md).
+/// Relative numbers belong to every jump point, not only to clip boundaries:
+/// the number is the count that lands there, and `3l` is as useful mid-clip
+/// as at a cut (spec 3.2).
 #[test]
-fn a_clip_thumbnail_is_drawn_inside_its_clip() {
+fn relative_numbers_are_painted_for_subdivision_ticks_too() {
+    let view = fixtures::normal();
+    let l = layout(800, 600);
+    let list = paint_view(&view, &l, &Chrome::default());
+    let numbered: Vec<i32> = list
+        .ops()
+        .iter()
+        .filter_map(|op| match op {
+            Paint::Text {
+                rect,
+                role: TextRole::RulerNumber,
+                ..
+            } => Some(rect.x - l.ruler.x),
+            _ => None,
+        })
+        .collect();
+    let minor: Vec<i32> = view
+        .ticks
+        .iter()
+        .filter(|t| !t.major)
+        .map(|t| t.column as i32)
+        .collect();
+    assert!(
+        numbered
+            .iter()
+            .any(|x| minor.iter().any(|c| (*x - c).abs() <= 2)),
+        "only clip boundaries were numbered: numbers at {numbered:?}, subdivisions at {minor:?}"
+    );
+}
+
+/// A decoded thumbnail is repeated across the whole clip, like a filmstrip,
+/// and never spills past the clip's own edge (spec 15.2).
+#[test]
+fn a_clip_thumbnail_tiles_across_the_clip_and_stays_inside_it() {
     let mut view = fixtures::normal();
-    let thumb = davimci_app::Thumbnail::new(4, 2, vec![255u8; 32], davimci_core::Frame(0));
-    let clip = view.tracks[0].clips[0].clone();
-    view.tracks[0].clips[0].thumbnail = Some(thumb);
+    // A tall, narrow picture, so a tile is a few pixels wide at a normal
+    // lane height and the clip holds several of them.
+    let thumb = davimci_app::Thumbnail::new(2, 8, vec![255u8; 2 * 8 * 4], davimci_core::Frame(0));
+    let clip = view.tracks[0].clips[1].clone();
+    view.tracks[0].clips[1].thumbnail = Some(thumb);
     let l = layout(800, 600);
     let list = paint_view(&view, &l, &Chrome::default());
     let images = list.images();
-    assert_eq!(images.len(), 1, "one clip has a picture");
-    let (rect, id, _) = images[0];
-    assert_eq!(id, clip.id);
-    let (first, last) = clip.columns;
-    assert!(rect.x >= l.tracks.x + first as i32);
     assert!(
-        rect.x + rect.width as i32 <= l.tracks.x + last as i32 + 1,
-        "the thumbnail spilled onto the next clip: {rect:?}"
+        images.len() > 1,
+        "one stamp is not a filmstrip: {} tiles",
+        images.len()
     );
+    assert!(
+        images.iter().all(|(_, id, _)| *id == clip.id),
+        "a tile belongs to a clip that is not the one it pictures"
+    );
+    let (first, last) = clip.columns;
+    let left = l.tracks.x + first as i32;
+    let right = l.tracks.x + last as i32 + 1;
+    for (rect, _, _) in &images {
+        assert!(rect.x >= left, "a tile started left of its clip: {rect:?}");
+        assert!(
+            rect.x + rect.width as i32 <= right,
+            "a tile spilled onto the next clip: {rect:?}"
+        );
+    }
+    // The strip covers the clip: the last tile ends at its edge.
+    let covered: i32 = images.iter().map(|(r, _, _)| r.width as i32).sum();
+    assert_eq!(covered, right - left, "the strip left a gap");
 }
 
 /// A lane with no analysis draws nothing rather than a flat line, so

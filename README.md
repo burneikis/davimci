@@ -124,8 +124,8 @@ it is linked dynamically, since davimci is GPL-3.0 over LGPL-2.1 MLT.
 | GUI layout and painting: panes, lanes, clips, ticks, playhead, selection | implemented, tested |
 | GUI input translation: window keys to `davimci-keys` tokens | implemented, tested |
 | `:` line: drawn as typed, caret, history, completion suggestions | implemented, tested |
-| Relative jump-point numbers on the ruler | implemented, tested |
-| Clip thumbnails, decoded by the host while the transport is idle | implemented, tested |
+| Relative jump-point numbers on every ruler tick | implemented, tested |
+| Clip thumbnails as a filmstrip, decoded by the host while idle | implemented, tested |
 | Batched input: a held key costs one seek, not one per repeat | implemented, tested |
 | Media picker and INSERT-mode subtitle editing (state, not widgets) | implemented, tested |
 | Editor assembly: workspace + backend + presenter + transport behind one `Host` | implemented, tested |
@@ -211,8 +211,14 @@ the host is asked for one picture); the `:` line is visible while it is typed,
 with a caret and with the matching commands listed above it; clip labels are
 drawn over the waveform rather than under it; the ruler numbers its major
 jump points relative to the playhead, so `3l` lands on the tick marked 3; and
-video clips carry thumbnails, decoded one per tick while the transport is
-stopped and invalidated when a clip is trimmed or slipped.
+video clips carry a thumbnail filmstrip, decoded one picture per tick while
+the transport is stopped and invalidated when a clip is trimmed or slipped.
+
+Also fixed from the window: playback could not be restarted once it had run to
+the end of the timeline - reaching the end leaves MLT's producer at speed
+zero, and seeking back does not undo it, so every later play said "playing"
+and never moved. Starting a preview resets the speed, and pressing play *at*
+the end now says why nothing can play instead of claiming to.
 
 Earlier audit fixes, each with a regression test: counts clamp instead of
 overflowing on a long digit run (spec §3.1); a backward predicate motion can

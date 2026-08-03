@@ -58,12 +58,13 @@ Mode is shown in a status line near the playhead (e.g. `-- VISUAL (V1,A2) --`).
   Zoomed in → jump points are dense (near frame-level).
 - Jump points are rendered as small tick marks on the timeline ruler so the
   user can see where `h`/`l` will land before pressing it.
-- Ticks at clip boundaries carry a **relative number**: the count of jump
-  points between them and the playhead, so `3l` visibly lands on the tick
-  labelled `3`, exactly as vim's `relativenumber` shows how far `3j` goes.
-  The point at or before the playhead is `0`, and direction is read from the
-  side of the playhead a tick is on rather than from a sign. Numbers are
-  dropped where two would overlap, so a zoomed-out ruler stays legible.
+- Every tick carries a **relative number**, subdivisions included: the count
+  of jump points between it and the playhead, so `3l` visibly lands on the
+  tick labelled `3`, exactly as vim's `relativenumber` shows how far `3j`
+  goes. The point at or before the playhead is `0`, and direction is read
+  from the side of the playhead a tick is on rather than from a sign. Where
+  two numbers would overlap the later one is dropped, so a dense ruler thins
+  out instead of smearing.
 - Configurable: `jump_point_density`, and whether jump points snap to
   (clip bounds | markers | beat-detected audio peaks | silence boundaries).
 - Density is **monotonic in zoom**: zooming in only ever adds points, never
@@ -123,6 +124,13 @@ require("davimci.transport").configure({
 
 All transport keys are remappable like any other binding. A user who wants
 `<Space>` bare as play/pause simply loses it as leader and remaps.
+
+Playing from the end of the timeline is refused with a reason rather than
+reported as playback: the playhead may legally sit there (§15.2), there is
+nothing after it, and a status line that says "playing" while nothing moves
+is a lie. Playback that has run to the end must be startable again from
+anywhere in bounds - reaching the end is a stop, never a state the editor has
+to be restarted to leave.
 
 #### Interrupting playback
 
@@ -860,13 +868,15 @@ order.
   its lane - envelope, thumbnail or plain colour - never under it.
 
 - **Thumbnails:** a video clip shows a picture of its first visible frame,
-  at the head of the clip and clipped to it. Thumbnails are decoded by the
-  host, not the frontend: the app asks for the visible clips that have none,
-  nearest the playhead first, and the host decodes what it can afford -
-  never while the transport is running, since the preview needs the decoder
-  more. A thumbnail belongs to a clip's in-point, so trimming or slipping a
-  clip drops the picture until a new one arrives, and a clip with no picture
-  is drawn plain rather than black.
+  repeated across the clip's whole width at the picture's own aspect ratio -
+  a filmstrip, not a stamp. The strip never crosses the clip's edge: the last
+  tile is cropped there rather than squashed into what is left. Thumbnails
+  are decoded by the host, not the frontend: the app asks for the visible
+  clips that have none, nearest the playhead first, and the host decodes what
+  it can afford - never while the transport is running, since the preview
+  needs the decoder more. A thumbnail belongs to a clip's in-point, so
+  trimming or slipping a clip drops the picture until a new one arrives, and
+  a clip with no picture is drawn plain rather than black.
 
 ### 15.3 Command line
 

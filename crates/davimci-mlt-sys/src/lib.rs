@@ -182,6 +182,7 @@ unsafe extern "C" {
     pub fn mlt_producer_get_length(self_: mlt_producer) -> mlt_position;
     pub fn mlt_producer_get_playtime(self_: mlt_producer) -> mlt_position;
     pub fn mlt_producer_set_speed(self_: mlt_producer, speed: c_double) -> c_int;
+    pub fn mlt_producer_get_speed(self_: mlt_producer) -> c_double;
     pub fn mlt_producer_close(self_: mlt_producer);
 
     // -- playlist --------------------------------------------------------

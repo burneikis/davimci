@@ -248,6 +248,15 @@ impl Producer {
         unsafe { sys::mlt_producer_set_speed(self.raw, speed) };
     }
 
+    /// Playback speed as MLT currently has it. Reaching the end of a
+    /// producer sets this to zero, which is why it has to be readable:
+    /// a paused producer looks identical to a playing one otherwise.
+    #[must_use]
+    pub fn speed(&self) -> f64 {
+        // SAFETY: valid producer.
+        unsafe { sys::mlt_producer_get_speed(self.raw) }
+    }
+
     pub fn attach(&mut self, filter: &Filter) -> Result<(), MltError> {
         // SAFETY: both handles are live and owned by the caller.
         let rc = unsafe { sys::mlt_service_attach(self.service(), filter.raw) };

@@ -829,7 +829,7 @@ so the picture kept its startup size in the corner of the pane.
 `Editor::refresh_preview` now recomposes on a size change, with a regression
 test (`resizing_the_video_pane_recomposes_the_frame_at_the_new_size`).
 
-Four more defects, all found the same way - by using the window:
+Six more defects, all found the same way - by using the window:
 
 - **Holding `h`/`l` lagged and then froze.** Every key repeat seeked and
   decoded, so input outran the decoder. Input is now drained one batch per
@@ -843,12 +843,24 @@ Four more defects, all found the same way - by using the window:
 - **Clip labels were painted under the waveform**, so an analysed lane had
   unreadable clip names. Labels are drawn last (spec §15.2).
 - **The ruler said where `h`/`l` would land but not how far**, so a count had
-  to be guessed. Major ticks carry relative jump-point numbers (spec §3.2).
+  to be guessed. Every tick carries a relative jump-point number, clip
+  boundaries and subdivisions alike, thinned only where two would overlap
+  (spec §3.2). Labelling only the boundaries was the first attempt, and it
+  was useless: the counts that need reading are the ones between cuts.
+- **Playback could not be restarted after it ran to the end.** Reaching the
+  end leaves MLT's producer at speed zero, and `mlt_producer_seek` does not
+  undo that - so every later play reported "playing" and never advanced.
+  `preview_start` resets the speed, with a regression test that fakes the
+  post-EOF state (`a_preview_started_after_playback_ran_off_the_end_plays_again`).
+  Starting playback *from* the end is now refused with a sentence rather than
+  reported as playback (spec §3.2.1).
 
-Also added here: clip thumbnails (spec §15.2). The picture is decoded by the
-host - `Editor` pulls one per tick, only while the transport is stopped, and
-puts the playhead back afterwards - and the shell caches one GPU texture per
-clip, keyed by in-point, so a redraw is not an upload.
+Also added here: clip thumbnails (spec §15.2), drawn as a filmstrip repeated
+across the clip rather than one picture at its head. The picture is decoded by
+the host - `Editor` pulls one per tick, only while the transport is stopped,
+and puts the playhead back afterwards - and the shell caches one GPU texture
+per clip, keyed by in-point, so a redraw is not an upload. A tile cut off at
+the clip's edge is cropped, never squashed.
 
 ### Phase 8b - export
 

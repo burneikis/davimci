@@ -19,10 +19,13 @@ pub struct Metrics {
     pub track_header_width: u32,
     /// Fraction of the window height the video pane wants, in percent.
     pub video_percent: u32,
-    /// Advance of one monospace character, used to place the `:` caret and
-    /// the ruler's relative numbers. Text is measured by the shell's font,
-    /// but a caret has to be a rectangle somewhere.
+    /// Advance of one monospace character on the `:` line, used to place the
+    /// caret. Text is measured by the shell's font, but a caret has to be a
+    /// rectangle somewhere.
     pub char_width: u32,
+    /// Advance of one digit in the ruler's smaller number font, used to
+    /// decide which relative numbers fit without overlapping.
+    pub number_char_width: u32,
 }
 
 impl Default for Metrics {
@@ -35,6 +38,7 @@ impl Default for Metrics {
             track_header_width: 80,
             video_percent: 50,
             char_width: 8,
+            number_char_width: 6,
         }
     }
 }
@@ -296,25 +300,34 @@ pub fn paint(view: &ViewState, layout: &Layout, chrome: &Chrome) -> DrawList {
                 Fill::Clip
             };
             d.rect(rect, fill);
-            // The thumbnail sits inside the clip, at the head, and is
-            // clipped to it: a picture wider than its clip would spill onto
-            // the neighbour it is not a picture of.
+            // A filmstrip: the picture is repeated across the whole clip,
+            // at its own aspect ratio, so a long clip reads as film rather
+            // than as one stamp on a coloured bar. The last tile is
+            // truncated at the clip's edge rather than spilling onto the
+            // neighbour it is not a picture of.
             if let Some(thumb) = &clip.thumbnail
                 && rect.width > 4
                 && rect.height > 4
             {
                 let height = rect.height;
-                let width = (thumb.width * height / thumb.height.max(1)).min(rect.width);
-                d.image(
-                    Rect {
-                        x: rect.x,
-                        y: rect.y,
-                        width: width.max(1),
-                        height,
-                    },
-                    clip.id,
-                    thumb.clone(),
-                );
+                let tile = (thumb.width * height / thumb.height.max(1)).max(1);
+                let mut x = rect.x;
+                let end = rect.x.saturating_add(rect.width as i32);
+                while x < end {
+                    let width = tile.min((end - x) as u32);
+                    d.image(
+                        Rect {
+                            x,
+                            y: rect.y,
+                            width,
+                            height,
+                        },
+                        clip.id,
+                        thumb.clone(),
+                        tile,
+                    );
+                    x = x.saturating_add(tile as i32);
+                }
             }
         }
 
@@ -421,14 +434,16 @@ pub fn paint(view: &ViewState, layout: &Layout, chrome: &Chrome) -> DrawList {
 }
 
 /// Relative jump-point numbers on the ruler: `0` under the playhead, and the
-/// count each `l` or `h` away from it (spec §11), the way vim numbers lines.
+/// count each `l` or `h` away from it (spec §3.2), the way vim numbers lines.
 ///
-/// Only ticks with room for their number are labelled, and only major ones,
-/// so a zoomed-out ruler stays a ruler rather than a wall of digits.
+/// Every jump point is numbered, subdivisions included - the number is the
+/// count that lands there, and a count is exactly as useful mid-clip as at a
+/// boundary. Numbers are dropped only where two would overlap, so a dense
+/// ruler thins out rather than turning into a smear of digits.
 fn paint_relative_numbers(d: &mut DrawList, layout: &Layout, view: &ViewState) {
-    let cw = layout.metrics.char_width.max(1);
+    let cw = layout.metrics.number_char_width.max(1);
     let mut last_end: i64 = i64::MIN;
-    for tick in view.ticks.iter().filter(|t| t.major) {
+    for tick in &view.ticks {
         let text = tick.relative.unsigned_abs().to_string();
         let width = text.len() as u32 * cw;
         let x = i64::from(layout.ruler.x) + i64::from(tick.column) + 2;

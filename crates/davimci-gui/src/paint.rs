@@ -122,6 +122,10 @@ pub enum Paint {
         rect: Rect,
         clip: davimci_core::ClipId,
         image: Thumbnail,
+        /// Width of a whole tile. The last tile of a filmstrip is cut off at
+        /// the clip's edge, and it must be *cropped* rather than squashed -
+        /// so the shell shows `rect.width / tile` of the picture.
+        tile: u32,
     },
 }
 
@@ -144,8 +148,13 @@ impl DrawList {
         });
     }
 
-    pub fn image(&mut self, rect: Rect, clip: davimci_core::ClipId, image: Thumbnail) {
-        self.ops.push(Paint::Image { rect, clip, image });
+    pub fn image(&mut self, rect: Rect, clip: davimci_core::ClipId, image: Thumbnail, tile: u32) {
+        self.ops.push(Paint::Image {
+            rect,
+            clip,
+            image,
+            tile,
+        });
     }
 
     /// Every thumbnail in the list, in draw order - what a shell uploads.
@@ -154,7 +163,9 @@ impl DrawList {
         self.ops
             .iter()
             .filter_map(|op| match op {
-                Paint::Image { rect, clip, image } => Some((*rect, *clip, image)),
+                Paint::Image {
+                    rect, clip, image, ..
+                } => Some((*rect, *clip, image)),
                 _ => None,
             })
             .collect()

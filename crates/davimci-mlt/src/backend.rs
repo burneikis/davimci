@@ -100,6 +100,16 @@ pub struct MltBackend {
 }
 
 impl MltBackend {
+    /// The graph's current playback speed, or `None` with no graph.
+    ///
+    /// Exposed because "playing" and "stopped at the end" look identical
+    /// from outside MLT: reaching the end leaves the producer at speed zero,
+    /// and the regression test for restarting playback needs to see that.
+    #[must_use]
+    pub fn playback_speed(&self) -> Option<f64> {
+        self.graph.as_ref().map(|g| g.root.speed())
+    }
+
     /// Create a backend for a timeline's profile.
     pub fn new(props: TimelineProps) -> Result<Self> {
         let profile = Profile::new(
@@ -646,6 +656,11 @@ impl RenderBackend for MltBackend {
         let res = scale.apply(self.props.resolution);
         self.seek(from)?;
         let graph = self.require_graph()?;
+        // Reaching the end of a producer leaves MLT with its speed at zero,
+        // and a seek does not undo that. Without this, the *second* play
+        // after playback once ran off the end reports "playing" and never
+        // advances a frame.
+        graph.root.set_speed(1.0);
         let root = graph.root.clone_ref();
 
         // Audio-only consumers, in preference order: MLT must never own a

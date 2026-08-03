@@ -196,6 +196,17 @@ impl Transport {
         scale: PreviewScale,
     ) -> Result<(), String> {
         let from = session.timeline().playhead().frame;
+        // The playhead may legally sit at or past the end (spec §15.2), and
+        // starting there gives a consumer that ends on its first frame -
+        // which reads as "playing" and never moves. Say so instead.
+        let duration = session.timeline().duration();
+        if from >= duration {
+            return Err(if duration == Frame::ZERO {
+                "there is nothing on this timeline to play.".into()
+            } else {
+                "the playhead is at the end of the timeline; nothing to play.".into()
+            });
+        }
         backend
             .preview_start(from, scale)
             .map_err(|e| e.to_string())?;
@@ -531,6 +542,31 @@ mod tests {
             .unwrap();
         assert!(t.interrupt(&mut b).unwrap());
         assert_eq!(t.stop(&mut b, &s).unwrap(), None);
+    }
+
+    /// Regression: the playhead may sit at the end of the timeline, and
+    /// starting there gave a consumer that ended immediately - the status
+    /// line said "playing" while nothing moved. Now it says why.
+    #[test]
+    fn playing_from_the_end_of_the_timeline_is_refused_with_a_reason() {
+        let (mut b, _) = parts();
+        let mut s = session();
+        let track = s.timeline().playhead().track;
+        let end = s.timeline().duration();
+        s.set_playhead(end, track).unwrap();
+        let err = t_new()
+            .play_pause(&mut b, &s, PreviewScale::Full)
+            .unwrap_err();
+        assert!(err.contains("end of the timeline"), "{err}");
+        assert!(!b.is_previewing(), "nothing should have started");
+
+        // One frame back in bounds, and it plays.
+        s.set_playhead(Frame(end.get() - 1), track).unwrap();
+        assert!(t_new().play_pause(&mut b, &s, PreviewScale::Full).is_ok());
+    }
+
+    fn t_new() -> Transport {
+        Transport::new()
     }
 
     #[test]

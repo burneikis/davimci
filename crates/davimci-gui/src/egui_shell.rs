@@ -155,13 +155,21 @@ fn draw_ops(list: &DrawList, ui: &Ui, origin: Pos2, modal: bool, thumbs: &mut Th
                     fill_color(*fill),
                 );
             }
-            Paint::Image { rect, clip, image } => {
+            Paint::Image {
+                rect,
+                clip,
+                image,
+                tile,
+            } => {
                 let tex = thumbs.texture(ui.ctx(), *clip, image);
                 let r = to_egui(*rect).translate(origin.to_vec2());
+                // A tile cut off at the clip's edge shows less of the
+                // picture; it is never squashed into the space that is left.
+                let u = (rect.width as f32 / (*tile).max(1) as f32).clamp(0.0, 1.0);
                 painter.with_clip_rect(r).image(
                     tex.id(),
                     r,
-                    EguiRect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                    EguiRect::from_min_max(Pos2::ZERO, Pos2::new(u, 1.0)),
                     Color32::WHITE,
                 );
             }

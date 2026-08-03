@@ -175,3 +175,24 @@ fn probing_missing_media_reports_it_offline() {
         .unwrap_err();
     assert!(matches!(err, davimci_backend::BackendError::Offline { .. }));
 }
+
+/// Regression: playing to the end of the timeline leaves MLT's producer at
+/// speed zero, and seeking back does not undo that - so the next play said
+/// "playing" and never advanced a frame. Starting a preview resets the speed.
+#[test]
+fn a_preview_started_after_playback_ran_off_the_end_plays_again() {
+    let mut b = backend();
+    let tl = fixture(&[("V1", &[(0, 30, "a")])]);
+    b.set_timeline(&tl).unwrap();
+    // What reaching the end leaves behind.
+    b.set_rate(0.0).unwrap();
+    assert_eq!(b.playback_speed(), Some(0.0));
+
+    b.preview_start(Frame(0), PreviewScale::Quarter).unwrap();
+    assert_eq!(
+        b.playback_speed(),
+        Some(1.0),
+        "a restarted preview is still paused at the producer"
+    );
+    b.preview_stop().unwrap();
+}
