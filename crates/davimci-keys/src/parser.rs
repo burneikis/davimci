@@ -59,6 +59,10 @@ enum St {
         count2: Option<u32>,
         buf: Vec<Key>,
     },
+    /// `i`/`a` typed in a VISUAL mode, waiting for the object's name.
+    VisualObject {
+        around: bool,
+    },
     OperatorObject {
         op: Operator,
         count1: Option<u32>,
@@ -162,7 +166,19 @@ impl Parser {
                 register,
                 count2,
                 wide,
-            } => self.operator_object(key, op, count1, register, count2, wide),
+            } => self.operator_object(key, keymap, op, count1, register, count2, wide),
+            St::VisualObject { around } => self.visual_object(key, around),
+        }
+    }
+
+    /// The object typed after `i`/`a` while a selection is live (spec 6).
+    /// Only the track objects mean anything here: they narrow the scope of
+    /// what is already selected rather than resolving a new range.
+    fn visual_object(&mut self, key: Key, around: bool) -> Step {
+        self.reset();
+        match key {
+            Key::Char('t') => Step::Complete(Action::NarrowSelection { group: around }),
+            _ => Step::Invalid,
         }
     }
 
@@ -176,6 +192,18 @@ impl Parser {
         pre: Option<(Option<u32>, char)>,
     ) -> Step {
         let (count1, register) = pre.map_or((None, None), |(c, r)| (c, Some(r)));
+        // In a VISUAL mode `i`/`a` start a text object, not a media insert:
+        // typing `it` narrows the live selection to a track (spec 6).
+        if mode.is_visual()
+            && let Some(around) = match key {
+                Key::Char('i') => Some(false),
+                Key::Char('a') => Some(true),
+                _ => None,
+            }
+        {
+            self.state = St::VisualObject { around };
+            return Step::Pending;
+        }
         if register.is_none() {
             if let Some(d) = digit(key)
                 && (d != 0 || count1.is_some())
@@ -448,9 +476,11 @@ impl Parser {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn operator_object(
         &mut self,
         key: Key,
+        keymap: &Keymap,
         op: Operator,
         count1: Option<u32>,
         register: Option<char>,
@@ -458,6 +488,21 @@ impl Parser {
         wide: bool,
     ) -> Step {
         self.reset();
+        // A config-registered name (spec 9.4) is looked up first, so config
+        // wins over defaults here exactly as it does for keymaps.
+        if let Key::Char(c) = key
+            && keymap.has_object(c)
+        {
+            return Step::Complete(Action::Verb {
+                op,
+                count: merge_count(count1, count2),
+                register,
+                target: Target::Object(davimci_motion::TextObject::Named {
+                    name: c,
+                    around: wide,
+                }),
+            });
+        }
         let object = match (key, wide) {
             (Key::Char('c'), false) => davimci_motion::TextObject::InnerClip,
             (Key::Char('c'), true) => davimci_motion::TextObject::AClip,

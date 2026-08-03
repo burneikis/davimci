@@ -52,6 +52,17 @@ impl fmt::Debug for ObjectDef {
     }
 }
 
+/// A `davimci.transition.register` definition (spec 9.10).
+///
+/// Backend-shaped on purpose: `service` and `props` are handed to the render
+/// backend verbatim, and this crate never learns what they mean.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransitionDef {
+    pub name: String,
+    pub service: String,
+    pub props: Vec<(String, String)>,
+}
+
 /// One registered event handler.
 pub struct Autocmd {
     pub id: HandlerId,
@@ -79,6 +90,7 @@ pub(crate) struct State {
     pub motions: BTreeMap<String, Function>,
     pub objects: BTreeMap<String, ObjectDef>,
     pub presets: BTreeMap<String, ExportPreset>,
+    pub transitions: BTreeMap<String, TransitionDef>,
     pub timeline: TimelineConfig,
     pub callbacks: BTreeMap<HandlerId, Function>,
     pub autocmds: Vec<Autocmd>,
@@ -93,6 +105,7 @@ impl fmt::Debug for State {
             .field("motions", &self.motions.keys().collect::<Vec<_>>())
             .field("objects", &self.objects.keys().collect::<Vec<_>>())
             .field("presets", &self.presets.keys().collect::<Vec<_>>())
+            .field("transitions", &self.transitions.keys().collect::<Vec<_>>())
             .field("timeline", &self.timeline)
             .field("autocmds", &self.autocmds)
             .field("requests", &self.requests)

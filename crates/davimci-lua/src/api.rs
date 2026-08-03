@@ -72,7 +72,7 @@ pub(crate) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
     let davimci = lua.create_table()?;
     davimci.set("version", env!("CARGO_PKG_VERSION"))?;
 
-    let modules: [(&str, Table); 7] = [
+    let modules: [(&str, Table); 8] = [
         ("keymap", keymap_module(lua, state)?),
         ("motions", motions_module(lua, state)?),
         ("textobject", textobject_module(lua, state)?),
@@ -80,6 +80,7 @@ pub(crate) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
         ("timeline", timeline_module(lua, state)?),
         ("media", media_module(lua, state)?),
         ("autocmd", autocmd_module(lua, state)?),
+        ("transition", transition_module(lua, state)?),
     ];
     let editor = editor_module(lua, state)?;
 
@@ -200,6 +201,45 @@ fn textobject_module(lua: &Lua, state: &Shared) -> mlua::Result<Table> {
                     name,
                     inner,
                     around,
+                },
+            );
+            Ok(())
+        })?,
+    )?;
+    Ok(t)
+}
+
+/// `davimci.transition.register(name, { service = ..., <prop> = ... })`
+/// (spec 9.10).
+fn transition_module(lua: &Lua, state: &Shared) -> mlua::Result<Table> {
+    let t = lua.create_table()?;
+    let st = Rc::clone(state);
+    t.set(
+        "register",
+        lua.create_function(move |_, (name, def): (String, Table)| {
+            let service: Option<String> = def.get("service")?;
+            let Some(service) = service.filter(|s| !s.trim().is_empty()) else {
+                return Err(err(LuaError::Config(format!(
+                    "transition '{name}' does not say which service renders it"
+                ))));
+            };
+            // Everything else is a backend property, passed through as
+            // written: this crate does not know what any of them mean.
+            let mut props = Vec::new();
+            for pair in def.clone().pairs::<String, mlua::Value>() {
+                let (key, value) = pair?;
+                if key == "service" {
+                    continue;
+                }
+                props.push((key, value.to_string()?));
+            }
+            props.sort();
+            st.borrow_mut().transitions.insert(
+                name.clone(),
+                crate::registry::TransitionDef {
+                    name,
+                    service,
+                    props,
                 },
             );
             Ok(())

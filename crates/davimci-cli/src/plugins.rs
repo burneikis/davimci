@@ -75,7 +75,13 @@ impl Plugins {
     /// config wins over a default without either knowing about the other.
     #[must_use]
     pub fn keymap(&self) -> Keymap {
-        Keymap::new().with_overrides(self.runtime.keymap_overrides())
+        let mut keymap = Keymap::new().with_overrides(self.runtime.keymap_overrides());
+        // A registered object has to be typeable, or `dic` for a config's
+        // `c` would be an unbound sequence (spec 9.4).
+        for name in self.runtime.object_names() {
+            keymap.register_object(&name);
+        }
+        keymap
     }
 
     #[must_use]
@@ -91,6 +97,31 @@ impl Plugins {
     #[must_use]
     pub fn object_names(&self) -> Vec<String> {
         self.runtime.object_names()
+    }
+
+    /// Every transition type the config registered, in backend terms
+    /// (spec 9.10).
+    #[must_use]
+    pub fn transitions(&self) -> Vec<davimci_backend::TransitionDef> {
+        self.runtime
+            .transitions()
+            .into_iter()
+            .map(|t| davimci_backend::TransitionDef {
+                name: t.name,
+                service: t.service,
+                props: t.props,
+            })
+            .collect()
+    }
+
+    /// Resolve a registered text object against one clip (spec 9.4).
+    pub fn run_object(
+        &self,
+        name: &str,
+        form: davimci_lua::ObjectForm,
+        clip: davimci_lua::ClipInfo,
+    ) -> Result<Option<(u64, u64)>, davimci_lua::LuaError> {
+        self.runtime.run_object(name, form, clip)
     }
 
     /// Every Lua-defined preset, translated for the export registry. A

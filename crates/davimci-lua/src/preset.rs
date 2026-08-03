@@ -154,6 +154,7 @@ impl ExportPreset {
             // own stream (spec 7); anywhere else they are mixed.
             separate_audio_tracks: matches!(self.container.as_str(), "mkv" | "matroska")
                 && self.audio_tracks != TrackSelection::None,
+            burn_subtitles: matches!(self.subtitle_tracks, SubtitleSelection::Burned),
             extra: Vec::new(),
         }
     }

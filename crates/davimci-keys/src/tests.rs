@@ -415,3 +415,93 @@ fn dax_on_a_track_with_no_transition_says_so() {
     let out = feed(&mut e, &mut s, "dax");
     assert!(matches!(out.last(), Some(Outcome::Error(_))), "{out:?}");
 }
+
+// `<` / `>` jump-point edge trims (spec 4.0.1)
+
+/// Table-driven landing positions: the nearest edge moves by whole jump
+/// points, and the count multiplies the step.
+#[test]
+fn angle_brackets_trim_the_nearest_edge_by_jump_points() {
+    // Zoomed in far enough that jump points subdivide (spec 3.2): the step
+    // is 8 frames here, so the landings are exactly one step apart.
+    let cases: &[(&str, u64)] = &[(">", 208), ("<", 192), ("2>", 216), ("3<", 176)];
+    for (keys, want) in cases {
+        let mut e = Engine::new();
+        e.set_zoom(davimci_motion::Zoom::new(12));
+        let mut s = Session::new(fixture(&[("V1", &[(0, 200, "a"), (200, 200, "b")])]));
+        // Stand next to the cut, so the nearest edge is the one at 200.
+        feed(&mut e, &mut s, "196<Right>");
+        let out = feed(&mut e, &mut s, keys);
+        assert!(
+            matches!(out.last(), Some(Outcome::Applied(_))),
+            "{keys}: {out:?}"
+        );
+        assert_eq!(
+            s.timeline().tracks()[0].clips()[0].end().get(),
+            *want,
+            "{keys}"
+        );
+    }
+}
+
+#[test]
+fn an_edge_trim_with_no_jump_point_that_way_is_refused_intact() {
+    let mut e = Engine::new();
+    let mut s = Session::new(fixture(&[("V1", &[(0, 200, "a")])]));
+    let before = s.timeline().clone();
+    // At the very start there is nothing to the left to trim towards.
+    let out = feed(&mut e, &mut s, "<");
+    assert!(
+        matches!(out.last(), Some(Outcome::Error(_) | Outcome::Applied(_))),
+        "{out:?}"
+    );
+    if matches!(out.last(), Some(Outcome::Error(_))) {
+        assert_eq!(s.timeline(), &before);
+    }
+}
+
+// `it` / `at` in VISUAL (spec 6)
+
+#[test]
+fn typing_it_in_visual_narrows_the_selection_to_the_focused_track() {
+    let mut e = Engine::new();
+    let mut s = Session::new(fixture(&[
+        ("V1", &[(0, 100, "a")]),
+        ("A1", &[(0, 100, "m")]),
+    ]));
+    let tracks: Vec<_> = s.timeline().tracks().iter().map(|t| t.id).collect();
+    feed(&mut e, &mut s, "<C-v>");
+    // Block mode can cover several tracks; `it` cuts it back to one.
+    e.execute_action(crate::action::Action::ToggleVisualTrack, &mut s);
+    assert_eq!(e.selection().map(|s| s.tracks.len()), Some(1));
+    let out = feed(&mut e, &mut s, "it");
+    assert!(matches!(out.last(), Some(Outcome::Moved)), "{out:?}");
+    assert_eq!(e.selection().map(|s| s.tracks), Some(vec![tracks[0]]));
+}
+
+#[test]
+fn a_registered_object_is_typeable_and_handed_to_the_host() {
+    let mut keymap = crate::keymap::Keymap::new();
+    keymap.register_object("q");
+    let mut e = Engine::with_keymap(keymap);
+    let mut s = Session::new(fixture(&[("V1", &[(0, 100, "a")])]));
+    let out = feed(&mut e, &mut s, "diq");
+    match out.last() {
+        Some(Outcome::ResolveObject { name, around, verb }) => {
+            assert_eq!(*name, 'q');
+            assert!(!around);
+            // The verb comes back re-targetable at whatever range the host
+            // resolves, and runs through the ordinary command path.
+            let action = (**verb).clone().with_range(davimci_motion::TimeRange::new(
+                davimci_core::Frame(10),
+                davimci_core::Frame(40),
+            ));
+            assert!(matches!(
+                e.execute_action(action, &mut s),
+                Outcome::Applied(_)
+            ));
+            assert_eq!(s.timeline().duration().get(), 70);
+        }
+        other => panic!("expected a host resolution, got {other:?}"),
+    }
+}

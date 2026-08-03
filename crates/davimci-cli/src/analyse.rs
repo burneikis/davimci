@@ -326,6 +326,31 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// `:analyze` (spec 12): every envelope is dropped and re-queued, so a
+    /// predicate motion answers `Pending` again until the work lands.
+    #[test]
+    fn analyze_drops_every_envelope_and_requeues_the_work() {
+        let dir = tmpdir("reanalyse");
+        let mut a = Analyser::new(&dir);
+        let tl = multi_audio_fixture(1, Some(2));
+        a.sync(&tl);
+        let track = tl
+            .tracks()
+            .iter()
+            .find(|t| t.kind == TrackKind::Audio)
+            .unwrap()
+            .id;
+        let _ = a.take_stale();
+        assert_eq!(a.reanalyse(), 1, ":analyze re-queued the audio track");
+        assert!(
+            a.analysis(track).is_none(),
+            "the old envelope survived :analyze"
+        );
+        assert_eq!(a.take_stale(), vec![track], "the view was not invalidated");
+        a.cancel_all();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn an_unchanged_timeline_is_not_analysed_twice() {
         let dir = tmpdir("once");

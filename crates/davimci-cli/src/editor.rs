@@ -85,6 +85,9 @@ pub struct Editor {
     /// reported as `ClipInserted`/`ClipDeleted` (spec 9.8) without every
     /// command having to describe itself twice.
     known_clips: std::collections::BTreeSet<(TrackId, ClipId)>,
+    /// `:set preview off` (spec 15.5): no frame is pulled or composed, which
+    /// is what makes a no-display session possible.
+    preview: bool,
     quit: bool,
 }
 
@@ -127,6 +130,7 @@ impl Editor {
             plugin_messages: Vec::new(),
             last_export: None,
             known_clips: std::collections::BTreeSet::new(),
+            preview: true,
             quit: false,
         }
     }
@@ -141,6 +145,17 @@ impl Editor {
         let (presets, problems) = plugins.presets();
         for preset in presets {
             self.exporter.presets_mut().define(preset);
+        }
+        // Transition types go to the backend, which is the only layer that
+        // knows what a service is (spec 9.10). A backend without a registry
+        // says so once, and those types keep degrading to a dissolve.
+        for def in plugins.transitions() {
+            let name = def.name.clone();
+            if let Err(e) = self.backend.register_transition(def) {
+                self.notices.push(Message::warning(format!(
+                    "the transition type '{name}' is not available: {e}"
+                )));
+            }
         }
         self.notices.extend(problems);
         self.notices.extend(plugins.take_notices());
@@ -233,10 +248,38 @@ impl Editor {
                     session.timeline(),
                 ))
             }
+            // `:set preview off` is a view setting, so it never enters the
+            // undo log; it belongs here because the preview is the editor's.
+            ExCommand::Set(crate::setting::Setting::Preview(on)) => {
+                Some(Ok(self.set_preview(*on, session)))
+            }
             ExCommand::Presets => Some(Ok(self.exporter.list_presets().join("  |  "))),
             ExCommand::CancelRender => Some(self.exporter.cancel(self.backend.as_mut())),
             _ => None,
         }
+    }
+
+    /// `:set preview on|off` (spec 12.1, 15.5).
+    ///
+    /// Turning the preview off stops the transport and drops the last
+    /// composed frame, so a no-display session neither decodes nor paints;
+    /// turning it back on shows the frame under the playhead again.
+    fn set_preview(&mut self, on: bool, session: &Session) -> String {
+        self.preview = on;
+        if on {
+            self.show_playhead(session);
+            "preview on".into()
+        } else {
+            self.interrupt_transport(session);
+            self.last = None;
+            "preview off".into()
+        }
+    }
+
+    /// Whether the preview is showing frames at all (`:set preview`).
+    #[must_use]
+    pub fn preview_enabled(&self) -> bool {
+        self.preview
     }
 
     /// `:normalize` and `:duck` (spec 6.1).
@@ -256,6 +299,16 @@ impl Editor {
                 Some(self.normalize(*target_db, session, selection))
             }
             ExCommand::Duck { track, db } => Some(self.duck(track, *db, session, selection)),
+            // Every envelope is dropped and re-measured, reported like any
+            // other background job (spec 12).
+            ExCommand::Analyze => {
+                let n = self.analyser.reanalyse();
+                Some(Ok(if n == 0 {
+                    "there is no audio in this timeline to analyse".to_string()
+                } else {
+                    format!("re-analysing {n} track(s)")
+                }))
+            }
             _ => None,
         }
     }
@@ -458,6 +511,12 @@ impl Editor {
         });
     }
 
+    /// The range `<Space>l` is looping, if any.
+    #[must_use]
+    pub fn loop_range(&self) -> Option<(Frame, Frame)> {
+        self.transport.loop_range()
+    }
+
     #[must_use]
     pub fn transport_state(&self) -> TransportState {
         self.transport.state()
@@ -560,6 +619,9 @@ impl Editor {
     /// Pull and compose the frame at the playhead. Only meaningful when the
     /// transport is idle: during playback the pacer owns the picture.
     fn show_playhead(&mut self, session: &Session) {
+        if !self.preview {
+            return;
+        }
         if self.transport.state() != TransportState::Stopped {
             return;
         }
@@ -893,7 +955,55 @@ impl Host for Editor {
         }
     }
 
-    fn transport(&mut self, cmd: TransportCmd) {
+    fn resolve_object(
+        &mut self,
+        name: char,
+        around: bool,
+        session: &Session,
+    ) -> Result<Option<davimci_motion::TimeRange>, AppError> {
+        let tl = session.timeline();
+        let head = tl.playhead();
+        let clip = tl
+            .track(head.track)
+            .and_then(|t| t.clip_at(head.frame))
+            .ok_or_else(|| {
+                AppError::UnhandledCommand(
+                    "there is no clip under the playhead for that text object".into(),
+                )
+            })?;
+        let with_transitions = tl
+            .track(head.track)
+            .and_then(|t| t.transition_range(clip.id))
+            .unwrap_or((clip.start, clip.end()));
+        let info = davimci_lua::ClipInfo {
+            start: clip.start.get(),
+            end: clip.end().get(),
+            with_transitions_start: with_transitions.0.get(),
+            with_transitions_end: with_transitions.1.get(),
+        };
+        let form = if around {
+            davimci_lua::ObjectForm::Around
+        } else {
+            davimci_lua::ObjectForm::Inner
+        };
+        self.plugins
+            .run_object(&name.to_string(), form, info)
+            .map(|range| range.map(|(s, e)| davimci_motion::TimeRange::new(Frame(s), Frame(e))))
+            .map_err(|e| AppError::UnhandledCommand(e.to_string()))
+    }
+
+    fn selection_changed(&mut self, selection: Option<&Selection>) {
+        // A loop follows the selection it was set on; losing the selection
+        // ends it rather than leaving playback wrapping over nothing.
+        let gone =
+            selection.is_none_or(|s| s.clips(self.workspace.current().timeline()).is_empty());
+        if gone && self.transport.clear_loop() {
+            self.notices
+                .push(Message::info("loop ended: the selection is gone"));
+        }
+    }
+
+    fn transport(&mut self, cmd: TransportCmd, selection: Option<&Selection>) {
         // Transport needs the session only to read the playhead and the
         // duration, and the app owns it - so the workspace's copy, which is
         // synced on every command, is close enough for the read-only use and
@@ -925,10 +1035,15 @@ impl Host for Editor {
                 self.interrupt_transport(&session);
                 return;
             }
-            // The selection now reaches the host, but the transport has no
-            // loop: playback runs to the end and stops. Reported rather than
-            // silently ignored.
-            TransportCmd::LoopSelection => Err("looping a selection is not wired up yet".into()),
+            TransportCmd::LoopSelection => match loop_range(&session, selection) {
+                Some(range) => self.transport.loop_range_start(
+                    self.backend.as_mut(),
+                    &session,
+                    self.scale,
+                    range,
+                ),
+                None => Err("there is nothing here to loop.".into()),
+            },
         };
         match result {
             Ok(msg) => self.notices.push(Message::info(msg)),
@@ -975,7 +1090,7 @@ impl Host for Editor {
             }
         }
         // One tick, one frame: the transport already composed it.
-        if let Some(p) = result.presentation {
+        if let Some(p) = result.presentation.filter(|_| self.preview) {
             self.last = Some(p);
         }
         if result.stopped {
@@ -1018,12 +1133,32 @@ impl Host for Editor {
             frame: head.frame.get(),
             track,
         });
+        // A loop survives a seek inside its range and ends on one outside it.
+        if self.transport.playhead_moved(head.frame) {
+            self.notices
+                .push(Message::info("loop ended: the playhead left the loop"));
+        }
         self.show_playhead(session);
     }
 
     fn wants_quit(&self) -> bool {
         self.quit
     }
+}
+
+/// What `<Space>l` loops: the selection's span, or the clip under the
+/// playhead in `NORMAL` (spec 3.2.1).
+fn loop_range(session: &Session, selection: Option<&Selection>) -> Option<(Frame, Frame)> {
+    let tl = session.timeline();
+    if let Some(sel) = selection {
+        let clips = sel.clips(tl);
+        let start = clips.iter().map(|(_, c)| c.start).min()?;
+        let end = clips.iter().map(|(_, c)| c.end()).max()?;
+        return (end > start).then_some((start, end));
+    }
+    let head = tl.playhead();
+    let clip = tl.track(head.track)?.clip_at(head.frame)?;
+    Some((clip.start, clip.end()))
 }
 
 /// The frame a fresh editor should show: frame zero of the current timeline.

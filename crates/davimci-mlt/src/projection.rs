@@ -358,6 +358,15 @@ impl Projection {
         Some(layout)
     }
 
+    /// Drop every text track, for an export whose subtitles travel as a
+    /// sidecar or a muxed stream rather than being painted on (spec 8).
+    /// Returns whether anything was dropped.
+    pub fn drop_text_tracks(&mut self) -> bool {
+        let before = self.tracks.len();
+        self.tracks.retain(|t| t.kind != TrackKind::Text);
+        self.tracks.len() != before
+    }
+
     /// Whether two projections describe the same set of playlists in the same
     /// order. A false here means the graph must be rebuilt rather than patched.
     #[must_use]
@@ -395,16 +404,18 @@ fn project_transition(
     kind: TrackKind,
 ) -> TransitionEntry {
     let head = t.head();
-    let last = t.duration.get() - 1;
+    let last = t.duration.get().saturating_sub(1);
 
-    // The outgoing clip runs `tail` frames past its out-point.
+    // The outgoing clip runs `tail` frames past its out-point. Saturating,
+    // because a clip with no source handles - a generated one, or media that
+    // went offline - must project to something rather than trap.
     let mut from = project_clip(prev, kind);
-    from.in_point = Frame(prev.source_out().get() - head);
+    from.in_point = Frame(prev.source_out().get().saturating_sub(head));
     from.out_point = Frame(from.in_point.get() + last);
 
     // The incoming clip starts `head` frames before its in-point.
     let mut to = project_clip(clip, kind);
-    to.in_point = Frame(clip.source_in.get() - head);
+    to.in_point = Frame(clip.source_in.get().saturating_sub(head));
     to.out_point = Frame(to.in_point.get() + last);
 
     let spec = crate::transitions::spec(&t.kind, kind);

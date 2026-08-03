@@ -42,6 +42,10 @@ pub struct Transport {
     /// True while shuttling with real varispeed rather than by stepping the
     /// playhead. Decided by the backend, once, when the shuttle starts.
     varispeed: bool,
+    /// The half-open range `<Space>l` is looping (spec 3.2.1). Transport
+    /// state, never an edit: it outlives a pause and a seek inside itself,
+    /// and never reaches the undo log.
+    loop_range: Option<(Frame, Frame)>,
 }
 
 impl Default for Transport {
@@ -59,7 +63,77 @@ impl Transport {
             origin: Frame::ZERO,
             clock_locked: false,
             varispeed: false,
+            loop_range: None,
         }
+    }
+
+    /// The range being looped, if any.
+    #[must_use]
+    pub fn loop_range(&self) -> Option<(Frame, Frame)> {
+        self.loop_range
+    }
+
+    /// `<Space>l`: loop `range`, or stop looping if it is already the loop.
+    ///
+    /// Playback starts if it was not running, from inside the range: looping
+    /// a selection the playhead is nowhere near would otherwise play the
+    /// timeline up to it first.
+    pub fn loop_range_start(
+        &mut self,
+        backend: &mut dyn RenderBackend,
+        session: &Session,
+        scale: PreviewScale,
+        range: (Frame, Frame),
+    ) -> Result<String, String> {
+        if range.1 <= range.0 {
+            return Err("there is nothing selected to loop.".into());
+        }
+        if self.loop_range == Some(range) {
+            self.loop_range = None;
+            return Ok("loop off".into());
+        }
+        self.loop_range = Some(range);
+        let head = session.timeline().playhead().frame;
+        if !self.is_playing() || head < range.0 || head >= range.1 {
+            self.restart(backend, range.0, scale)?;
+        }
+        Ok(format!("looping {}-{}", range.0.get(), range.1.get()))
+    }
+
+    /// Drop the loop, reporting whether there was one. Called when what the
+    /// loop was following - a selection, a seek out of range - is gone.
+    pub fn clear_loop(&mut self) -> bool {
+        self.loop_range.take().is_some()
+    }
+
+    /// A seek: a loop survives one inside its range and ends on one outside
+    /// it. Returns whether the loop ended.
+    pub fn playhead_moved(&mut self, frame: Frame) -> bool {
+        match self.loop_range {
+            Some((start, end)) if frame < start || frame >= end => self.clear_loop(),
+            _ => false,
+        }
+    }
+
+    /// Restart the preview at `from`, keeping whatever loop is set. The
+    /// still cache lives in the backend, so a wrap costs no decode it has
+    /// already done.
+    fn restart(
+        &mut self,
+        backend: &mut dyn RenderBackend,
+        from: Frame,
+        scale: PreviewScale,
+    ) -> Result<(), String> {
+        if backend.is_previewing() {
+            backend.preview_stop().map_err(|e| e.to_string())?;
+        }
+        backend
+            .preview_start(from, scale)
+            .map_err(|e| e.to_string())?;
+        self.state = TransportState::Playing;
+        self.origin = from;
+        self.clock_locked = false;
+        Ok(())
     }
 
     #[must_use]
@@ -278,6 +352,30 @@ impl Transport {
                         Some(f) if f >= self.origin => self.clock_locked = true,
                         _ => at = None,
                     }
+                }
+                // A loop wraps rather than stopping: the pass ends at the
+                // loop's end, not the timeline's.
+                if let Some((start, end)) = self.loop_range
+                    && at.is_some_and(|f| f >= end)
+                {
+                    return match self.restart(backend, start, scale) {
+                        Ok(()) => TickResult {
+                            playhead: Some(start),
+                            stopped: false,
+                            presentation,
+                        },
+                        // A wrap that will not start is not a reason to keep
+                        // pretending to play.
+                        Err(_) => {
+                            self.clear_loop();
+                            let _ = self.stop(backend, session);
+                            TickResult {
+                                playhead: Some(start),
+                                stopped: true,
+                                presentation,
+                            }
+                        }
+                    };
                 }
                 // Running off the end stops playback rather than wedging at
                 // the last frame.

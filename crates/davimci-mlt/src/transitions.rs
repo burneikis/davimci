@@ -6,6 +6,9 @@
 //! types cross-fade with `mix`, and an unknown name falls back to the
 //! default rather than failing a render.
 
+use std::collections::BTreeMap;
+use std::sync::{OnceLock, RwLock};
+
 use davimci_core::TrackKind;
 
 /// How one transition type is realised by the backend.
@@ -55,6 +58,39 @@ const VIDEO: &[Builtin] = &[
     ("iris", "luma", &[("resource", "%luma05.pgm")]),
 ];
 
+/// Types registered at runtime (spec 9.10), on top of the built-ins.
+///
+/// Process-global because [`spec`] is a pure lookup called from the
+/// projection, which has no backend to ask; registering is the backend's job
+/// and happens once, at config load.
+fn registered() -> &'static RwLock<BTreeMap<String, TransitionSpec>> {
+    static REGISTRY: OnceLock<RwLock<BTreeMap<String, TransitionSpec>>> = OnceLock::new();
+    REGISTRY.get_or_init(|| RwLock::new(BTreeMap::new()))
+}
+
+/// Add a transition type. A name that is already registered is replaced, so
+/// reloading a config does not accumulate stale definitions.
+pub fn register(name: &str, service: &str, props: Vec<(String, String)>) {
+    if let Ok(mut map) = registered().write() {
+        map.insert(
+            name.to_string(),
+            TransitionSpec {
+                service: service.to_string(),
+                props,
+            },
+        );
+    }
+}
+
+/// Every registered type's name.
+#[must_use]
+pub fn registered_names() -> Vec<String> {
+    registered()
+        .read()
+        .map(|m| m.keys().cloned().collect())
+        .unwrap_or_default()
+}
+
 /// Every transition type a user may name.
 #[must_use]
 pub fn names() -> Vec<&'static str> {
@@ -65,6 +101,7 @@ pub fn names() -> Vec<&'static str> {
 #[must_use]
 pub fn is_known(name: &str) -> bool {
     VIDEO.iter().any(|(n, _, _)| *n == name)
+        || registered().read().is_ok_and(|m| m.contains_key(name))
 }
 
 /// The service and properties for `kind` on a track of `track_kind`.
@@ -78,7 +115,12 @@ pub fn spec(kind: &str, track_kind: TrackKind) -> TransitionSpec {
     if track_kind == TrackKind::Audio {
         return TransitionSpec::new("mix", &[("start", "0"), ("end", "1")]);
     }
+    if let Some(found) = registered().read().ok().and_then(|m| m.get(kind).cloned()) {
+        return found;
+    }
     VIDEO.iter().find(|(n, _, _)| *n == kind).map_or_else(
+        // An unregistered name still renders: a project made with a config
+        // type has to open in a build that does not have that config.
         || TransitionSpec::new("luma", &[]),
         |(_, service, props)| TransitionSpec::new(service, props),
     )
@@ -104,6 +146,24 @@ mod tests {
                 .iter()
                 .any(|(k, _)| k == "resource")
         );
+    }
+
+    /// A registered type (spec 9.10) is rendered by the service it named,
+    /// and shows up as a known type.
+    #[test]
+    fn a_registered_type_names_its_own_service() {
+        register(
+            "sparkle_test",
+            "frei0r.sparkle",
+            vec![("density".into(), "3".into())],
+        );
+        let video = spec("sparkle_test", TrackKind::Video);
+        assert_eq!(video.service, "frei0r.sparkle");
+        assert_eq!(video.props, vec![("density".to_string(), "3".to_string())]);
+        assert!(is_known("sparkle_test"));
+        assert!(registered_names().contains(&"sparkle_test".to_string()));
+        // Audio still cross-fades, whatever a config called the type.
+        assert_eq!(spec("sparkle_test", TrackKind::Audio).service, "mix");
     }
 
     /// An unknown name must still render: a project made with a Lua-defined

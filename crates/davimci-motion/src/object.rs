@@ -29,6 +29,13 @@ pub enum TextObject {
     ATrack,
     /// Carries the visual selection; `None` outside VISUAL mode.
     InnerSegment(Option<TimeRange>),
+    /// A user object registered from Lua (spec 9.4), typed as `i<name>` or
+    /// `a<name>`. The grammar only carries the name: resolving it needs the
+    /// Lua runtime, which lives above this crate, so the host answers it.
+    Named {
+        name: char,
+        around: bool,
+    },
 }
 
 /// Anything that resolves to a scoped range. Lua objects implement it too.
@@ -63,6 +70,9 @@ impl Object for TextObject {
                     .map_or(range, |(start, end)| TimeRange::new(start, end));
                 Ok(Resolved::Range(widened, Scope::single(track)))
             }
+            // Only the host can resolve one of these; reaching here means a
+            // caller skipped that seam.
+            Self::Named { name, .. } => Err(MotionError::UnresolvedObject(*name)),
             Self::ATrack => {
                 let (range, group) = clip_extent(tl, track)?;
                 let scope = match group {

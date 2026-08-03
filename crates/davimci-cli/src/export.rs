@@ -11,10 +11,11 @@
 
 use std::path::{Path, PathBuf};
 
+use davimci_analysis::Cue;
 use davimci_backend::{
-    Container, PresetRegistry, RenderBackend, RenderJob, RenderSettings, RenderState,
+    Container, PresetRegistry, RenderBackend, RenderJob, RenderSettings, RenderState, SubtitleMode,
 };
-use davimci_core::{Frame, Timeline, TrackKind};
+use davimci_core::{Fps, Frame, Timeline, TrackKind};
 
 use crate::error::CliError;
 
@@ -92,6 +93,71 @@ struct Running {
     output: PathBuf,
     /// Reported so a finished job can say how long it was.
     total: u64,
+    /// The subtitle file written beside the render, and what is to become of
+    /// it once the render lands (spec 8).
+    subtitles: Option<(SubtitleMode, PathBuf)>,
+}
+
+/// The timeline's text tracks as subtitle cues, in timeline time (spec 8).
+///
+/// Pure: the same timeline always gives the same cues, so the sidecar can be
+/// tested with no render and no ffmpeg.
+#[must_use]
+pub fn cues(timeline: &Timeline, fps: Fps) -> Vec<Cue> {
+    let ms = |f: Frame| (f.get() as f64 * 1000.0 / fps.as_f64()).round() as u64;
+    let mut cues: Vec<Cue> = timeline
+        .tracks()
+        .iter()
+        .filter(|t| t.kind == TrackKind::Text)
+        .flat_map(|t| t.clips())
+        .filter_map(|c| {
+            let text = c.text.as_ref()?.trim();
+            (!text.is_empty()).then(|| Cue {
+                start_ms: ms(c.start),
+                end_ms: ms(c.end()),
+                text: text.to_string(),
+            })
+        })
+        .collect();
+    cues.sort_by_key(|c| (c.start_ms, c.end_ms));
+    cues
+}
+
+/// Where the sidecar for `output` goes: next to it, named after it.
+#[must_use]
+pub fn sidecar_path(output: &Path) -> PathBuf {
+    output.with_extension("srt")
+}
+
+/// Mux `srt` into `output` as a subtitle stream, in place.
+///
+/// ffmpeg writes to a temporary neighbour and the result replaces the
+/// render, so a failed mux leaves the rendered file untouched.
+fn mux_subtitles(output: &Path, srt: &Path) -> Result<(), String> {
+    let temp = output.with_extension(format!(
+        "muxing.{}",
+        output
+            .extension()
+            .map(|e| e.to_string_lossy().to_string())
+            .unwrap_or_else(|| "mkv".into())
+    ));
+    let run = std::process::Command::new("ffmpeg")
+        .args(["-y", "-i"])
+        .arg(output)
+        .arg("-i")
+        .arg(srt)
+        .args(["-c", "copy", "-c:s", "srt", "-map", "0", "-map", "1"])
+        .arg(&temp)
+        .output()
+        .map_err(|e| format!("ffmpeg could not be run to mux the subtitles: {e}"))?;
+    if !run.status.success() {
+        let _ = std::fs::remove_file(&temp);
+        return Err("ffmpeg could not mux the subtitles into the output".to_string());
+    }
+    std::fs::rename(&temp, output)
+        .map_err(|e| format!("the muxed file could not replace the render: {e}"))?;
+    let _ = std::fs::remove_file(srt);
+    Ok(())
 }
 
 impl Default for Exporter {
@@ -177,6 +243,26 @@ impl Exporter {
         };
         settings.separate_audio_tracks = multitrack;
 
+        // The subtitle file is written before the render starts, so a
+        // sidecar exists even if the render is cancelled halfway.
+        let subtitles = match preset.subtitles {
+            mode @ (SubtitleMode::Sidecar | SubtitleMode::Embedded) => {
+                let cues = cues(timeline, fps);
+                if cues.is_empty() {
+                    None
+                } else {
+                    let path = match mode {
+                        SubtitleMode::Embedded => output.with_extension("embedding.srt"),
+                        _ => sidecar_path(&output),
+                    };
+                    std::fs::write(&path, davimci_analysis::to_srt(&cues))
+                        .map_err(|e| CliError::io("write", path.display(), &e))?;
+                    Some((mode, path))
+                }
+            }
+            _ => None,
+        };
+
         backend
             .render(RenderJob::new(output.clone(), settings))
             .map_err(|e| CliError::ExportFailed {
@@ -189,6 +275,7 @@ impl Exporter {
             id,
             output: output.clone(),
             total: duration.get(),
+            subtitles,
         });
         Ok(format!(
             "exporting {} frames to {} as {}{}",
@@ -217,9 +304,21 @@ impl Exporter {
             }),
             RenderState::Done => {
                 self.running = None;
+                let note = match &running.subtitles {
+                    Some((SubtitleMode::Embedded, srt)) => {
+                        match mux_subtitles(&running.output, srt) {
+                            Ok(()) => " with an embedded subtitle stream".to_string(),
+                            // The render is on disk and playable; only the
+                            // subtitles failed, so this degrades locally.
+                            Err(reason) => format!(", but {reason}"),
+                        }
+                    }
+                    Some((_, srt)) => format!(" with subtitles in {}", srt.display()),
+                    None => String::new(),
+                };
                 Some(ExportEvent::Finished {
                     id: running.id,
-                    message: format!("exported {}", running.output.display()),
+                    message: format!("exported {}{note}", running.output.display()),
                 })
             }
             RenderState::Cancelled => {
@@ -463,5 +562,76 @@ mod tests {
             default_output(None, Container::Mp4),
             PathBuf::from("untitled.mp4")
         );
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod subtitle_tests {
+    use super::*;
+    use davimci_backend::{MockBackend, Preset, SubtitleMode};
+    use davimci_core::{Resolution, testing::fixture};
+
+    /// A timeline whose text track carries two cues.
+    fn subtitled() -> Timeline {
+        let mut tl = fixture(&[("V1", &[(0, 120, "a")])]);
+        let track = tl.add_track(TrackKind::Text);
+        for (start, text) in [(0u64, "hello"), (60, "world")] {
+            let id = tl.new_clip_id();
+            let mut clip = davimci_core::Clip::generated(id, text, Frame(start), Frame(60));
+            clip.text = Some(text.to_string());
+            tl.insert_clip(track, clip, Frame(start)).unwrap();
+        }
+        tl
+    }
+
+    #[test]
+    fn cues_come_out_of_the_text_tracks_in_timeline_time() {
+        let tl = subtitled();
+        let cues = cues(&tl, tl.props.fps);
+        assert_eq!(cues.len(), 2);
+        assert_eq!(cues[0].text, "hello");
+        assert_eq!(cues[0].start_ms, 0);
+        // 60 frames at 60 fps is one second.
+        assert_eq!(cues[0].end_ms, 1000);
+        // And the SRT it writes parses back to the same cues.
+        assert_eq!(
+            davimci_analysis::parse_srt(&davimci_analysis::to_srt(&cues)),
+            cues
+        );
+    }
+
+    /// `sidecar` writes an SRT next to the output and keeps the text out of
+    /// the picture; `burned` does neither (spec 8).
+    #[test]
+    fn sidecar_writes_an_srt_and_stops_burning_the_text_in() {
+        let dir = std::env::temp_dir().join(format!("davimci-sidecar-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let out = dir.join("cut.mkv");
+        let srt = sidecar_path(&out);
+        let _ = std::fs::remove_file(&srt);
+
+        let mut exporter = Exporter::new();
+        let mut preset = Preset::new(
+            "sidecar",
+            davimci_backend::Container::Mkv,
+            davimci_backend::VideoCodec::H264,
+            davimci_backend::AudioCodec::Aac,
+        )
+        .unwrap();
+        preset.subtitles = SubtitleMode::Sidecar;
+        exporter.presets_mut().define(preset);
+
+        let mut backend = MockBackend::new(Resolution::HD_1080);
+        exporter
+            .start(&mut backend, &out, Some("sidecar"), &subtitled())
+            .unwrap();
+        let written = std::fs::read_to_string(&srt).expect("a sidecar next to the output");
+        assert!(written.contains("hello") && written.contains("-->"));
+        assert!(
+            !backend.last_job.as_ref().unwrap().settings.burn_subtitles,
+            "a sidecar export must not also burn the text in"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

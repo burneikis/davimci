@@ -166,6 +166,16 @@ impl ModeState {
         }
     }
 
+    /// Replace the selection's track set (`it`/`at` in VISUAL, spec 6).
+    /// Ignored when empty: a selection always covers at least one track.
+    pub fn set_visual_tracks(&mut self, tracks: Vec<TrackId>) {
+        if let Some(v) = &mut self.visual
+            && !tracks.is_empty()
+        {
+            v.tracks = tracks;
+        }
+    }
+
     pub fn toggle_visual_track(&mut self, track: TrackId) {
         if let Some(v) = &mut self.visual {
             v.toggle_track(track);

@@ -412,7 +412,7 @@ fn saving_clears_the_autosave_so_the_next_open_does_not_prompt() {
 }
 
 #[test]
-fn undo_shortens_the_autosave_log_rather_than_extending_it() {
+fn the_autosave_describes_the_state_after_an_undo() {
     let dir = Scratch::new("undo-log");
     let file = dir.join("p.davimci");
     let mut ws = Workspace::new(dir.path());
@@ -608,4 +608,218 @@ fn a_transition_longer_than_the_handles_is_refused_intact() {
         .unwrap_err();
     assert!(err.to_string().contains("handle"), "{err}");
     assert_eq!(ws.current().timeline(), &before);
+}
+
+// `:set` (spec 12.1)
+
+#[test]
+fn set_writes_the_property_and_one_undo_takes_it_back() {
+    let dir = Scratch::new("set-clip");
+    let mut ws = Workspace::new(dir.path()).without_autosave();
+    let tl = media_fixture(&[(0, 100, 20, 400), (100, 100, 20, 400)]);
+    seeded(&mut ws, tl);
+    let before = json(ws.current().timeline());
+    let props = |ws: &Workspace| ws.current().timeline().tracks()[0].clips()[0].props;
+
+    for (line, check) in [
+        (":set clip.scale 0.5", 0),
+        (":set clip.opacity 0.25", 1),
+        (":set clip.x -40", 2),
+        (":set clip.gain -6", 3),
+        (":set clip.fade_in 100", 4),
+    ] {
+        ws.run(line, OnRecovery::Discard).unwrap();
+        let p = props(&ws);
+        match check {
+            0 => assert!((p.transform.scale - 0.5).abs() < f32::EPSILON),
+            1 => assert!((p.transform.opacity - 0.25).abs() < f32::EPSILON),
+            2 => assert!((p.transform.x + 40.0).abs() < f32::EPSILON),
+            3 => assert!((p.gain_db + 6.0).abs() < f32::EPSILON),
+            _ => assert!(p.fade_in.get() > 0),
+        }
+    }
+    // Each setter is one command, so one undo per `:set` returns exactly.
+    for _ in 0..5 {
+        ws.with_session(|s| s.undo().map(|_| ())).unwrap();
+    }
+    assert_eq!(json(ws.current().timeline()), before);
+}
+
+#[test]
+fn a_rejected_set_leaves_the_timeline_byte_identical() {
+    let dir = Scratch::new("set-reject");
+    let mut ws = Workspace::new(dir.path()).without_autosave();
+    seeded(&mut ws, media_fixture(&[(0, 100, 20, 400)]));
+    let before = json(ws.current().timeline());
+    for line in [
+        ":set clip.opacity 2",
+        ":set clip.wobble 1",
+        ":set transition.duration 0",
+        ":set timeline.fps nope",
+        ":set clip.scale",
+    ] {
+        let err = ws.run(line, OnRecovery::Discard).unwrap_err();
+        assert_eq!(
+            davimci_core::Classify::class(&err),
+            davimci_core::ErrorClass::User,
+            "{line}"
+        );
+        assert_eq!(json(ws.current().timeline()), before, "{line}");
+    }
+}
+
+#[test]
+fn set_transition_changes_type_and_duration_without_re_running_transition() {
+    let dir = Scratch::new("set-transition");
+    let mut ws = Workspace::new(dir.path()).without_autosave();
+    let tl = media_fixture(&[(0, 100, 20, 400), (100, 100, 20, 400)]);
+    let right = tl.tracks()[0].clips()[1].id;
+    seeded(&mut ws, tl);
+    let at = |ws: &Workspace| {
+        ws.current()
+            .timeline()
+            .find_clip(right)
+            .and_then(|(_, c)| c.transition_in.clone())
+            .map(|t| (t.kind, t.duration.get()))
+    };
+
+    // With no transition on the cut there is nothing to change.
+    assert!(
+        ws.run(":set transition.duration 20", OnRecovery::Discard)
+            .is_err()
+    );
+    ws.run("transition", OnRecovery::Discard).unwrap();
+    ws.run(":set transition.duration 20", OnRecovery::Discard)
+        .unwrap();
+    assert_eq!(at(&ws), Some(("dissolve".into(), 20)));
+    ws.run(":set transition.type wipe_left", OnRecovery::Discard)
+        .unwrap();
+    assert_eq!(at(&ws), Some(("wipe_left".into(), 20)));
+}
+
+#[test]
+fn set_timeline_fps_is_the_exactly_invertible_reconform() {
+    let dir = Scratch::new("set-fps");
+    let mut ws = Workspace::new(dir.path()).without_autosave();
+    seeded(
+        &mut ws,
+        media_fixture(&[(0, 120, 20, 400), (120, 60, 20, 400)]),
+    );
+    let before = json(ws.current().timeline());
+    ws.run(":set timeline.fps 30", OnRecovery::Discard).unwrap();
+    assert_eq!(ws.current().timeline().props.fps.as_f64(), 30.0);
+    ws.with_session(|s| s.undo().map(|_| ())).unwrap();
+    assert_eq!(json(ws.current().timeline()), before);
+}
+
+#[test]
+fn a_transform_set_through_set_projects_the_same_xml_as_one_set_in_model() {
+    let dir = Scratch::new("set-xml");
+    let mut ws = Workspace::new(dir.path()).without_autosave();
+    let tl = media_fixture(&[(0, 100, 20, 400)]);
+    let (track, clip) = (track_id(&tl, "V1"), tl.tracks()[0].clips()[0].clone());
+    seeded(&mut ws, tl.clone());
+    ws.run(":set clip.scale 0.5", OnRecovery::Discard).unwrap();
+    ws.run(":set clip.opacity 0.25", OnRecovery::Discard)
+        .unwrap();
+
+    let mut model = Session::new(tl);
+    model
+        .exec(&EditCommand::SetProps {
+            track,
+            clip: clip.id,
+            props: davimci_core::ClipProps {
+                transform: davimci_core::Transform {
+                    scale: 0.5,
+                    opacity: 0.25,
+                    ..clip.props.transform
+                },
+                ..clip.props
+            },
+        })
+        .unwrap();
+    assert_eq!(
+        davimci_mlt::to_xml(&davimci_mlt::Projection::of(ws.current().timeline())),
+        davimci_mlt::to_xml(&davimci_mlt::Projection::of(model.timeline()))
+    );
+}
+
+/// Recovery rebuilds the *tree*, not a line: a branch abandoned before the
+/// crash is still reachable with `g-`/`g+` afterwards (spec 10.4).
+#[test]
+fn recovery_restores_the_undo_tree_with_its_branches() {
+    let dir = Scratch::new("recover-tree");
+    let file = dir.join("p.davimci");
+
+    let (before_list, expected) = {
+        let mut ws = Workspace::new(dir.path());
+        seeded(&mut ws, fixture(&[("V1", &[(0, 300, "a")])]));
+        ws.run(&format!("w {}", file.display()), OnRecovery::Discard)
+            .unwrap();
+        // One branch...
+        for frame in [100, 200] {
+            let cmd = split(ws.current().timeline(), frame);
+            ws.exec(&cmd).unwrap();
+        }
+        // ...then back up and start another, which is what makes a tree.
+        ws.with_session(|s| s.undo()).unwrap();
+        let cmd = split(ws.current().timeline(), 250);
+        ws.exec(&cmd).unwrap();
+        (
+            ws.current_session().undolist().len(),
+            json(ws.current().timeline()),
+        )
+        // Dropped without :w or :q - the crash.
+    };
+
+    let mut ws = Workspace::new(dir.path());
+    ws.open_project(&file, OnRecovery::Recover).unwrap();
+    assert_eq!(json(ws.current().timeline()), expected);
+    assert_eq!(
+        ws.current_session().undolist().len(),
+        before_list,
+        "the abandoned branch did not survive recovery"
+    );
+
+    // `g-` walks back in change order and reaches the abandoned branch's
+    // state, exactly as it did before the crash.
+    let seen: Vec<String> = (0..3)
+        .map(|_| {
+            ws.with_session(|s| s.time_travel_back().map(|_| ()))
+                .unwrap();
+            ws.current().timeline().dump()
+        })
+        .collect();
+    assert!(
+        seen.iter().any(|d| d.contains("100")),
+        "the other branch was not reachable: {seen:?}"
+    );
+}
+
+/// A crash mid-write leaves half a record. Everything before it recovers.
+#[test]
+fn a_truncated_final_record_recovers_everything_before_it() {
+    let dir = Scratch::new("truncated");
+    let file = dir.join("p.davimci");
+    let mut ws = Workspace::new(dir.path());
+    seeded(&mut ws, fixture(&[("V1", &[(0, 300, "a")])]));
+    ws.run(&format!("w {}", file.display()), OnRecovery::Discard)
+        .unwrap();
+    for frame in [100, 200] {
+        let cmd = split(ws.current().timeline(), frame);
+        ws.exec(&cmd).unwrap();
+    }
+    let expected = ws.current().timeline().dump();
+
+    // Cut the file mid-record, as a crash between two writes would.
+    let log = ws.autosave_path_for(&file);
+    let text = std::fs::read_to_string(&log).unwrap();
+    std::fs::write(&log, format!("{text}{{\"n\":{{\"id\":9,\"par")).unwrap();
+
+    let recovered = autosave::replay(&log).unwrap();
+    assert_eq!(
+        recovered.timeline().dump(),
+        expected,
+        "the complete records before the torn one must still replay"
+    );
 }

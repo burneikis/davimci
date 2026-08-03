@@ -35,6 +35,10 @@ pub enum Lookup {
 #[derive(Debug, Clone)]
 pub struct Keymap {
     bindings: HashMap<Vec<Key>, LeafAction>,
+    /// Names user config registered as text objects (spec 9.4). The grammar
+    /// needs them to know that `dic` is a verb over an object rather than a
+    /// mistyped sequence; resolving them is the host's job.
+    objects: std::collections::BTreeSet<char>,
 }
 
 impl Default for Keymap {
@@ -49,6 +53,7 @@ impl Keymap {
     pub fn new() -> Self {
         Self {
             bindings: default_bindings().into_iter().collect(),
+            objects: std::collections::BTreeSet::new(),
         }
     }
 
@@ -67,6 +72,20 @@ impl Keymap {
 
     pub fn bind(&mut self, keys: Vec<Key>, action: LeafAction) {
         self.bindings.insert(keys, action);
+    }
+
+    /// Make a config-registered text object typeable (spec 9.4). Only its
+    /// first character is a key, since an object is typed as `i<name>`.
+    pub fn register_object(&mut self, name: &str) {
+        if let Some(c) = name.chars().next() {
+            self.objects.insert(c);
+        }
+    }
+
+    /// Whether `i<c>`/`a<c>` names a registered object.
+    #[must_use]
+    pub fn has_object(&self, c: char) -> bool {
+        self.objects.contains(&c)
     }
 
     #[must_use]

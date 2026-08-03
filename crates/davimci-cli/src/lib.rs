@@ -20,6 +20,7 @@ pub mod error;
 pub mod excmd;
 pub mod export;
 pub mod plugins;
+pub mod setting;
 pub mod thumbnail;
 pub mod transport;
 #[cfg(feature = "window")]
@@ -37,6 +38,7 @@ pub use error::CliError;
 pub use excmd::{ExCommand, ExOutcome, parse, vocabulary};
 pub use export::{ExportEvent, Exporter};
 pub use plugins::{AskOnTerminal, Plugins};
+pub use setting::Setting;
 pub use transport::{Transport, TransportState};
 #[cfg(feature = "window")]
 pub use window::Window;

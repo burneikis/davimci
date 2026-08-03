@@ -58,6 +58,28 @@ pub fn parse_srt(text: &str) -> Vec<Cue> {
     cues
 }
 
+/// Cues as SRT text, the inverse of [`parse_srt`] (spec 8 sidecar export).
+#[must_use]
+pub fn to_srt(cues: &[Cue]) -> String {
+    let mut out = String::new();
+    for (i, cue) in cues.iter().enumerate() {
+        out.push_str(&format!(
+            "{}\n{} --> {}\n{}\n\n",
+            i + 1,
+            srt_timestamp(cue.start_ms),
+            srt_timestamp(cue.end_ms),
+            cue.text
+        ));
+    }
+    out
+}
+
+/// Milliseconds as `00:00:01,500`.
+fn srt_timestamp(ms: u64) -> String {
+    let (h, m, s, milli) = (ms / 3_600_000, ms / 60_000 % 60, ms / 1000 % 60, ms % 1000);
+    format!("{h:02}:{m:02}:{s:02},{milli:03}")
+}
+
 /// `00:00:01,500` or `00:00:01.500` -> milliseconds.
 fn timestamp(text: &str) -> Option<u64> {
     let text = text.split_whitespace().next()?.replace(',', ".");

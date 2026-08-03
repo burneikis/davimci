@@ -322,3 +322,118 @@ fn a_registered_motion_moves_the_playhead_and_never_writes() {
         "a motion reached the undo log"
     );
 }
+
+/// spec 9.4: a registered object is typeable, and the verb acts on the range
+/// the config returned - through the ordinary command layer, so it undoes.
+#[test]
+fn a_registered_text_object_is_typeable_and_its_range_is_what_gets_deleted() {
+    let dir = Scratch::with_config(
+        "textobject",
+        &[(
+            "init.lua",
+            r#"
+local textobj = require("davimci.textobject")
+textobj.register("c", {
+  inner = function(clip) return { start = clip.core_range.start + 10, ["end"] = clip.core_range["end"] - 10 } end,
+  around = function(clip) return clip.range_with_transitions end,
+})
+"#,
+        )],
+    );
+    let (mut app, mut editor, _) = editor_with(&dir);
+    let v1_end = |app: &App| {
+        app.session().timeline().tracks()[0]
+            .clips()
+            .last()
+            .map(|c| c.end().get())
+            .unwrap_or(0)
+    };
+    let before = v1_end(&app);
+    feed(&mut app, &mut editor, "dic");
+    // The config's inner form is 20 frames narrower than the clip, so that
+    // is exactly what the ripple delete took.
+    assert_eq!(
+        v1_end(&app),
+        before - 80,
+        "the config's range was not what got deleted"
+    );
+    // And it is one ordinary command.
+    app.session_mut().undo().unwrap();
+    assert_eq!(v1_end(&app), before);
+}
+
+/// spec 9.10: a transition type a config registered reaches the backend and
+/// the projected graph names the service the config asked for.
+#[test]
+fn a_registered_transition_type_reaches_the_projected_graph() {
+    let dir = Scratch::with_config(
+        "transition",
+        &[(
+            "init.lua",
+            r#"
+require("davimci.transition").register("sparkle", {
+  service = "frei0r.sparkle",
+  density = "3",
+})
+"#,
+        )],
+    );
+    let mut plugins = Plugins::load(
+        Some(&davimci_lua::ConfigPaths::new(dir.path())),
+        dir.path(),
+        &DenyAll,
+    );
+    let _ = plugins.take_notices();
+    let defs = plugins.transitions();
+    assert_eq!(defs.len(), 1, "the config's type did not reach the seam");
+    assert_eq!(defs[0].service, "frei0r.sparkle");
+
+    // Installed the way the editor installs it, through the backend trait.
+    let mut backend = MockBackend::new(Resolution {
+        width: 8,
+        height: 4,
+    });
+    // A backend with no registry refuses rather than pretending.
+    assert!(
+        davimci_backend::RenderBackend::register_transition(&mut backend, defs[0].clone()).is_err()
+    );
+    davimci_mlt::transitions::register(&defs[0].name, &defs[0].service, defs[0].props.clone());
+
+    // Plant one and project: the XML names the config's service.
+    let tl = fixture(&[("V1", &[(0, 100, "a"), (100, 100, "b")])]);
+    let clip = tl.tracks()[0].clips()[1].id;
+    let mut session = Session::new(tl);
+    session
+        .exec(&davimci_cmd::EditCommand::SetTransition {
+            track: session.timeline().tracks()[0].id,
+            clip,
+            transition: Some(davimci_core::Transition::new(
+                "sparkle",
+                davimci_core::Frame(10),
+            )),
+        })
+        .unwrap();
+    let xml = davimci_mlt::to_xml(&davimci_mlt::Projection::of(session.timeline()));
+    assert!(
+        xml.contains("frei0r.sparkle"),
+        "the registered service is not in the graph:\n{xml}"
+    );
+
+    // And a project using a type this build has never heard of still opens,
+    // degrading to a dissolve rather than failing the render.
+    session
+        .exec(&davimci_cmd::EditCommand::SetTransition {
+            track: session.timeline().tracks()[0].id,
+            clip,
+            transition: Some(davimci_core::Transition::new(
+                "no_such_type",
+                davimci_core::Frame(10),
+            )),
+        })
+        .unwrap();
+    let xml = davimci_mlt::to_xml(&davimci_mlt::Projection::of(session.timeline()));
+    assert!(
+        xml.contains("luma"),
+        "the unknown type did not degrade:\n{xml}"
+    );
+}

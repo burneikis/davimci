@@ -840,6 +840,27 @@ impl RenderBackend for MltBackend {
         (pos >= 0).then_some(Frame(pos as u64))
     }
 
+    fn register_transition(&mut self, def: davimci_backend::TransitionDef) -> Result<()> {
+        if def.service.trim().is_empty() {
+            return Err(BackendError::Unavailable {
+                reason: format!("the transition type '{}' names no service", def.name),
+            });
+        }
+        crate::transitions::register(&def.name, &def.service, def.props);
+        Ok(())
+    }
+
+    fn transition_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = crate::transitions::names()
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        names.extend(crate::transitions::registered_names());
+        names.sort();
+        names.dedup();
+        names
+    }
+
     fn render(&mut self, job: RenderJob) -> Result<()> {
         if self.render.is_some() {
             return Err(BackendError::Render {
@@ -866,12 +887,17 @@ impl RenderBackend for MltBackend {
         // the mix sums them, and the consumer cuts the bus into streams.
         let mut export_graph = None;
         let mut layout: Option<AudioLayout> = None;
-        if job.settings.separate_audio_tracks
-            && let Some(mut routed) = self.projection.clone()
-        {
-            layout = routed.route_audio();
-            if layout.is_some() {
-                export_graph = Some(self.build_graph(&routed)?);
+        let needs_own_graph = job.settings.separate_audio_tracks || !job.settings.burn_subtitles;
+        if needs_own_graph && let Some(mut projection) = self.projection.clone() {
+            // Subtitles that are not burned in must not reach the picture:
+            // the text tracks are dropped from the exported graph and
+            // carried by the sidecar or the muxed stream instead (spec 8).
+            let dropped = !job.settings.burn_subtitles && projection.drop_text_tracks();
+            if job.settings.separate_audio_tracks {
+                layout = projection.route_audio();
+            }
+            if layout.is_some() || dropped {
+                export_graph = Some(self.build_graph(&projection)?);
             }
         }
 

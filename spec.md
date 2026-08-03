@@ -92,6 +92,14 @@ is also the easiest to reach without spending a dedicated key.
 | `<Space>p` | Play from playhead, return playhead to origin on stop (preview-and-return) |
 | `<Space>l` | Loop the current selection (or current clip in NORMAL) |
 
+`<Space>l` loops what is selected, or the clip under the playhead in NORMAL.
+The loop is transport state, never an edit: it never reaches the undo log, it
+survives a pause and a seek *inside* its range, and pressing `<Space>l` again
+on the same range turns it off. Playback wraps to the loop's start rather than
+stopping at its end, and starts from the loop's start when the playhead is
+outside it. The loop ends, with a message, when the selection it was set on is
+cleared or the playhead seeks out of its range.
+
 Shuttle is varispeed playback where the backend can vary its rate: the audio
 clock keeps running and the rate steps, so a shuttle sounds like a shuttle. A
 backend without rate control degrades to a silent stepped scrub at the same
@@ -245,7 +253,7 @@ otherwise.
 |---|---|
 | `t` + motion | **Ripple trim** the nearest edge to the motion target (later clips shift) |
 | `gt` + motion | **Roll** edit: move the cut point, both adjacent clips absorb the change, total duration unchanged |
-| `<` / `>` | Trim edge left / right by one jump point (count-prefixed) |
+| `<` / `>` | Trim edge left / right by one jump point (count-prefixed); this is the ripple trim `t` performs, with the jump-point set deciding where the edge lands, so the step follows the zoom (spec 3.2). No jump point in that direction is a user error and trims nothing |
 | `T` | Slip: shift a clip's source in/out points without moving it on the timeline |
 | `gT` | Slide: move a clip along the timeline, adjacent clips absorb the change |
 
@@ -317,7 +325,7 @@ is track-scoped or group-scoped**, and grouping is a per-clip relationship
 Within visual mode:
 - Motions (`h`/`l`/`w`/`b`/etc.) extend the selection as usual.
 - `o` swaps the active end of the selection (standard vim behavior).
-- Track objects (`it`/`at`) can still modify scope while in visual mode, e.g. select a time range, then `it` to constrain it to only the current track even if it started as a track-group selection.
+- Track objects (`it`/`at`) can still modify scope while in visual mode, e.g. select a time range, then `it` to constrain it to only the current track even if it started as a track-group selection. Typing an object in a VISUAL mode changes the selection's *scope* and never its range: `it` keeps the focused track, `at` keeps the focused track and everything its link group reaches.
 - Once selected, apply a verb: `d` (ripple delete selection), `y` (yank), `gd` (lift, leave gap), `s` (split at both bounds and isolate segment).
 
 ---
@@ -556,6 +564,14 @@ textobj.register("c", { -- clip
 
 Users can define new objects (e.g. `is` for silence-detected segment) the same way.
 
+A registered object is typeable exactly as a built-in one is: its first
+character is the key, so `register("c", ...)` makes `dic` and `dac` verbs over
+it. Config wins over defaults, as it does for keymaps, so registering a name a
+built-in object already uses replaces that object. The verb runs through the
+command layer with the range the object returned, so it undoes, repeats and
+records like any other edit; an object that returns nothing is reported and
+edits nothing.
+
 ### 9.5 Export presets
 
 ```lua
@@ -657,6 +673,26 @@ A user callback that throws is logged, disabled for the rest of the session,
 and anything it queued before throwing is discarded, so a half-run handler
 cannot half-edit the timeline. A config file that fails to load costs that
 file only.
+
+### 9.10 Custom transitions
+
+```lua
+require("davimci.transition").register("sparkle", {
+  service = "frei0r.sparkle",  -- required: what the backend renders it with
+  density = "3",               -- everything else is a backend property
+})
+```
+
+A registered type is usable anywhere a built-in one is: `:transition sparkle`,
+`:set transition.type sparkle`, and the project file, which stores the name.
+The config names a backend *service*; it never learns what the backend is, and
+a backend with no transition registry reports that once at load and renders
+those types as dissolves.
+
+A name this build does not know **degrades to a dissolve** rather than failing
+the render, so a project made with a plugin still opens without it. Audio is
+unaffected either way: overlapping audio always cross-fades, whatever the type
+is called (spec 6.2).
 
 ---
 
@@ -789,6 +825,7 @@ Projects behave like vim buffers, with the same command vocabulary.
 | `:new` | New empty timeline (prompts for fps/resolution, see section 7.1) |
 | `:relink [old] <new>` | Point offline clips at media that moved |
 | `:analyze` | Re-run analysis on the current project (spec 10.2) |
+| `:set <property> <value>` | Change one property (see 12.1) |
 
 - Multiple timelines may be open simultaneously; registers and marks are
   **global** across timelines, so a yank in one can be pasted into another. A
@@ -806,7 +843,11 @@ Projects behave like vim buffers, with the same command vocabulary.
 - Autosave writes the command log continuously to `.davimci/autosave/`, enabling
   crash recovery on next open. Autosave never overwrites the project file.
   Each open timeline gets one log, named after the project path so two
-  projects with the same file name cannot share one. `:w` and a clean `:q`
+  projects with the same file name cannot share one. Each record carries the
+  edge of the undo tree its command was applied at, so recovery rebuilds the
+  tree and not a line: `g-`/`g+` reach the same branches after a crash as
+  before it. A record torn in half by the crash is dropped, and everything
+  before it still recovers. `:w` and a clean `:q`
   delete it: a surviving log means the session did not survive, and the next
   open of that project offers to replay it. A recovered timeline is ahead of
   the file on disk and is therefore unsaved. A log that will not replay is
@@ -817,6 +858,38 @@ Projects behave like vim buffers, with the same command vocabulary.
   if the new path exists - otherwise they stay offline and export stays
   blocked (spec 0 offline-media policy).
 - `ProjectLoaded` fires after project-local `.davimci.lua` evaluation (spec 9.7).
+
+### 12.1 `:set`
+
+One command over a typed property registry, not a family of special cases.
+`:set <property> <value>`; an unknown property and an out-of-range value are
+both user errors, rejected before anything mutates and reported in a sentence
+naming the property.
+
+| Property | Value | Acts on |
+|---|---|---|
+| `clip.x`, `clip.y` | pixels | Selection, else the clip under the playhead |
+| `clip.scale` | `> 0`, at most `100` | as above |
+| `clip.opacity` | `0` to `1` | as above |
+| `clip.gain` | dB, `-96` to `24` | as above |
+| `clip.fade_in`, `clip.fade_out` | milliseconds, clamped to the clip | as above |
+| `transition.duration` | frames, `> 0` | The transition under the playhead, else the one on the nearest cut |
+| `transition.type` | a transition name | as above |
+| `timeline.fps` | `25`, `29.97` or `30000/1001` | The timeline (re-conform, spec 7.1) |
+| `timeline.resolution` | `1920x1080` | as above |
+| `preview` | `on`/`off` | The session's preview (spec 15.5) |
+
+- Every setter but `preview` is one command, so a change across a selection is
+  one `u`, and `.` repeats it. `:set preview` is a view setting and never
+  enters the undo log.
+- `:set clip.gain` and `:set clip.fade_in|fade_out` mean exactly what `:gain`
+  and `:fade` mean; the two spellings are the same command.
+- `:set transition.*` changes the transition that is there and fails when
+  there is none, rather than creating one; `:transition` creates.
+- `:set timeline.fps` and `:set timeline.resolution` re-conform, and undo
+  restores the exact prior geometry rather than recomputing it (spec 7.1).
+- `:set preview off` stops the transport and stops pulling frames, so a
+  session with no display still edits, saves and exports.
 
 ---
 

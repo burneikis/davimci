@@ -54,6 +54,32 @@ pub enum Target {
     WholeClip,
     /// Applied while in a VISUAL mode: use the live selection.
     Visual,
+    /// An already-resolved range on the focused track. The host builds this
+    /// after answering a config-registered text object (spec 9.4); nothing
+    /// in the grammar produces it.
+    Range(davimci_motion::TimeRange),
+}
+
+impl Action {
+    /// Re-target a verb at a range the host resolved (spec 9.4). Anything
+    /// else is returned unchanged.
+    #[must_use]
+    pub fn with_range(self, range: davimci_motion::TimeRange) -> Self {
+        match self {
+            Self::Verb {
+                op,
+                count,
+                register,
+                ..
+            } => Self::Verb {
+                op,
+                count,
+                register,
+                target: Target::Range(range),
+            },
+            other => other,
+        }
+    }
 }
 
 /// What a single non-composing keystroke needs typed after it.
@@ -162,6 +188,11 @@ pub enum Action {
     SwapVisualEnds,
     /// Toggle a track in/out of a `VISUAL-BLOCK` selection.
     ToggleVisualTrack,
+    /// `it` / `at` typed while a selection is live: narrow the selection to
+    /// the focused track, or to its link group (spec 6).
+    NarrowSelection {
+        group: bool,
+    },
     /// `<` / `>`: trim the nearest edge by one jump point.
     TrimEdgeStep {
         forward: bool,
@@ -234,6 +265,7 @@ impl Action {
             | Self::JumpMark(_)
             | Self::SwapVisualEnds
             | Self::ToggleVisualTrack
+            | Self::NarrowSelection { .. }
             | Self::TrimEdgeStep { .. }
             | Self::GainAdjust(_)
             | Self::ToggleMute

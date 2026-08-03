@@ -42,6 +42,6 @@ pub use event::{Dispatch, Event, HandlerFailure};
 pub use loader::{ConfigPaths, DenyAll, Trust, TrustPrompt};
 pub use motion::{MotionAnswer, MotionEnv, Sample, TrackData};
 pub use preset::{ExportPreset, SubtitleSelection, TrackSelection};
-pub use registry::{HandlerId, KeyBinding, Rhs};
+pub use registry::{HandlerId, KeyBinding, Rhs, TransitionDef};
 pub use request::{OptValue, Opts, Request, parse_editor_command};
 pub use runtime::{ClipInfo, ObjectForm, Runtime, Sandbox};

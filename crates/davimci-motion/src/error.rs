@@ -37,6 +37,9 @@ pub enum MotionError {
 
     #[error("nothing on this track matches that condition")]
     NoPredicateMatch,
+
+    #[error("the text object '{0}' is defined in config and only the editor can resolve it")]
+    UnresolvedObject(char),
 }
 
 impl Classify for MotionError {

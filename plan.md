@@ -55,135 +55,7 @@ The architectural rules these rest on are in `AGENTS.md`.
 
 ---
 
-## 1. The `:set` family
-
-Spec 8, 6.2, 7.1 and 15.5 all reach for `:set`, and none of them can be
-finished without it. It is one command with a typed property registry, not
-four special cases.
-
-Deliverables:
-- `:set clip.<prop> <value>` for transform (position, scale, opacity), gain,
-  and fades - overlay editing in spec 8 is exactly this.
-- `:set transition.duration <frames>` and `:set transition.type <name>`,
-  replacing the re-run-`:transition` workaround.
-- `:set timeline.fps <rate>` on the existing exactly-invertible re-conform.
-- `:set preview off` for no-display sessions, needed by the TUI.
-- Each setter is one `EditCommand`; view-only settings do not enter the log.
-- Unknown property or out-of-range value is a user error, rejected with a
-  sentence naming the property.
-
-Testing:
-- Table-driven: property, input, expected model change, expected inverse.
-- A rejected `:set` leaves the timeline byte-identical.
-- Golden MLT XML for a transform set through `:set` matching one set in-model.
-
----
-
-## 2. Transport loop
-
-Deliverables:
-- `<Space>l` loops the live selection, which already rides the `Host` seam.
-- Loop state belongs to the transport, not the undo log, and survives a seek
-  inside the loop range.
-- Playback stops at the loop end and resumes at its start without a reseek
-  glitch, reusing the still cache.
-
-Testing:
-- Scripted headless session: set a selection, loop, tick past the end, assert
-  the playhead wrapped rather than stopped.
-- Clearing the selection while looping ends the loop with a message.
-
----
-
-## 3. Remaining key grammar
-
-Two actions parse today but reach no command, and the object table cannot yet
-name anything a config defined.
-
-Deliverables:
-- `<`/`>` jump-point edge trims map onto the existing ripple-trim command,
-  with the jump-point set deciding the edge.
-- Typing `it`/`at` while a `VISUAL*` selection is live narrows it to a track
-  rather than being ignored (spec 6).
-- `TextObject` gains a named variant so a Lua-registered object (spec 9.4)
-  is typeable: the grammar carries the name, and the host resolves it through
-  `Runtime::run_object` the way it already resolves a registered motion.
-
-Testing:
-- Golden key strings for both, and a landing-position table for `<`/`>` at a
-  clip boundary, at timeline start, and with a count prefix.
-- A fixture config registers `ic`/`ac`, and `dic` deletes the range the
-  config returned.
-
----
-
-## 4. `:analyze`
-
-The analyser re-runs itself when a track's audible signature changes, which
-covers the reason the command exists, but spec 12 lists it and it is not
-accepted.
-
-Deliverables:
-- `:analyze` drops the current project's envelopes and re-queues every audio
-  source, reporting progress like any other background job.
-
-Testing:
-- Assert predicate motions report `Pending` while the job runs and answer
-  correctly after it finishes.
-
----
-
-## 5. Undo history across crash recovery
-
-A saved project carries its undo tree (format v2). A recovered autosave does
-not: the autosave log is a flat list, so recovery replays into a fresh tree.
-
-Deliverables:
-- Autosave records the tree edge each command was applied at, so recovery
-  rebuilds the tree rather than a line.
-- Recovery is still tolerant of a truncated final record.
-
-Testing:
-- Branch the undo tree, kill the process, recover, and assert `g-`/`g+`
-  traverse the same branches as before the crash.
-- A truncated autosave recovers everything up to the last complete record.
-
----
-
-## 6. Subtitle export selection
-
-`SubtitleSelection` is parsed and validated in presets, but the renderer only
-ever burns text in. Spec 8 asks for sidecar and embedded too.
-
-Deliverables:
-- `burned` keeps today's behaviour; `sidecar` writes SRT next to the output;
-  `embedded` muxes a subtitle stream where the container allows it.
-- Container/codec validation already rejects the impossible pairings at preset
-  definition time; the renderer trusts that and does not re-decide.
-
-Testing:
-- `ffprobe` the output of each mode: stream counts for `embedded`, absence
-  plus a sidecar file for `sidecar`, and a pixel diff proving burn-in.
-
----
-
-## 7. Lua-registered transition types
-
-Deliverables:
-- A `RenderBackend` method exposing the transition registry so `davimci-lua`
-  can register a type without knowing MLT exists.
-- `transitions::spec` is the seam; an unknown name keeps degrading to a
-  dissolve so a project still opens in a build without the plugin.
-
-Testing:
-- Register a type from a fixture config, plant it, and assert the projected
-  MLT XML names the right service.
-- Open a project using an unregistered type and assert it degrades with a
-  notice rather than failing the render.
-
----
-
-## 8. TUI frontend (`davimci-tui`, `--features tui`)
+## 1. TUI frontend (`davimci-tui`, `--features tui`)
 
 Explicitly a nice-to-have. Ships only if it stays thin; cut without regret
 otherwise.
@@ -207,7 +79,7 @@ Testing:
 
 ---
 
-## 9. Integration and hardening
+## 2. Integration and hardening
 
 Deliverables:
 - A scripted-session file format - keystrokes plus assertions - usable as both
@@ -270,15 +142,16 @@ Standing rules:
 
 ## Milestones remaining
 
-M1 to M3 are met: the GUI edits video, plays it in sync, saves, and exports a
-multi-audio MKV. That was the first usable build.
+M1 to M6 are met: the GUI edits video, plays it in sync, saves, exports a
+multi-audio MKV, and the whole Lua surface - motions, text objects, keymaps,
+hooks, presets, transition types - reaches a running editor. Overlays and
+subtitles are editable through `:set` and exportable burned, sidecar or
+embedded.
 
 | M | Definition of done |
 |---|---|
-| M4 | Lua config fully wired: custom motions, text objects, keymaps, hooks, export presets, all reaching a running editor. |
-| M6 | Overlays and subtitle tracks editable through `:set` and exportable burned, sidecar or embedded; transitions extensible from Lua. |
 | M7 | Optional TUI behind `--features tui`, passing cross-frontend parity. Cut without regret if it is not thin. |
-| M8 | Hardened: soak-tested, 1080p60 validated, crash recovery restoring the undo tree, documented default keymap. |
+| M8 | Hardened: soak-tested, 1080p60 validated, documented default keymap. Crash recovery already restores the undo tree. |
 
 M5 (audio operations) landed with M3. M7 is deliberately late: the TUI is a
 convenience, and shipping it early would mean maintaining two frontends

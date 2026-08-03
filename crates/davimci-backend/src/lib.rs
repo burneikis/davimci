@@ -22,7 +22,7 @@ use davimci_core::{Fps, Frame, Resolution, Timeline};
 
 pub use error::{BackendError, Result};
 pub use frame::{PreviewScale, VideoFrame};
-pub use job::{RenderJob, RenderProgress, RenderSettings, RenderState};
+pub use job::{RenderJob, RenderProgress, RenderSettings, RenderState, TransitionDef};
 pub use mock::MockBackend;
 pub use preset::{
     AudioCodec, Container, Preset, PresetError, PresetRegistry, SubtitleMode, TrackSelection,
@@ -97,6 +97,21 @@ pub trait RenderBackend {
     /// Master clock position, in timeline frames. Audio is the master clock,
     /// so this is what the presenter paces against.
     fn audio_clock_position(&self) -> Option<Frame>;
+
+    /// Add a transition type (spec 9.10). A backend that has no extensible
+    /// transitions refuses, and the type keeps degrading to a dissolve.
+    fn register_transition(&mut self, def: TransitionDef) -> Result<()> {
+        let _ = def;
+        Err(BackendError::Unavailable {
+            reason: "this backend has no transition registry".into(),
+        })
+    }
+
+    /// Every transition type this backend can render, built-in or
+    /// registered.
+    fn transition_names(&self) -> Vec<String> {
+        Vec::new()
+    }
 
     /// Begin an export. Progress is polled; the call itself does not block.
     fn render(&mut self, job: RenderJob) -> Result<()>;

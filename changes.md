@@ -657,3 +657,106 @@ Still open: a text object registered from Lua is loaded and listed, but the
 key grammar has no way to name one - `TextObject` is a closed enum. That is
 grammar work rather than wiring, so it moved to the remaining-key-grammar
 item in `plan.md`.
+
+---
+
+## The `:set` family (`davimci-cli`)
+
+One command over a typed registry, not four special cases: `setting.rs` parses
+and range-checks a property name and value with no session, no filesystem and
+no backend, so every setter is proved by a table. Execution then splits by
+what a property *is*: clip properties and the re-conform are ordinary
+`EditCommand`s the workspace runs, and `preview` is a view setting the editor
+intercepts exactly as it intercepts an export, because the preview is the only
+thing the workspace does not own.
+
+`spec.md` gained section 12.1, which the spec had reached for from four places
+(8, 6.2, 7.1, 15.5) without ever defining. Two decisions worth recording:
+`:set clip.gain` and `:set clip.fade_*` are the same commands `:gain` and
+`:fade` build rather than a parallel implementation, and `:set transition.*`
+changes the transition that is there and fails when there is none - creating
+one stays `:transition`, so the two verbs do not overlap.
+
+## Transport loop (`<Space>l`)
+
+Loop state lives on the `Transport`, next to the playhead it governs, so it
+never touches the undo log. A wrap restarts the preview at the loop's start
+rather than seeking inside a running consumer; the still cache is in the
+backend, so the second pass costs no decode the first one already paid.
+
+The seam moved rather than grew: `Host::transport` now carries the selection,
+because `<Space>l` is the one transport action whose meaning depends on it,
+and a new `Host::selection_changed` reports a selection that went away. Those
+two, plus a check in `playhead_moved`, are the whole of "a loop follows the
+selection it was set on and survives a seek inside its range".
+
+## Remaining key grammar
+
+Three gaps, three different answers:
+
+- `<`/`>` build the same `EditCommand::Trim` that `t` + motion builds; only
+  the landing position is decided by the jump-point set rather than a typed
+  motion. No jump point in that direction is a user error, so the timeline is
+  untouched at the end of the timeline.
+- `it`/`at` in a VISUAL mode are a new `Action::NarrowSelection`: an object
+  typed with a selection live changes its *scope* and never its range, which
+  is what spec 6 asked for and what the objects carry a scope for.
+- A config-registered text object is `TextObject::Named { name, around }`.
+  The grammar carries the name and nothing else: resolving it needs Lua, so
+  the engine hands the whole verb back as `Outcome::ResolveObject` and the
+  host re-issues it with `Action::with_range`. The verb then runs through the
+  ordinary command path, so a plugin object undoes and repeats like any other
+  edit. Config wins over defaults, as it does for keymaps, so registering `c`
+  replaces the built-in `ic`/`ac` rather than being unreachable behind it.
+
+## `:analyze`
+
+Wiring, not machinery: `Analyser::reanalyse` already dropped every envelope
+and re-queued the work for the Lua `analyze` request, so the command is the
+same call with a sentence on the end. It lives in the editor for the reason
+`:normalize` does - the workspace has no analysis.
+
+## Undo history across crash recovery
+
+The autosave stopped being a flat command log. Each record now carries the
+tree edge its command was applied at, and a move of the current position is
+its own record, so recovery rebuilds a `SavedHistory` and hands it to
+`UndoTree::restore` - the same path a saved project takes. Undo no longer
+rewrites the file: a tree only grows, so the log is append-only unless the
+root itself changes.
+
+Tolerance is deliberate and narrow. Only the *last* record may be incomplete,
+and only when the file does not end in a newline - that is what a crash
+mid-write leaves. A `Current` record pointing past the states that survived
+lands on the last one rather than refusing the whole recovery.
+
+## Subtitle export selection
+
+`SubtitleMode` now reaches the renderer as one bit, `RenderSettings::
+burn_subtitles`, because that is the only decision the backend has to make:
+whether the text tracks are in the graph. Everything else is the CLI's, which
+is the layer allowed to do I/O - the sidecar is written before the render
+starts, so a cancelled export still leaves the SRT, and `embedded` muxes the
+same file into the output with ffmpeg once the render lands.
+
+Departure from the plan: a failed mux does not fail the export. The render is
+on disk and playable; only the subtitles are missing, which is a recoverable
+error and is reported as one.
+
+Found on the way: projecting a transition on a clip with no source handles
+underflowed. Generated clips have no handles, so this was reachable from a
+test and would have been reachable from an offline clip; the projection now
+saturates.
+
+## Lua-registered transition types
+
+`RenderBackend::register_transition` takes a `TransitionDef` - a name, a
+service and properties - so `davimci-lua` can define a type without learning
+what MLT is, and a backend with no registry refuses instead of pretending.
+The MLT side keeps registered types in a process-global map that `spec` reads
+before the built-ins, because `spec` is a pure lookup called from the
+projection, which has no backend to ask.
+
+`transitions::spec` stayed the only seam, so the degradation rule needed no
+change: a name this build does not know is still a dissolve, and a project
+made with a plugin opens without it.

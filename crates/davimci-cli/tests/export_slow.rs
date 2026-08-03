@@ -259,3 +259,95 @@ fn cancelling_a_real_export_stops_it_and_keeps_the_partial_file() {
     app.event(Event::Key(davimci_keys::Key::Char('l')), &mut editor);
     let _ = std::fs::remove_file(&out);
 }
+
+/// Each subtitle mode produces the file it promises (spec 8).
+#[test]
+fn subtitle_modes_burn_write_or_mux_and_are_told_apart_by_ffprobe() {
+    use davimci_backend::{AudioCodec, Container, Preset, SubtitleMode, VideoCodec};
+
+    let src = fixture("counter_720p.mkv");
+    for (name, mode) in [
+        ("subs_burned", SubtitleMode::Burned),
+        ("subs_sidecar", SubtitleMode::Sidecar),
+        ("subs_embedded", SubtitleMode::Embedded),
+    ] {
+        let (mut app, mut editor) = editor_with(&src);
+        // A text track with one cue on it, added the only way anything is
+        // added: through a command.
+        {
+            use davimci_cmd::EditCommand;
+            let session = app.session_mut();
+            session
+                .exec(&EditCommand::AddTrack {
+                    kind: davimci_core::TrackKind::Text,
+                    name: None,
+                    new_id: None,
+                })
+                .unwrap();
+            let track = session.timeline().tracks().last().unwrap().id;
+            let mut clip = davimci_core::Clip::generated(
+                davimci_core::ClipId(0),
+                "cue",
+                davimci_core::Frame(0),
+                davimci_core::Frame(30),
+            );
+            clip.text = Some("hello".into());
+            session
+                .exec(&EditCommand::Insert {
+                    track,
+                    at: davimci_core::Frame(0),
+                    clip,
+                    new_id: None,
+                })
+                .unwrap();
+        }
+        editor.prime(app.session());
+
+        let mut preset = Preset::new(name, Container::Mkv, VideoCodec::H264, AudioCodec::Aac)
+            .expect("a legal pairing");
+        preset.subtitles = mode;
+        editor.exporter_mut().presets_mut().define(preset);
+
+        let out = std::env::temp_dir().join(format!("davimci-slow-{name}.mkv"));
+        let srt = out.with_extension("srt");
+        let _ = std::fs::remove_file(&out);
+        let _ = std::fs::remove_file(&srt);
+
+        app.event(
+            Event::Command(format!(":export {} --preset {name}", out.display())),
+            &mut editor,
+        );
+        drain_export(&mut app, &mut editor);
+        assert!(out.exists(), "{name}: the export produced no file");
+
+        match mode {
+            SubtitleMode::Burned => {
+                assert_eq!(
+                    stream_count(&out, "s"),
+                    0,
+                    "{name}: burned-in text became a stream"
+                );
+                assert!(!srt.exists(), "{name}: burned-in text also wrote a sidecar");
+            }
+            SubtitleMode::Sidecar => {
+                assert_eq!(
+                    stream_count(&out, "s"),
+                    0,
+                    "{name}: a sidecar became a stream"
+                );
+                let text = std::fs::read_to_string(&srt).expect("a sidecar file");
+                assert!(text.contains("hello"), "{name}: the sidecar has no cue");
+            }
+            SubtitleMode::Embedded => {
+                assert_eq!(
+                    stream_count(&out, "s"),
+                    1,
+                    "{name}: the subtitle stream was not muxed in"
+                );
+            }
+            SubtitleMode::None => unreachable!(),
+        }
+        let _ = std::fs::remove_file(&out);
+        let _ = std::fs::remove_file(&srt);
+    }
+}

@@ -18,10 +18,14 @@ shared view state with waveforms and filmstrips. User Lua config is loaded at
 startup: keymaps, callbacks, custom motions, export presets and event handlers
 all reach the running editor, and a plugin edit is an ordinary undo step.
 
-Not yet done: the `:set` family, `<Space>l` (loop selection), `:analyze`, edge
-trims with `<`/`>`, text objects registered from Lua, sidecar and embedded
-subtitle export, Lua-registered transition types, and the TUI frontend. `plan.md` has the remaining work in dependency order; `todo.md` has
-the smaller gaps.
+The `:set` family, `<Space>l` (loop selection), `:analyze`, `<`/`>` edge
+trims, Lua-registered text objects and transition types, and sidecar and
+embedded subtitle export all work, and crash recovery restores the undo tree
+with its branches.
+
+Not yet done: the TUI frontend, a scripted-session file format, and the
+performance validation and soak testing of the hardening pass. `plan.md` has
+the remaining work in dependency order; `todo.md` has the smaller gaps.
 
 ## Usage
 

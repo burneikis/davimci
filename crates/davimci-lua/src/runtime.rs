@@ -210,6 +210,12 @@ impl Runtime {
         self.state.borrow().motions.keys().cloned().collect()
     }
 
+    /// Every transition type user config registered (spec 9.10).
+    #[must_use]
+    pub fn transitions(&self) -> Vec<crate::registry::TransitionDef> {
+        self.state.borrow().transitions.values().cloned().collect()
+    }
+
     #[must_use]
     pub fn object_names(&self) -> Vec<String> {
         self.state.borrow().objects.keys().cloned().collect()

@@ -40,6 +40,12 @@ pub enum CliError {
     #[error("there is no clip under the playhead to {0}")]
     NoClipUnderPlayhead(&'static str),
 
+    #[error("there is no setting called {0}; :set completes the ones there are")]
+    UnknownProperty(String),
+
+    #[error("{prop} needs {expected}")]
+    BadPropertyValue { prop: String, expected: String },
+
     #[error("there is no track named {0} in this timeline")]
     NoSuchTrack(String),
 
@@ -111,6 +117,8 @@ impl Classify for CliError {
             | Self::NothingToReplace
             | Self::NoClipUnderPlayhead(_)
             | Self::NoSuchTrack(_)
+            | Self::UnknownProperty(_)
+            | Self::BadPropertyValue { .. }
             | Self::AnalysisNotReady(_)
             | Self::NothingToExport
             | Self::NoExportRunning

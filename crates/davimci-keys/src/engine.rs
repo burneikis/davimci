@@ -52,7 +52,7 @@ pub enum MediaIntent {
     Replace,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Outcome {
     /// A sequence is still being typed.
     Pending,
@@ -94,6 +94,15 @@ pub enum Outcome {
     /// A Lua-bound key fired; the host must run callback `.0` through
     /// `davimci_lua::Runtime::invoke` and execute the requests it returns.
     Plugin(u32),
+    /// A config-registered text object was typed (spec 9.4). Only the host
+    /// has the Lua runtime, so it resolves the name and re-issues the verb
+    /// with [`Engine::execute_action`] and the range it answered.
+    ResolveObject {
+        name: char,
+        around: bool,
+        /// The verb to run once the range is known.
+        verb: Box<Action>,
+    },
     /// Something named in the spec but not yet backed by a command.
     NotImplemented(&'static str),
     /// Rejected: the message is user-facing text, never `Debug` output.
@@ -106,7 +115,7 @@ pub enum Outcome {
 /// The policy travels with the outcome rather than being looked up later
 /// because the host never sees the [`Action`]: only the engine knows which
 /// binding the keys resolved to.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Feed {
     pub outcome: Outcome,
     pub transport: TransportPolicy,
@@ -251,6 +260,19 @@ impl Engine {
     }
 
     fn execute(&mut self, action: Action, session: &mut Session) -> Outcome {
+        // A registered object cannot be resolved here: it needs Lua, which
+        // lives above this crate. Hand the whole verb back to the host.
+        if let Action::Verb {
+            target: Target::Object(TextObject::Named { name, around }),
+            ..
+        } = action
+        {
+            return Outcome::ResolveObject {
+                name,
+                around,
+                verb: Box::new(action),
+            };
+        }
         match action {
             Action::Move { motion, count } => self.do_move(motion, count, session),
             Action::Verb {
@@ -330,7 +352,13 @@ impl Engine {
                 self.mode.toggle_visual_track(t);
                 Outcome::Moved
             }
-            Action::TrimEdgeStep { .. } => Outcome::NotImplemented("jump-point edge trim"),
+            Action::NarrowSelection { group } => self.do_narrow_selection(group, session),
+            Action::TrimEdgeStep { forward, count } => {
+                match self.do_trim_edge_step(forward, count, session) {
+                    Ok(o) => o,
+                    Err(e) => Outcome::Error(e.user_message_pub()),
+                }
+            }
             Action::GainAdjust(step) => self.do_gain(step, session),
             Action::ToggleMute => self.do_track_flags(session, true),
             Action::ToggleSolo => self.do_track_flags(session, false),
@@ -421,6 +449,9 @@ impl Engine {
                     Resolved::Range(r, s) => Ok(Some((r, s))),
                 }
             }
+            // The host resolved this range itself; scope is the focused
+            // track, as it is for every other single-track object.
+            Target::Range(range) => Ok(Some((*range, Scope::single(playhead.track)))),
             Target::Visual => Ok(self
                 .mode
                 .visual()
@@ -646,6 +677,68 @@ impl Engine {
             _ => return Err(KeysError::Internal("that operator is not an edge trim")),
         };
         Ok(run(session.exec(&cmd)))
+    }
+
+    /// `it` / `at` with a selection live: keep the focused track, or the
+    /// focused track and everything its link group reaches (spec 6).
+    ///
+    /// The range is untouched - an object typed in VISUAL changes *scope*,
+    /// which is the whole reason the objects carry one.
+    fn do_narrow_selection(&mut self, group: bool, session: &Session) -> Outcome {
+        if self.mode.visual().is_none() {
+            return Outcome::Invalid;
+        }
+        let tl = session.timeline();
+        let head = tl.playhead();
+        let mut tracks = vec![head.track];
+        if group
+            && let Some(g) = tl
+                .track(head.track)
+                .and_then(|t| t.clip_at(head.frame))
+                .and_then(|c| c.group)
+        {
+            tracks.extend(tl.group_members(g).into_iter().map(|(t, _)| t));
+            tracks.dedup();
+        }
+        self.mode.set_visual_tracks(tracks);
+        Outcome::Moved
+    }
+
+    /// `<` / `>`: ripple-trim the nearest edge by `count` jump points
+    /// (spec 4.0.1).
+    ///
+    /// Same command as `t` + motion; only the landing position is decided
+    /// differently - by the jump-point set rather than by a typed motion, so
+    /// the step is whatever the current zoom calls one (spec 3.2).
+    fn do_trim_edge_step(
+        &mut self,
+        forward: bool,
+        count: u32,
+        session: &mut Session,
+    ) -> Result<Outcome, KeysError> {
+        let playhead = session.timeline().playhead();
+        let track = playhead.track;
+        let (clip, edge) = nearest_edge(session.timeline(), track, playhead.frame)
+            .ok_or(KeysError::EmptyTarget)?;
+        let anchor =
+            edge_frame(session.timeline(), track, clip, edge).ok_or(KeysError::EmptyTarget)?;
+        let direction = if forward {
+            davimci_motion::Direction::Forward
+        } else {
+            davimci_motion::Direction::Backward
+        };
+        let jumps = self.jump_points(session.timeline());
+        // No jump point that way is the timeline's edge: nothing to trim to,
+        // and a user error rather than a silent no-op.
+        let to = jumps
+            .step(anchor, direction, count.max(1))
+            .ok_or(KeysError::EmptyTarget)?;
+        Ok(run(session.exec(&EditCommand::Trim {
+            track,
+            clip,
+            edge,
+            delta: delta_of(anchor, to),
+        })))
     }
 
     fn do_fade(&mut self, target: &Target, session: &mut Session) -> Result<Outcome, KeysError> {

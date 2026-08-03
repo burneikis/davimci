@@ -258,7 +258,7 @@ fn source_ms_range(clip: &Clip, fps: Fps) -> (u64, u64) {
     (start, start + ms(clip.duration).max(1))
 }
 
-fn frames_for_ms(ms: u64, fps: Fps) -> u64 {
+pub(crate) fn frames_for_ms(ms: u64, fps: Fps) -> u64 {
     (ms as f64 * fps.as_f64() / 1000.0).round() as u64
 }
 

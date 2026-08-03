@@ -9,7 +9,8 @@ use std::path::PathBuf;
 use davimci_analysis::{FfprobeProber, ImportOptions, Prober};
 use davimci_cmd::EditCommand;
 use davimci_core::{
-    DEFAULT_TRANSITION, DEFAULT_TRANSITION_FRAMES, Frame, Selection, TimelineProps, Transition,
+    ClipProps, DEFAULT_TRANSITION, DEFAULT_TRANSITION_FRAMES, Frame, Selection, TimelineProps,
+    Transition,
 };
 
 use crate::autosave::OnRecovery;
@@ -69,6 +70,13 @@ pub enum ExCommand {
         kind: Option<String>,
         frames: Option<u64>,
     },
+    /// `:analyze` - drop every envelope and measure the audio again
+    /// (spec 12, 10.2). Needs the analyser, so the editor runs it.
+    Analyze,
+    /// `:set <property> <value>` (spec 12.1). The value is parsed and
+    /// range-checked at parse time, so an accepted `ExCommand::Set` is one
+    /// the model will take.
+    Set(crate::setting::Setting),
 }
 
 /// Default target for `:normalize`, in dBFS RMS. Conservative on purpose:
@@ -245,6 +253,14 @@ pub fn parse(line: &str) -> Result<ExCommand, CliError> {
                 _ => Err(bad()),
             }
         }
+        "set" | "se" => match args.as_slice() {
+            [prop, value] => crate::setting::parse(prop, value).map(ExCommand::Set),
+            _ => Err(CliError::Usage {
+                cmd: "set".into(),
+                usage: "<property> <value>".into(),
+            }),
+        },
+        "analyze" | "analyse" => Ok(ExCommand::Analyze),
         "presets" => Ok(ExCommand::Presets),
         "cancel" => Ok(ExCommand::CancelRender),
         "new" => Ok(ExCommand::New),
@@ -301,6 +317,9 @@ pub fn vocabulary() -> Vec<String> {
         "normalise",
         "duck",
         "transition",
+        "analyze",
+        "analyse",
+        "set",
         "new",
         "ls",
         "buffers",
@@ -436,12 +455,20 @@ impl Workspace {
             }
             // These two measure the audio, so they need the analysis the
             // editor owns; it intercepts them before they arrive here.
-            ExCommand::Normalize { .. } | ExCommand::Duck { .. } => {
+            ExCommand::Normalize { .. } | ExCommand::Duck { .. } | ExCommand::Analyze => {
                 Err(CliError::AnalysisNotReady("this command"))
             }
             // A transition is an undoable edit on the timeline and needs
             // neither backend nor analysis, so it runs here (spec 6.2).
             ExCommand::Transition { kind, frames } => self.transition(kind.as_deref(), *frames),
+            // `:set preview` is the one setting the workspace cannot answer:
+            // it belongs to the preview, which only the editor owns, and the
+            // editor intercepts it before it arrives here.
+            ExCommand::Set(crate::setting::Setting::Preview(_)) => Err(CliError::Usage {
+                cmd: "set preview".into(),
+                usage: "on|off needs a running editor".into(),
+            }),
+            ExCommand::Set(setting) => self.set(setting, selection),
             ExCommand::Relink { old, new } => self.relink(old.as_deref(), new),
         }
     }
@@ -492,6 +519,113 @@ impl Workspace {
             imported.path,
             imported.mapping.len()
         )))
+    }
+
+    /// `:set <property> <value>` on the selection, or on the clip under the
+    /// playhead when nothing is selected (spec 12.1).
+    ///
+    /// Every setter is one command, so a selection-wide change is one `u`.
+    fn set(
+        &mut self,
+        setting: &crate::setting::Setting,
+        selection: Option<&Selection>,
+    ) -> Result<ExOutcome, CliError> {
+        use crate::setting::{Setting, TransformField};
+        let fps = self.current().timeline().props.fps;
+        let clip_props = |clip: &davimci_core::Clip| -> ClipProps {
+            let mut props = clip.props;
+            match setting {
+                Setting::Transform(field, v) => match field {
+                    TransformField::X => props.transform.x = *v,
+                    TransformField::Y => props.transform.y = *v,
+                    TransformField::Scale => props.transform.scale = *v,
+                    TransformField::Opacity => props.transform.opacity = *v,
+                },
+                Setting::Gain(db) => props.gain_db = *db,
+                Setting::Fade(end, ms) => {
+                    // Clamped to the clip, exactly as `:fade` is: the two
+                    // spellings must not mean different things.
+                    let frames = Frame(crate::audio::frames_for_ms(*ms, fps)).min(clip.duration);
+                    match end {
+                        crate::audio::FadeEnd::In => props.fade_in = frames,
+                        crate::audio::FadeEnd::Out => props.fade_out = frames,
+                    }
+                }
+                _ => {}
+            }
+            props
+        };
+        match setting {
+            Setting::Transform(..) | Setting::Gain(_) | Setting::Fade(..) => {
+                let clips = crate::audio::targets(self.current().timeline(), selection, "set")?;
+                let cmds = clips
+                    .iter()
+                    .map(|(track, clip)| EditCommand::SetProps {
+                        track: *track,
+                        clip: clip.id,
+                        props: clip_props(clip),
+                    })
+                    .collect();
+                self.exec(&EditCommand::Sequence(cmds))?;
+                Ok(ExOutcome::msg(format!(
+                    "{} {}",
+                    crate::audio::describe(&clips),
+                    describe_setting(setting)
+                )))
+            }
+            Setting::TransitionDuration(_) | Setting::TransitionType(_) => {
+                let tl = self.current().timeline();
+                let head = tl.playhead();
+                // The transition under the playhead first, then the one on
+                // the nearest cut: the user standing inside an overlap means
+                // that overlap (spec 6.2).
+                let (clip, existing) = tl
+                    .transition_at(head.track, head.frame)
+                    .map(|(clip, t)| (clip, t.clone()))
+                    .or_else(|| {
+                        let (clip, _) = tl.nearest_cut(head.track, head.frame)?;
+                        let t = tl.track(head.track)?.clip(clip)?.transition_in.clone()?;
+                        Some((clip, t))
+                    })
+                    .ok_or(CliError::NoTransitionTarget {
+                        what: "transition to change",
+                    })?;
+                let transition = match setting {
+                    Setting::TransitionDuration(frames) => {
+                        Transition::new(&existing.kind, Frame(*frames))
+                    }
+                    Setting::TransitionType(kind) => Transition::new(kind, existing.duration),
+                    _ => existing,
+                };
+                self.exec(&EditCommand::SetTransition {
+                    track: head.track,
+                    clip,
+                    transition: Some(transition),
+                })?;
+                Ok(ExOutcome::msg(format!(
+                    "transition {}",
+                    describe_setting(setting)
+                )))
+            }
+            Setting::TimelineFps(fps) => {
+                let props = TimelineProps {
+                    fps: *fps,
+                    ..self.current().timeline().props
+                };
+                self.exec(&EditCommand::Reconform { props })?;
+                Ok(ExOutcome::msg(format!("timeline conformed to {props}")))
+            }
+            Setting::TimelineResolution(resolution) => {
+                let props = TimelineProps {
+                    resolution: *resolution,
+                    ..self.current().timeline().props
+                };
+                self.exec(&EditCommand::Reconform { props })?;
+                Ok(ExOutcome::msg(format!("timeline conformed to {props}")))
+            }
+            // Handled by the editor; unreachable through this path.
+            Setting::Preview(_) => Err(CliError::UnknownProperty("preview".into())),
+        }
     }
 
     /// `:relink` (Phase 0 offline-media policy): point clips at a file that
@@ -582,6 +716,22 @@ impl Workspace {
         } else {
             format!("relinked {n} clip(s) to {new}")
         }))
+    }
+}
+
+/// What a `:set` did, as a status-line phrase.
+fn describe_setting(setting: &crate::setting::Setting) -> String {
+    use crate::setting::Setting;
+    match setting {
+        Setting::Transform(field, v) => format!("{} = {v}", field.name()),
+        Setting::Gain(db) => format!("gain {db:+} dB"),
+        Setting::Fade(crate::audio::FadeEnd::In, ms) => format!("fade in {ms} ms"),
+        Setting::Fade(crate::audio::FadeEnd::Out, ms) => format!("fade out {ms} ms"),
+        Setting::TransitionDuration(frames) => format!("{frames} frames"),
+        Setting::TransitionType(kind) => format!("set to {kind}"),
+        Setting::TimelineFps(fps) => format!("{fps}"),
+        Setting::TimelineResolution(r) => format!("{r}"),
+        Setting::Preview(on) => format!("preview {}", if *on { "on" } else { "off" }),
     }
 }
 

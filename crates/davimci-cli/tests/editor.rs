@@ -710,3 +710,64 @@ fn ducking_without_analysis_leaves_the_timeline_alone() {
     assert!(msg.contains("analysis"), "{msg}");
     assert_eq!(app.session().timeline(), &before);
 }
+
+// `<Space>l` (spec 3.2.1)
+
+#[test]
+fn looping_wraps_at_the_loop_end_instead_of_stopping() {
+    let (mut app, mut editor) = editor();
+    // In NORMAL the loop is the clip under the playhead: frames 0..100.
+    feed(&mut app, &mut editor, " l");
+    assert_eq!(
+        editor.loop_range(),
+        Some((davimci_core::Frame(0), davimci_core::Frame(100)))
+    );
+    assert_eq!(editor.transport_state(), TransportState::Playing);
+
+    let mut wrapped = false;
+    let mut last = davimci_core::Frame::ZERO;
+    for _ in 0..1_000 {
+        app.event(Event::Tick, &mut editor);
+        let at = app.session().timeline().playhead().frame;
+        if at < last {
+            wrapped = true;
+            break;
+        }
+        last = at;
+        assert!(at <= davimci_core::Frame(100), "ran past the loop end");
+    }
+    assert!(wrapped, "playback did not wrap at the loop end");
+    assert_eq!(editor.transport_state(), TransportState::Playing);
+
+    // Pressing it again on the same range turns the loop off.
+    feed(&mut app, &mut editor, " l");
+    assert_eq!(editor.loop_range(), None);
+}
+
+#[test]
+fn clearing_the_selection_ends_the_loop_with_a_message() {
+    let (mut app, mut editor) = editor();
+    feed(&mut app, &mut editor, "v");
+    feed(&mut app, &mut editor, " l");
+    assert!(editor.loop_range().is_some(), "a selection did not loop");
+    feed(&mut app, &mut editor, "<Esc>");
+    assert_eq!(editor.loop_range(), None);
+    assert!(
+        editor
+            .take_notices()
+            .iter()
+            .any(|m| m.text.contains("loop ended")),
+        "the user was not told the loop ended"
+    );
+}
+
+#[test]
+fn analyze_is_accepted_and_reports_what_it_queued() {
+    let (mut app, mut editor) = editor();
+    app.event(Event::Command("analyze".into()), &mut editor);
+    let message = app.view().message.map(|m| m.text).unwrap_or_default();
+    assert!(
+        message.contains("analys"),
+        ":analyze was not accepted: {message}"
+    );
+}

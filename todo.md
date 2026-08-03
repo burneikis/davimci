@@ -6,3 +6,8 @@
 - write docs, guide for the codebase and how to learn it
 - plugin support for gui windows
 - ask for `.davimci.lua` trust in the window rather than on the terminal, once the app has a modal path
+- `:set proxy on|off` (spec 10.3) is named in the spec but not in the `:set`
+  registry; proxies have no runtime switch yet
+- a burned-in subtitle is not asserted by a pixel diff: MLT's text producers
+  need a display, so the slow test only proves the text stayed out of the
+  streams and the sidecar

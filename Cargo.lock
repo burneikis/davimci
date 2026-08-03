@@ -494,6 +494,7 @@ dependencies = [
  "davimci-keys",
  "davimci-lua",
  "davimci-mlt",
+ "davimci-motion",
  "davimci-present",
  "davimci-tui",
  "eframe",

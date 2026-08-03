@@ -9,7 +9,7 @@ use davimci_cmd::Session;
 use davimci_core::{ClipId, Frame, Selection, TrackId};
 use davimci_keys::engine::{Outcome, TransportCmd};
 use davimci_keys::{Engine, Key, Keymap, MediaIntent, Mode, ZoomIntent};
-use davimci_motion::{JumpConfig, Zoom};
+use davimci_motion::{JumpConfig, TimeRange, Zoom};
 
 use crate::cmdline::{CommandKey, CommandLine, CommandLineEvent};
 use crate::error::AppError;
@@ -48,8 +48,33 @@ pub trait Host {
 
     /// Dispatch a transport action to the backend clock. Never an edit, so it
     /// never reaches the undo log (spec 3.2.1).
-    fn transport(&mut self, cmd: TransportCmd) {
-        let _ = cmd;
+    ///
+    /// `selection` carries what is selected, because `<Space>l` loops it and
+    /// the visual selection lives in the key engine, not in the host.
+    fn transport(&mut self, cmd: TransportCmd, selection: Option<&Selection>) {
+        let _ = (cmd, selection);
+    }
+
+    /// The visual selection changed or was cleared (spec 6). Only the loop
+    /// cares: a loop that follows a selection ends when the selection does.
+    fn selection_changed(&mut self, selection: Option<&Selection>) {
+        let _ = selection;
+    }
+
+    /// Resolve a config-registered text object (spec 9.4) against the clip
+    /// under the playhead. Only the host has the Lua runtime, so the grammar
+    /// hands the name here and applies the verb to whatever range comes
+    /// back. `Ok(None)` means the object matched nothing.
+    fn resolve_object(
+        &mut self,
+        name: char,
+        around: bool,
+        session: &Session,
+    ) -> Result<Option<TimeRange>, AppError> {
+        let _ = (name, around, session);
+        Err(AppError::UnhandledCommand(format!(
+            "no text object '{name}' is registered"
+        )))
     }
 
     /// Stop playback and commit the playhead where it reached (spec 3.2.1).
@@ -437,6 +462,10 @@ impl App {
         // the host when the line is submitted.
         let before = self.engine.selection();
         let fed = self.engine.feed(key, &mut self.session);
+        let after = self.engine.selection();
+        if after != before {
+            host.selection_changed(after.as_ref());
+        }
         if self.engine.mode() == Mode::Command {
             self.pending_selection = before;
         }
@@ -684,7 +713,10 @@ impl App {
                     self.apply_outcome(o, host);
                 }
             }
-            Outcome::Transport(cmd) => host.transport(cmd),
+            Outcome::Transport(cmd) => {
+                let selection = self.engine.selection();
+                host.transport(cmd, selection.as_ref());
+            }
             Outcome::Zoom(intent) => match intent {
                 ZoomIntent::In => self.zoom_in(),
                 ZoomIntent::Out => self.zoom_out(),
@@ -709,6 +741,23 @@ impl App {
                 Ok(effects) => self.apply_plugin(effects, host),
                 Err(e) => self.messages.push(Message::error(e.to_string())),
             },
+            // A registered object is resolved by the host and the verb then
+            // runs through the engine, so a plugin object edits by the same
+            // write path a built-in one does (spec 9.9).
+            Outcome::ResolveObject { name, around, verb } => {
+                match host.resolve_object(name, around, &self.session) {
+                    Ok(Some(range)) => {
+                        let outcome = self
+                            .engine
+                            .execute_action(verb.with_range(range), &mut self.session);
+                        return self.apply_outcome(outcome, host);
+                    }
+                    Ok(None) => self.messages.push(Message::warning(format!(
+                        "The text object '{name}' matched nothing here."
+                    ))),
+                    Err(e) => self.messages.push(Message::error(e.to_string())),
+                }
+            }
             Outcome::NotImplemented(what) => self
                 .messages
                 .push(Message::warning(format!("Not implemented yet: {what}."))),

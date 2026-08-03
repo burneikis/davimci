@@ -268,6 +268,9 @@ impl Preset {
             // routed is decided against the timeline at export time.
             separate_audio_tracks: self.container.keeps_audio_tracks_separate()
                 && self.audio_tracks != TrackSelection::None,
+            // Only `burned` paints the text into the picture; the other
+            // modes keep it out of the graph entirely (spec 8).
+            burn_subtitles: self.subtitles == SubtitleMode::Burned,
             extra: self.extra.clone(),
         }
     }

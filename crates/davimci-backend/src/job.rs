@@ -18,6 +18,10 @@ pub struct RenderSettings {
     /// Only some containers can carry that, and only some sources can be
     /// routed, so this is decided before the render rather than during it.
     pub separate_audio_tracks: bool,
+    /// Whether text tracks are composited into the picture (spec 8). False
+    /// for the sidecar and embedded modes, where the subtitles travel as
+    /// their own file or stream instead of being painted on.
+    pub burn_subtitles: bool,
     /// Extra backend properties, passed through verbatim.
     pub extra: Vec<(String, String)>,
 }
@@ -31,6 +35,7 @@ impl Default for RenderSettings {
             audio_codec: "aac".into(),
             container: "mkv".into(),
             separate_audio_tracks: false,
+            burn_subtitles: true,
             extra: Vec::new(),
         }
     }
@@ -132,4 +137,17 @@ mod tests {
         assert!(RenderState::Cancelled.is_terminal());
         assert!(RenderState::Failed("x".into()).is_terminal());
     }
+}
+
+/// A transition type a config registered (spec 9.10).
+///
+/// Named in backend terms and nothing more: `service` is whatever the render
+/// engine calls the effect, and `props` are passed to it verbatim. The layer
+/// that writes one of these never needs to know which engine is behind the
+/// trait.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransitionDef {
+    pub name: String,
+    pub service: String,
+    pub props: Vec<(String, String)>,
 }
