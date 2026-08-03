@@ -170,6 +170,22 @@ pub enum EditCommand {
         clip: ClipId,
         props: ClipProps,
     },
+    /// Edit a subtitle clip's text (spec §8, §15.4).
+    SetClipText {
+        track: TrackId,
+        clip: ClipId,
+        text: String,
+    },
+    /// Mute/solo a track (`<Space>m`, `<Space>s`, spec §6.1).
+    ///
+    /// Track state rather than a clip edit, but still a command: it is
+    /// undoable, repeatable and scriptable for exactly the same reason every
+    /// other mutation is.
+    SetTrackFlags {
+        track: TrackId,
+        muted: bool,
+        solo: bool,
+    },
     /// Point a clip's media at another file (`:relink`, spec §12). The
     /// `offline` flag is decided by the caller, which is the only layer that
     /// may touch the filesystem.
@@ -206,6 +222,8 @@ pub const VARIANT_NAMES: &[&str] = &[
     "Reconform",
     "RestoreConform",
     "SetProps",
+    "SetClipText",
+    "SetTrackFlags",
     "Relink",
     "Sequence",
 ];
@@ -234,6 +252,8 @@ impl EditCommand {
             Self::Reconform { .. } => "Reconform",
             Self::RestoreConform { .. } => "RestoreConform",
             Self::SetProps { .. } => "SetProps",
+            Self::SetClipText { .. } => "SetClipText",
+            Self::SetTrackFlags { .. } => "SetTrackFlags",
             Self::Relink { .. } => "Relink",
             Self::Sequence(_) => "Sequence",
         }
@@ -330,6 +350,12 @@ impl Command for EditCommand {
                 format!("conform the timeline back to {}", state.props)
             }
             Self::SetProps { clip, .. } => format!("set properties of {clip}"),
+            Self::SetClipText { clip, .. } => format!("edit text of {clip}"),
+            Self::SetTrackFlags { track, muted, solo } => match (muted, solo) {
+                (true, _) => format!("mute {track}"),
+                (false, true) => format!("solo {track}"),
+                (false, false) => format!("unmute {track}"),
+            },
             Self::Relink { clip, path, .. } => format!("relink {clip} to {path}"),
             Self::Sequence(v) => match v.len() {
                 0 => "nothing".to_string(),
@@ -714,6 +740,35 @@ impl Command for EditCommand {
                         track: *track,
                         clip: *clip,
                         props: previous,
+                    },
+                })
+            }
+
+            Self::SetClipText { track, clip, text } => {
+                let previous = tl.set_clip_text(*track, *clip, text.clone())?;
+                Ok(Effect {
+                    applied: self.clone(),
+                    inverse: Self::SetClipText {
+                        track: *track,
+                        clip: *clip,
+                        text: previous,
+                    },
+                })
+            }
+
+            Self::SetTrackFlags { track, muted, solo } => {
+                let previous = tl
+                    .track(*track)
+                    .map(|t| (t.muted, t.solo))
+                    .ok_or_else(|| CoreError::NoSuchTrack(track.to_string()))?;
+                tl.set_track_muted(*track, *muted)?;
+                tl.set_track_solo(*track, *solo)?;
+                Ok(Effect {
+                    applied: self.clone(),
+                    inverse: Self::SetTrackFlags {
+                        track: *track,
+                        muted: previous.0,
+                        solo: previous.1,
                     },
                 })
             }
@@ -1151,6 +1206,33 @@ mod tests {
     }
 
     #[test]
+    fn mute_and_solo_round_trip_as_commands() {
+        // Spec §6.1: track state, but undoable like any other mutation.
+        let mut tl = fixture(&[("A1", &[(0, 10, "a")]), ("A2", &[(0, 10, "b")])]);
+        let a1 = track_id(&tl, "A1");
+        roundtrip(
+            &mut tl,
+            &EditCommand::SetTrackFlags {
+                track: a1,
+                muted: true,
+                solo: false,
+            },
+        );
+        assert!(tl.track(a1).unwrap().muted);
+        roundtrip(
+            &mut tl,
+            &EditCommand::SetTrackFlags {
+                track: a1,
+                muted: false,
+                solo: true,
+            },
+        );
+        let t = tl.track(a1).unwrap();
+        assert!(!t.muted, "the inverse restored the mute it replaced");
+        assert!(t.solo);
+    }
+
+    #[test]
     fn relink_round_trips_and_restores_the_offline_flag() {
         let mut tl = media_fixture(&[(0, 100, 0, 200)]);
         let clip = clip_ids(&tl, "V1")[0];
@@ -1389,6 +1471,16 @@ mod tests {
                 track,
                 clip,
                 props: ClipProps::default(),
+            },
+            EditCommand::SetClipText {
+                track,
+                clip,
+                text: "hello".into(),
+            },
+            EditCommand::SetTrackFlags {
+                track,
+                muted: true,
+                solo: false,
             },
             EditCommand::Relink {
                 clip,

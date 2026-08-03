@@ -15,7 +15,9 @@ use crate::error::CliError;
 use crate::workspace::Workspace;
 
 /// A parsed `:` command.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Not `Eq`: gain and fade targets are decibels, and decibels are floats.
+#[derive(Debug, Clone, PartialEq)]
 pub enum ExCommand {
     /// `:w [path]`
     Write(Option<PathBuf>),
@@ -49,7 +51,19 @@ pub enum ExCommand {
     Presets,
     /// `:cancel` - stop the running export.
     CancelRender,
+    /// `:gain <db>` - absolute gain on the clip under the playhead (§6.1).
+    Gain(f32),
+    /// `:fade in|out <ms>` (§6.1).
+    Fade { end: crate::audio::FadeEnd, ms: u64 },
+    /// `:normalize [target_db]` (§6.1). Needs analysis, so the editor runs it.
+    Normalize { target_db: f32 },
+    /// `:duck <track> <db>` (§6.1). Needs analysis, so the editor runs it.
+    Duck { track: String, db: f32 },
 }
+
+/// Default target for `:normalize`, in dBFS RMS. Conservative on purpose:
+/// normalising should not be the thing that introduces clipping.
+pub const DEFAULT_NORMALIZE_DB: f32 = -12.0;
 
 /// What running a command produced. Messages are user-facing sentences, never
 /// `Debug` output (Phase 0 rule 4).
@@ -136,6 +150,64 @@ pub fn parse(line: &str) -> Result<ExCommand, CliError> {
         "render" => Ok(ExCommand::Render {
             preset: one("render", "<preset>")?,
         }),
+        "gain" => {
+            let v = one("gain", "<db>")?;
+            v.parse::<f32>()
+                .map(ExCommand::Gain)
+                .map_err(|_| CliError::Usage {
+                    cmd: "gain".into(),
+                    usage: "<db>".into(),
+                })
+        }
+        "fade" => match args.as_slice() {
+            [dir, ms] => {
+                let end = crate::audio::FadeEnd::parse(dir).ok_or_else(|| CliError::Usage {
+                    cmd: "fade".into(),
+                    usage: "in|out <ms>".into(),
+                })?;
+                let ms = ms.parse::<u64>().map_err(|_| CliError::Usage {
+                    cmd: "fade".into(),
+                    usage: "in|out <ms>".into(),
+                })?;
+                Ok(ExCommand::Fade { end, ms })
+            }
+            _ => Err(CliError::Usage {
+                cmd: "fade".into(),
+                usage: "in|out <ms>".into(),
+            }),
+        },
+        "normalize" | "normalise" => match args.as_slice() {
+            [] => Ok(ExCommand::Normalize {
+                target_db: DEFAULT_NORMALIZE_DB,
+            }),
+            [db] => db
+                .parse::<f32>()
+                .map(|target_db| ExCommand::Normalize { target_db })
+                .map_err(|_| CliError::Usage {
+                    cmd: "normalize".into(),
+                    usage: "[target_db]".into(),
+                }),
+            _ => Err(CliError::Usage {
+                cmd: "normalize".into(),
+                usage: "[target_db]".into(),
+            }),
+        },
+        "duck" => match args.as_slice() {
+            [track, db] => db
+                .parse::<f32>()
+                .map(|db| ExCommand::Duck {
+                    track: (*track).to_string(),
+                    db,
+                })
+                .map_err(|_| CliError::Usage {
+                    cmd: "duck".into(),
+                    usage: "<track> <db>".into(),
+                }),
+            _ => Err(CliError::Usage {
+                cmd: "duck".into(),
+                usage: "<track> <db>".into(),
+            }),
+        },
         "presets" => Ok(ExCommand::Presets),
         "cancel" => Ok(ExCommand::CancelRender),
         "new" => Ok(ExCommand::New),
@@ -228,6 +300,33 @@ impl Workspace {
             ExCommand::Buffer(n) => {
                 self.goto_buffer_id(*n)?;
                 Ok(ExOutcome::msg(self.current().name()))
+            }
+            // Gain and fades are clip properties, so the workspace can run
+            // them: no backend, no analysis, just an undoable edit (§6.1).
+            ExCommand::Gain(db) => {
+                let (track, clip) =
+                    crate::audio::clip_under_playhead(self.current().timeline(), "set gain on")?;
+                self.exec(&crate::audio::gain(track, &clip, *db))?;
+                Ok(ExOutcome::msg(format!("{} gain {db:+} dB", clip.label)))
+            }
+            ExCommand::Fade { end, ms } => {
+                let fps = self.current().timeline().props.fps;
+                let (track, clip) =
+                    crate::audio::clip_under_playhead(self.current().timeline(), "fade")?;
+                self.exec(&crate::audio::fade(track, &clip, *end, *ms, fps))?;
+                Ok(ExOutcome::msg(format!(
+                    "{} fade {} {ms} ms",
+                    clip.label,
+                    match end {
+                        crate::audio::FadeEnd::In => "in",
+                        crate::audio::FadeEnd::Out => "out",
+                    }
+                )))
+            }
+            // These two measure the audio, so they need the analysis the
+            // editor owns; it intercepts them before they arrive here.
+            ExCommand::Normalize { .. } | ExCommand::Duck { .. } => {
+                Err(CliError::AnalysisNotReady("this command"))
             }
             ExCommand::Relink { old, new } => self.relink(old.as_deref(), new),
         }

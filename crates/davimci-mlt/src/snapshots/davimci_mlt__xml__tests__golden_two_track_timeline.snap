@@ -34,5 +34,12 @@ expression: "to_xml(&Projection::of(&tl))"
   <tractor id="tractor0">
     <track producer="playlist0" hide="0"/>
     <track producer="playlist1" hide="1"/>
+    <transition id="mix0">
+      <property name="mlt_service">mix</property>
+      <property name="a_track">0</property>
+      <property name="b_track">1</property>
+      <property name="always_active">1</property>
+      <property name="sum">1</property>
+    </transition>
   </tractor>
 </mlt>

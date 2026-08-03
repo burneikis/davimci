@@ -36,6 +36,20 @@ pub fn to_xml(p: &Projection) -> String {
                 if let crate::projection::Resource::Offline { path } = &c.resource {
                     prop(&mut out, "davimci.offline", path);
                 }
+                // One track per stream (spec §7): without these a
+                // multi-stream file would decode its default stream on
+                // every track.
+                match c.stream {
+                    Some(crate::projection::StreamSelect::Audio(s)) => {
+                        prop(&mut out, "audio_index", &s.to_string());
+                        prop(&mut out, "video_index", "-1");
+                    }
+                    Some(crate::projection::StreamSelect::Video(s)) => {
+                        prop(&mut out, "video_index", &s.to_string());
+                        prop(&mut out, "audio_index", "-1");
+                    }
+                    None => {}
+                }
                 prop(&mut out, "davimci.clip", &c.clip.to_string());
                 prop(&mut out, "davimci.label", &c.label);
                 for f in &c.filters {
@@ -56,6 +70,19 @@ pub fn to_xml(p: &Projection) -> String {
             out,
             "    <track producer=\"playlist{ti}\" hide=\"{}\"/>",
             track.hide()
+        );
+    }
+    // Audio is summed by transitions, not by the multitrack: without these a
+    // tractor plays one track's audio and drops the rest.
+    for (n, b) in p.audio_mix_tracks().into_iter().enumerate() {
+        let _ = writeln!(
+            out,
+            "    <transition id=\"mix{n}\">\n      \
+             <property name=\"mlt_service\">mix</property>\n      \
+             <property name=\"a_track\">0</property>\n      \
+             <property name=\"b_track\">{b}</property>\n      \
+             <property name=\"always_active\">1</property>\n      \
+             <property name=\"sum\">1</property>\n    </transition>"
         );
     }
     out.push_str("  </tractor>\n");
@@ -174,6 +201,16 @@ mod tests {
         )
         .unwrap();
         insta::assert_snapshot!(to_xml(&Projection::of(&tl)));
+    }
+
+    #[test]
+    fn golden_routed_multi_audio_export_graph() {
+        // The export shape M3 depends on: one stream per audio track, each
+        // routed to its own channel pair before the mix sums them.
+        let mut p = Projection::of(&davimci_core::testing::multi_audio_fixture(3, Some(1)));
+        let layout = p.route_audio().expect("three audio tracks");
+        assert_eq!(layout.total_channels, 6);
+        insta::assert_snapshot!(to_xml(&p));
     }
 
     #[test]

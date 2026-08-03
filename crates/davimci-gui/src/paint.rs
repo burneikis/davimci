@@ -40,6 +40,8 @@ pub enum Fill {
     ClipOffline,
     ClipLinked,
     Selection,
+    /// One column of an audio lane's envelope (spec §6.1).
+    Waveform,
     Playhead,
     TickMajor,
     TickMinor,

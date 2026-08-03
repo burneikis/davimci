@@ -47,6 +47,17 @@ impl Resource {
     }
 }
 
+/// Which stream of a container an entry plays.
+///
+/// A multi-stream file becomes one track per stream (spec §7), so an entry
+/// that does not name its stream would play the demuxer's default and every
+/// audio track would carry the same samples.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StreamSelect {
+    Audio(u32),
+    Video(u32),
+}
+
 /// A render-time filter attached to one entry. Never destructive (spec §6.1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FilterSpec {
@@ -65,6 +76,12 @@ pub struct ClipEntry {
     /// **Inclusive** out-point: MLT's `out` is the last frame, not one past
     /// it, which is the one off-by-one this whole layer exists to contain.
     pub out_point: Frame,
+    /// Which stream of the resource to decode, when the resource has more
+    /// than one that could match.
+    pub stream: Option<StreamSelect>,
+    /// Channel count of the selected audio stream, when known. Export routing
+    /// needs it to know where the samples land after an upmix.
+    pub channels: Option<u16>,
     pub filters: Vec<FilterSpec>,
 }
 
@@ -134,6 +151,31 @@ impl TrackProjection {
     }
 }
 
+/// Where one audio track's samples sit in the export channel bus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AudioRoute {
+    pub track_index: usize,
+    pub start: u16,
+    pub channels: u16,
+}
+
+/// The channel bus an export uses to keep audio tracks apart.
+///
+/// The tractor mixes tracks into one frame, so "one stream per track" is
+/// really "one channel range per track": each track is routed to its own
+/// range before the mix, and the consumer cuts the bus back up into streams.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AudioLayout {
+    pub total_channels: u16,
+    pub routes: Vec<AudioRoute>,
+}
+
+/// Channels given to each audio track on the export bus.
+pub const CHANNELS_PER_TRACK: u16 = 2;
+
+/// The most audio streams the avformat consumer can be told to write.
+pub const MAX_AUDIO_STREAMS: usize = 8;
+
 /// The whole timeline, projected onto a tractor of playlists.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Projection {
@@ -175,6 +217,67 @@ impl Projection {
         }
     }
 
+    /// Indexes of the tracks whose audio has to be summed into the mix.
+    ///
+    /// Track 0 is the accumulator, so every other track needs one `mix`
+    /// transition against it; without them a tractor plays the audio of one
+    /// track only.
+    #[must_use]
+    pub fn audio_mix_tracks(&self) -> Vec<usize> {
+        (1..self.tracks.len()).collect()
+    }
+
+    /// The channel bus for a separate-stream export, or `None` when there is
+    /// nothing to keep apart.
+    #[must_use]
+    pub fn audio_layout(&self) -> Option<AudioLayout> {
+        let audio: Vec<usize> = self
+            .tracks
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| t.kind == TrackKind::Audio)
+            .map(|(i, _)| i)
+            .collect();
+        if audio.len() < 2 || audio.len() > MAX_AUDIO_STREAMS {
+            return None;
+        }
+        let routes = audio
+            .iter()
+            .enumerate()
+            .map(|(n, &track_index)| AudioRoute {
+                track_index,
+                start: n as u16 * CHANNELS_PER_TRACK,
+                channels: CHANNELS_PER_TRACK,
+            })
+            .collect::<Vec<_>>();
+        Some(AudioLayout {
+            total_channels: routes.len() as u16 * CHANNELS_PER_TRACK,
+            routes,
+        })
+    }
+
+    /// Route every audio track to its own channel range, returning the bus.
+    ///
+    /// Routing filters go *after* the clip's own filters: gain and fades are
+    /// clip properties and belong in the source channels, before the samples
+    /// are moved somewhere the mix will not touch them.
+    pub fn route_audio(&mut self) -> Option<AudioLayout> {
+        let layout = self.audio_layout()?;
+        for route in &layout.routes {
+            let Some(track) = self.tracks.get_mut(route.track_index) else {
+                continue;
+            };
+            for entry in &mut track.entries {
+                if let Entry::Clip(c) = entry {
+                    let src = c.channels.unwrap_or(2);
+                    c.filters
+                        .extend(routing_filters(src, layout.total_channels, route.start));
+                }
+            }
+        }
+        Some(layout)
+    }
+
     /// Whether two projections describe the same set of playlists in the same
     /// order. A false here means the graph must be rebuilt rather than patched.
     #[must_use]
@@ -204,10 +307,20 @@ fn project_clip(clip: &Clip, kind: TrackKind) -> ClipEntry {
         (None, Some(t)) => Resource::Text(t.clone()),
         (None, None) => Resource::Colour,
     };
+    let stream = clip
+        .media
+        .as_ref()
+        .and_then(|m| m.stream)
+        .map(|s| match kind {
+            TrackKind::Audio => StreamSelect::Audio(s),
+            _ => StreamSelect::Video(s),
+        });
     ClipEntry {
         clip: clip.id,
         label: clip.label.clone(),
         resource,
+        stream,
+        channels: clip.media.as_ref().and_then(|m| m.channels),
         in_point: clip.source_in,
         // Half-open [start, end) on our side, inclusive `out` on MLT's.
         out_point: Frame(clip.source_in.get() + clip.duration.get() - 1),
@@ -264,6 +377,68 @@ fn filters_for(clip: &Clip, kind: TrackKind) -> Vec<FilterSpec> {
         });
     }
     out
+}
+
+/// Where a decoded stream's samples land once the frame is widened to
+/// `total` channels.
+///
+/// This is FFmpeg's default upmix, verified against MLT rather than assumed:
+/// a mono stream lands on front-centre (index 2) as soon as the layout has a
+/// centre channel, and a stereo stream stays on the front pair.
+fn source_positions(src_channels: u16, total: u16) -> Vec<u16> {
+    if total <= 2 {
+        return (0..src_channels.min(total)).collect();
+    }
+    match src_channels {
+        0 => Vec::new(),
+        1 => vec![2],
+        _ => vec![0, 1],
+    }
+}
+
+/// Move a track's samples into the channel range the export gave it.
+///
+/// Moves are swaps, never copies: a swap leaves silence behind, so a track
+/// cannot leak into the range of the track that owns those channels. A mono
+/// source is duplicated across its pair once it has been moved.
+fn routing_filters(src_channels: u16, total: u16, start: u16) -> Vec<FilterSpec> {
+    if total <= CHANNELS_PER_TRACK {
+        return Vec::new();
+    }
+    let mut at = source_positions(src_channels, total);
+    let mut out = Vec::new();
+    for i in 0..at.len().min(CHANNELS_PER_TRACK as usize) {
+        let target = start + i as u16;
+        let from = at[i];
+        if from == target {
+            continue;
+        }
+        out.push(channel_op(from, target, true));
+        // The swap moves whatever was in `target` back to `from`, which
+        // matters when a later channel of this same source lived there.
+        for slot in at.iter_mut() {
+            if *slot == target {
+                *slot = from;
+            } else if *slot == from {
+                *slot = target;
+            }
+        }
+    }
+    if at.len() == 1 {
+        out.push(channel_op(start, start + 1, false));
+    }
+    out
+}
+
+fn channel_op(from: u16, to: u16, swap: bool) -> FilterSpec {
+    FilterSpec {
+        service: "channelcopy".into(),
+        props: vec![
+            ("from".into(), from.to_string()),
+            ("to".into(), to.to_string()),
+            ("swap".into(), i32::from(swap).to_string()),
+        ],
+    }
 }
 
 fn fade_filter(kind: TrackKind, animation: String) -> FilterSpec {
@@ -389,6 +564,122 @@ mod tests {
         assert_eq!(f.len(), 1);
         assert_eq!(f[0].service, "volume");
         assert_eq!(f[0].props[0].1, "-6.0000");
+    }
+
+    fn ops(f: &[FilterSpec]) -> Vec<(String, String, String)> {
+        f.iter()
+            .filter(|f| f.service == "channelcopy")
+            .map(|f| {
+                let get = |k: &str| {
+                    f.props
+                        .iter()
+                        .find(|(n, _)| n == k)
+                        .map(|(_, v)| v.clone())
+                        .unwrap_or_default()
+                };
+                (get("from"), get("to"), get("swap"))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_mono_track_is_swapped_off_centre_then_spread_across_its_pair() {
+        // Three mono tracks on a six-channel bus: this is the exact routing
+        // verified against MLT for the multitrack fixture.
+        assert_eq!(
+            ops(&routing_filters(1, 6, 0)),
+            vec![
+                ("2".into(), "0".into(), "1".into()),
+                ("0".into(), "1".into(), "0".into())
+            ]
+        );
+        assert_eq!(
+            ops(&routing_filters(1, 6, 2)),
+            vec![("2".into(), "3".into(), "0".into())],
+            "a mono source already sits on the centre channel"
+        );
+        assert_eq!(
+            ops(&routing_filters(1, 6, 4)),
+            vec![
+                ("2".into(), "4".into(), "1".into()),
+                ("4".into(), "5".into(), "0".into())
+            ]
+        );
+    }
+
+    #[test]
+    fn a_stereo_track_moves_as_two_swaps_and_leaves_silence_behind() {
+        assert!(ops(&routing_filters(2, 4, 0)).is_empty());
+        assert_eq!(
+            ops(&routing_filters(2, 4, 2)),
+            vec![
+                ("0".into(), "2".into(), "1".into()),
+                ("1".into(), "3".into(), "1".into())
+            ]
+        );
+    }
+
+    #[test]
+    fn routing_never_leaves_two_tracks_sharing_a_channel() {
+        // The property that matters: after routing, a track's samples occupy
+        // its own pair and nothing else, whatever it started as.
+        let total = 8u16;
+        for start in [0u16, 2, 4, 6] {
+            for src in [1u16, 2] {
+                let mut at = source_positions(src, total);
+                for f in routing_filters(src, total, start) {
+                    let get = |k: &str| -> u16 {
+                        f.props
+                            .iter()
+                            .find(|(n, _)| n == k)
+                            .and_then(|(_, v)| v.parse().ok())
+                            .unwrap_or_default()
+                    };
+                    let (from, to, swap) = (get("from"), get("to"), get("swap") == 1);
+                    if swap {
+                        for slot in at.iter_mut() {
+                            if *slot == to {
+                                *slot = from;
+                            } else if *slot == from {
+                                *slot = to;
+                            }
+                        }
+                    } else {
+                        at.push(to);
+                    }
+                }
+                at.sort_unstable();
+                assert_eq!(
+                    at,
+                    vec![start, start + 1],
+                    "src={src} start={start} left samples outside its own pair"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_single_audio_track_needs_no_bus() {
+        let tl = fixture(&[("V1", &[(0, 10, "a")]), ("A1", &[(0, 10, "b")])]);
+        assert_eq!(Projection::of(&tl).audio_layout(), None);
+    }
+
+    #[test]
+    fn every_audio_track_gets_its_own_channel_pair() {
+        let tl = fixture(&[
+            ("V1", &[(0, 10, "a")]),
+            ("A1", &[(0, 10, "b")]),
+            ("A2", &[(0, 10, "c")]),
+            ("A3", &[(0, 10, "d")]),
+        ]);
+        let layout = Projection::of(&tl)
+            .audio_layout()
+            .expect("three audio tracks");
+        assert_eq!(layout.total_channels, 6);
+        assert_eq!(
+            layout.routes.iter().map(|r| r.start).collect::<Vec<_>>(),
+            vec![0, 2, 4]
+        );
     }
 
     #[test]

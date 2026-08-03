@@ -264,6 +264,10 @@ impl Preset {
             video_codec: self.video.encoder().to_string(),
             audio_codec: self.audio.encoder().to_string(),
             container: self.container.extension().to_string(),
+            // A preset can only ask; whether the sources can actually be
+            // routed is decided against the timeline at export time.
+            separate_audio_tracks: self.container.keeps_audio_tracks_separate()
+                && self.audio_tracks != TrackSelection::None,
             extra: self.extra.clone(),
         }
     }

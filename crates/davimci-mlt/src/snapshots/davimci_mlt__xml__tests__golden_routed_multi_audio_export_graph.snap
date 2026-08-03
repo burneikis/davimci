@@ -1,0 +1,107 @@
+---
+source: crates/davimci-mlt/src/xml.rs
+expression: to_xml(&p)
+---
+<?xml version="1.0" encoding="utf-8"?>
+<mlt LC_NUMERIC="C" version="7" producer="tractor0">
+  <profile description="davimci" width="1920" height="1080" progressive="1" sample_aspect_num="1" sample_aspect_den="1" display_aspect_num="1920" display_aspect_den="1080" frame_rate_num="60" frame_rate_den="1" colorspace="709"/>
+  <producer id="p0_0" in="0" out="99">
+    <property name="mlt_service">avformat</property>
+    <property name="resource">/media/0.mkv</property>
+    <property name="davimci.clip">c3</property>
+    <property name="davimci.label">m0</property>
+  </producer>
+  <producer id="p1_0" in="0" out="99">
+    <property name="mlt_service">avformat</property>
+    <property name="resource">/media/multi.mkv</property>
+    <property name="audio_index">1</property>
+    <property name="video_index">-1</property>
+    <property name="davimci.clip">c5</property>
+    <property name="davimci.label">a0</property>
+    <filter>
+      <property name="mlt_service">channelcopy</property>
+      <property name="from">2</property>
+      <property name="to">0</property>
+      <property name="swap">1</property>
+    </filter>
+    <filter>
+      <property name="mlt_service">channelcopy</property>
+      <property name="from">0</property>
+      <property name="to">1</property>
+      <property name="swap">0</property>
+    </filter>
+  </producer>
+  <producer id="p2_0" in="0" out="99">
+    <property name="mlt_service">avformat</property>
+    <property name="resource">/media/multi.mkv</property>
+    <property name="audio_index">2</property>
+    <property name="video_index">-1</property>
+    <property name="davimci.clip">c7</property>
+    <property name="davimci.label">a1</property>
+    <filter>
+      <property name="mlt_service">channelcopy</property>
+      <property name="from">2</property>
+      <property name="to">3</property>
+      <property name="swap">0</property>
+    </filter>
+  </producer>
+  <producer id="p3_0" in="0" out="99">
+    <property name="mlt_service">avformat</property>
+    <property name="resource">/media/multi.mkv</property>
+    <property name="audio_index">3</property>
+    <property name="video_index">-1</property>
+    <property name="davimci.clip">c9</property>
+    <property name="davimci.label">a2</property>
+    <filter>
+      <property name="mlt_service">channelcopy</property>
+      <property name="from">2</property>
+      <property name="to">4</property>
+      <property name="swap">1</property>
+    </filter>
+    <filter>
+      <property name="mlt_service">channelcopy</property>
+      <property name="from">4</property>
+      <property name="to">5</property>
+      <property name="swap">0</property>
+    </filter>
+  </producer>
+  <playlist id="playlist0" davimci.track="V1">
+    <entry producer="p0_0" in="0" out="99"/>
+  </playlist>
+  <playlist id="playlist1" davimci.track="A1">
+    <entry producer="p1_0" in="0" out="99"/>
+  </playlist>
+  <playlist id="playlist2" davimci.track="A2">
+    <entry producer="p2_0" in="0" out="99"/>
+  </playlist>
+  <playlist id="playlist3" davimci.track="A3">
+    <entry producer="p3_0" in="0" out="99"/>
+  </playlist>
+  <tractor id="tractor0">
+    <track producer="playlist0" hide="0"/>
+    <track producer="playlist1" hide="1"/>
+    <track producer="playlist2" hide="1"/>
+    <track producer="playlist3" hide="1"/>
+    <transition id="mix0">
+      <property name="mlt_service">mix</property>
+      <property name="a_track">0</property>
+      <property name="b_track">1</property>
+      <property name="always_active">1</property>
+      <property name="sum">1</property>
+    </transition>
+    <transition id="mix1">
+      <property name="mlt_service">mix</property>
+      <property name="a_track">0</property>
+      <property name="b_track">2</property>
+      <property name="always_active">1</property>
+      <property name="sum">1</property>
+    </transition>
+    <transition id="mix2">
+      <property name="mlt_service">mix</property>
+      <property name="a_track">0</property>
+      <property name="b_track">3</property>
+      <property name="always_active">1</property>
+      <property name="sum">1</property>
+    </transition>
+  </tractor>
+</mlt>

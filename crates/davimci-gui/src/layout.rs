@@ -266,6 +266,10 @@ pub fn paint(view: &ViewState, layout: &Layout, chrome: &Chrome) -> DrawList {
             d.rect(rect, fill);
             d.text(rect, TextRole::ClipLabel, clip.label.clone());
         }
+
+        // Waveform, drawn over the clips it belongs to: an envelope beside
+        // the audio it describes is the whole point of showing it.
+        paint_waveform(&mut d, layout, track, y, row_h);
     }
 
     // Selection band, drawn over the lanes it covers.
@@ -318,6 +322,38 @@ pub fn paint(view: &ViewState, layout: &Layout, chrome: &Chrome) -> DrawList {
 }
 
 /// Draw the media picker centred over the window.
+/// One lane's audio envelope: a centred bar per column, height proportional
+/// to the analysed peak. Integral arithmetic, so two frontends drawing the
+/// same view state agree exactly.
+fn paint_waveform(
+    d: &mut DrawList,
+    layout: &Layout,
+    track: &davimci_app::TrackView,
+    y: i32,
+    row_h: u32,
+) {
+    if track.waveform.is_empty() || row_h < 4 {
+        return;
+    }
+    let max_h = row_h.saturating_sub(2);
+    let mid = y.saturating_add((row_h / 2) as i32);
+    for (column, level) in track.waveform.iter().enumerate() {
+        if *level == 0 || column as u32 >= layout.tracks.width {
+            continue;
+        }
+        let height = (u32::from(*level) * max_h / u32::from(davimci_app::waveform::LEVELS)).max(1);
+        d.rect(
+            Rect {
+                x: layout.tracks.x.saturating_add(column as i32),
+                y: mid.saturating_sub((height / 2) as i32),
+                width: 1,
+                height,
+            },
+            Fill::Waveform,
+        );
+    }
+}
+
 fn paint_picker(d: &mut DrawList, layout: &Layout, picker: &PickerView) {
     let row_h = layout.metrics.row_height.max(1);
     let panel = centred(layout.window, row_h);

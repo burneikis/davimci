@@ -34,6 +34,15 @@ pub enum CliError {
     #[error("there is no clip under the playhead to replace")]
     NothingToReplace,
 
+    #[error("there is no clip under the playhead to {0}")]
+    NoClipUnderPlayhead(&'static str),
+
+    #[error("there is no track named {0} in this timeline")]
+    NoSuchTrack(String),
+
+    #[error("{0} needs analysis of that track; it is still running or has not started")]
+    AnalysisNotReady(&'static str),
+
     #[error("an export to {output} is already running; wait for it or :cancel it")]
     ExportBusy { output: String },
 
@@ -91,6 +100,9 @@ impl Classify for CliError {
             | Self::NoClipUsesPath(_)
             | Self::ExportBusy { .. }
             | Self::NothingToReplace
+            | Self::NoClipUnderPlayhead(_)
+            | Self::NoSuchTrack(_)
+            | Self::AnalysisNotReady(_)
             | Self::NothingToExport
             | Self::NoExportRunning
             | Self::Preset(_) => ErrorClass::User,

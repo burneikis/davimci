@@ -554,3 +554,97 @@ fn an_edit_during_playback_pauses_before_reprojecting() {
         "the split did not apply"
     );
 }
+
+// -- audio operations (spec §6.1, plan.md Phase 9e) -------------------------
+
+/// `:gain` sets an absolute level on the clip under the playhead, and it is
+/// an ordinary undoable edit.
+#[test]
+fn gain_is_a_command_like_any_other() {
+    let (mut app, mut editor) = editor();
+    app.event(Event::Command(":gain -6".into()), &mut editor);
+    let props = app.session().timeline().tracks()[0].clips()[0].props;
+    assert_eq!(props.gain_db, -6.0);
+
+    feed(&mut app, &mut editor, "u");
+    assert_eq!(
+        app.session().timeline().tracks()[0].clips()[0]
+            .props
+            .gain_db,
+        0.0,
+        "a gain change must be undoable"
+    );
+}
+
+/// `:fade out 100` at 60 fps is six frames, clamped to the clip.
+#[test]
+fn fade_takes_a_duration_in_milliseconds() {
+    let (mut app, mut editor) = editor();
+    app.event(Event::Command(":fade out 100".into()), &mut editor);
+    let props = app.session().timeline().tracks()[0].clips()[0].props;
+    assert_eq!(props.fade_out, davimci_core::Frame(6));
+    assert_eq!(props.fade_in, davimci_core::Frame::ZERO);
+}
+
+/// A malformed audio command is refused with its usage rather than guessed at.
+#[test]
+fn a_fade_with_no_direction_reports_its_usage() {
+    let (mut app, mut editor) = editor();
+    app.event(Event::Command(":fade sideways 100".into()), &mut editor);
+    let msg = app.view().message.expect("a message").text;
+    assert!(msg.contains("in|out"), "{msg}");
+    assert_eq!(
+        app.session().timeline().tracks()[0].clips()[0]
+            .props
+            .fade_out,
+        davimci_core::Frame::ZERO,
+        "a rejected command must not mutate"
+    );
+}
+
+/// `:normalize` needs a measurement, and says so rather than guessing at one.
+#[test]
+fn normalising_without_analysis_says_so_and_changes_nothing() {
+    let (mut app, mut editor) = editor();
+    app.event(Event::Command(":normalize".into()), &mut editor);
+    let msg = app.view().message.expect("a message").text;
+    assert!(msg.contains("analysis"), "{msg}");
+    assert_eq!(
+        app.session().timeline().tracks()[0].clips()[0]
+            .props
+            .gain_db,
+        0.0
+    );
+}
+
+/// `<Space>m` mutes the focused track through the command layer, so the
+/// backend sees a reprojected graph.
+#[test]
+fn muting_a_track_reprojects_the_graph() {
+    let (mut app, mut editor) = editor();
+    feed(&mut app, &mut editor, "j<Space>m");
+    let muted = app
+        .session()
+        .timeline()
+        .tracks()
+        .iter()
+        .filter(|t| t.muted)
+        .count();
+    assert_eq!(muted, 1, "exactly the focused track is muted");
+    assert!(
+        app.view().tracks.iter().any(|t| t.muted),
+        "the view shows it"
+    );
+}
+
+/// `:duck` against a track that was never analysed refuses before it splits
+/// anything - a half-applied duck would be worse than none.
+#[test]
+fn ducking_without_analysis_leaves_the_timeline_alone() {
+    let (mut app, mut editor) = editor();
+    let before = app.session().timeline().clone();
+    app.event(Event::Command(":duck A1 -12".into()), &mut editor);
+    let msg = app.view().message.expect("a message").text;
+    assert!(msg.contains("analysis"), "{msg}");
+    assert_eq!(app.session().timeline(), &before);
+}

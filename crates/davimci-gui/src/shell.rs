@@ -131,9 +131,17 @@ impl Gui {
     /// React to what the app decided. A frontend that ignored this would
     /// simply never show a picker.
     pub fn apply_response(&mut self, response: &Response) {
-        if let Response::OpenPicker(intent) = response {
-            let dir = self.browse_dir.clone();
-            self.open_picker_at(intent_of(*intent), &dir);
+        match response {
+            Response::OpenPicker(intent) => {
+                let dir = self.browse_dir.clone();
+                self.open_picker_at(intent_of(*intent), &dir);
+            }
+            // `i` on a subtitle clip edits its text rather than opening a
+            // picker (spec §8, §15.4).
+            Response::EditText { clip, text } => {
+                self.open_subtitle(SubtitleEdit::new(*clip, text.clone()));
+            }
+            _ => {}
         }
     }
 
@@ -167,12 +175,14 @@ impl Gui {
             }
             GuiEvent::Redraw => self.out.push(Event::Tick),
             GuiEvent::Click { x, y } => {
-                if let Some(col) = self.column_at(x, y) {
-                    // Clicks are navigation, so they arrive as the key the
-                    // user could have typed instead - the grammar stays the
-                    // single interpreter of intent.
-                    let _ = col;
-                    self.out.push(Event::Tick);
+                // The shell reports where the click landed; the app decides
+                // that it means "seek there". A frontend that decided for
+                // itself would be a second editor.
+                if let Some(column) = self.column_at(x, y) {
+                    self.out.push(Event::Click {
+                        column,
+                        row: self.lane_at(y),
+                    });
                 }
             }
             GuiEvent::Key(raw, mods) => self.handle_key(raw, mods),
@@ -227,8 +237,18 @@ impl Gui {
                 }
                 _ => SubtitleEvent::Editing,
             };
-            if !matches!(ev, SubtitleEvent::Editing) {
-                self.subtitle = None;
+            match ev {
+                SubtitleEvent::Editing => {}
+                // An edit that ends equal to the original commits nothing at
+                // all (spec §15.4), so the app is told it was abandoned.
+                SubtitleEvent::Unchanged => {
+                    self.subtitle = None;
+                    self.out.push(Event::TextEditCancelled);
+                }
+                SubtitleEvent::Commit { clip, text } => {
+                    self.subtitle = None;
+                    self.out.push(Event::TextEdited { clip, text });
+                }
             }
             return;
         }
@@ -286,6 +306,17 @@ impl Gui {
             return None;
         }
         u32::try_from(x - l.tracks.x).ok()
+    }
+
+    /// Which track lane a y coordinate is over, or `None` on the ruler.
+    #[must_use]
+    pub fn lane_at(&self, y: i32) -> Option<usize> {
+        let l = self.layout();
+        if y < l.tracks.y || y >= l.tracks.y.saturating_add(l.tracks.height as i32) {
+            return None;
+        }
+        let row = (y - l.tracks.y) / l.metrics.row_height.max(1) as i32;
+        usize::try_from(row).ok()
     }
 
     #[must_use]
@@ -468,5 +499,36 @@ mod tests {
         assert_eq!(g.column_at(10, 0), None);
         let l = g.layout();
         assert_eq!(g.column_at(l.tracks.x + 5, l.tracks.y + 1), Some(5));
+    }
+
+    /// A click reaches the app as a position, and the ruler is not a lane.
+    #[test]
+    fn a_click_becomes_a_seek_event_with_its_lane() {
+        let mut g = gui();
+        let l = g.layout();
+        g.push(GuiEvent::Click {
+            x: l.tracks.x + 7,
+            y: l.tracks.y + l.metrics.row_height as i32 + 1,
+        });
+        assert_eq!(
+            g.poll(),
+            vec![Event::Click {
+                column: 7,
+                row: Some(1)
+            }]
+        );
+
+        g.push(GuiEvent::Click {
+            x: l.tracks.x + 3,
+            y: l.ruler.y,
+        });
+        assert_eq!(
+            g.poll(),
+            vec![Event::Click {
+                column: 3,
+                row: None
+            }],
+            "a click on the ruler seeks without changing track focus"
+        );
     }
 }

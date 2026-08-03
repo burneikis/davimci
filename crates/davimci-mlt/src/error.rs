@@ -20,6 +20,12 @@ pub enum MltError {
     #[error("MLT has no {service} consumer")]
     NoConsumer { service: String },
 
+    #[error("MLT has no {service} transition")]
+    NoTransition { service: String },
+
+    #[error("the transition could not be planted")]
+    PlantFailed,
+
     #[error("the playlist operation failed (code {code})")]
     PlaylistOp { code: i32 },
 
@@ -67,6 +73,8 @@ impl From<MltError> for BackendError {
             MltError::PlaylistOp { .. }
             | MltError::AttachFailed
             | MltError::NoFilter { .. }
+            | MltError::NoTransition { .. }
+            | MltError::PlantFailed
             | MltError::BadString { .. } => Self::Projection { reason },
         }
     }

@@ -14,6 +14,10 @@ pub struct RenderSettings {
     pub audio_codec: String,
     /// Container extension, e.g. `mkv`, `mp4`.
     pub container: String,
+    /// Whether each audio track gets its own stream in the file (spec §7).
+    /// Only some containers can carry that, and only some sources can be
+    /// routed, so this is decided before the render rather than during it.
+    pub separate_audio_tracks: bool,
     /// Extra backend properties, passed through verbatim.
     pub extra: Vec<(String, String)>,
 }
@@ -26,6 +30,7 @@ impl Default for RenderSettings {
             video_codec: "libx264".into(),
             audio_codec: "aac".into(),
             container: "mkv".into(),
+            separate_audio_tracks: false,
             extra: Vec::new(),
         }
     }

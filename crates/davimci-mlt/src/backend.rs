@@ -19,10 +19,12 @@ use davimci_core::{Fps, Frame, Resolution, Timeline, TimelineProps};
 use davimci_mlt_sys as sys;
 
 use crate::ffi::{
-    Consumer, EventHandle, Filter, Playlist, Producer, Profile, Tractor, attach_filter,
+    Consumer, EventHandle, Filter, Playlist, Producer, Profile, Tractor, Transition, attach_filter,
 };
 use crate::patch::{Patch, TrackOp, diff};
-use crate::projection::{ClipEntry, Entry, Projection, Resource, TrackProjection};
+use crate::projection::{
+    AudioLayout, ClipEntry, Entry, Projection, Resource, StreamSelect, TrackProjection,
+};
 
 type Result<T> = std::result::Result<T, BackendError>;
 
@@ -32,6 +34,10 @@ struct Graph {
     tractor: Tractor,
     playlists: Vec<Playlist>,
     root: Producer,
+    /// The audio `mix` transitions. The field does not own them, so the graph
+    /// does: dropping one while the tractor still points at it would be a
+    /// use-after-free.
+    _mixes: Vec<Transition>,
 }
 
 /// Frames lifted from the preview consumer, plus the size to lift them at.
@@ -57,6 +63,10 @@ struct Render {
     consumer: Consumer,
     total: u64,
     cancelled: bool,
+    /// An export that keeps audio tracks apart renders from its own graph,
+    /// because routing samples onto a wide channel bus is an export-only
+    /// shape: preview stays stereo.
+    _graph: Option<Graph>,
 }
 
 /// MLT-backed renderer and previewer.
@@ -122,6 +132,13 @@ impl MltBackend {
             .map_err(BackendError::from)?;
             self.props = projection.props;
         }
+        self.graph = Some(self.build_graph(projection)?);
+        self.rebuilds += 1;
+        Ok(())
+    }
+
+    /// Build a whole graph from a projection, without installing it.
+    fn build_graph(&self, projection: &Projection) -> Result<Graph> {
         let mut tractor = Tractor::new().map_err(BackendError::from)?;
         let mut playlists = Vec::with_capacity(projection.tracks.len());
         for (i, track) in projection.tracks.iter().enumerate() {
@@ -139,15 +156,34 @@ impl MltBackend {
                 .map_err(BackendError::from)?;
             playlists.push(pl);
         }
+        // Without a `mix` per track a tractor plays the audio of one track
+        // and drops the rest, so this is what makes a multi-track project
+        // audible at all, not only exportable.
+        let mut mixes = Vec::new();
+        for b in projection.audio_mix_tracks() {
+            let Ok(mix) = Transition::new(&self.profile, "mix") else {
+                continue;
+            };
+            {
+                let mut p = mix.properties();
+                p.set_int("always_active", 1).map_err(BackendError::from)?;
+                // Sum rather than average: halving every track's level to
+                // avoid clipping is a silent gain change nobody asked for.
+                p.set_int("sum", 1).map_err(BackendError::from)?;
+            }
+            tractor
+                .plant(&mix, 0, b as i32)
+                .map_err(BackendError::from)?;
+            mixes.push(mix);
+        }
         tractor.refresh();
         let root = tractor.as_producer();
-        self.graph = Some(Graph {
+        Ok(Graph {
             tractor,
             playlists,
             root,
-        });
-        self.rebuilds += 1;
-        Ok(())
+            _mixes: mixes,
+        })
     }
 
     fn build_playlist(&self, track: &TrackProjection) -> Result<Playlist> {
@@ -202,13 +238,47 @@ impl MltBackend {
                     .set("davimci.offline", path)
                     .map_err(BackendError::from)?;
             }
+            // One track per stream (spec §7): a track that does not name its
+            // stream decodes the container's default, so three audio tracks
+            // off one file would all play the first stream.
+            match entry.stream {
+                Some(StreamSelect::Audio(s)) => {
+                    props.set_int("audio_index", s as i32)?;
+                    props.set_int("video_index", -1)?;
+                }
+                Some(StreamSelect::Video(s)) => {
+                    props.set_int("video_index", s as i32)?;
+                    props.set_int("audio_index", -1)?;
+                }
+                None => {}
+            }
         }
-        // Normalisers. A consumer would plant these; davimci pulls frames
-        // directly, so it has to plant them itself or `mlt_frame_get_image`
-        // hands back native YUV at native size and ignores the request.
-        for service in ["avcolor_space", "rescale", "resize"] {
-            if let Ok(filter) = Filter::new(&self.profile, service, None) {
-                let _ = attach_filter(&mut producer, filter);
+        // Normalisers, in MLT's own loader order. A `loader` producer would
+        // plant these; davimci creates services directly, so it has to plant
+        // them itself or `mlt_frame_get_image` hands back native YUV at
+        // native size and `mlt_frame_get_audio` hands back the source's own
+        // channel count - which silently breaks every channel-routed export.
+        // Each entry is a preference list, exactly as `loader.ini` has it.
+        // Normalisers, in MLT's own `loader.ini` order. A `loader` producer
+        // would plant these; davimci creates services directly, so it has to
+        // plant them itself, and each one is load-bearing: without the image
+        // pair `mlt_frame_get_image` returns native YUV at native size, and
+        // without the audio three the frame keeps the source's channel count
+        // and sample format, which breaks channel-routed export and hands
+        // the encoder samples in a format it did not ask for.
+        for alternatives in [
+            &["avcolor_space"][..],
+            &["rescale"][..],
+            &["resize"][..],
+            &["swresample", "audiochannels"][..],
+            &["resample"][..],
+            &["audioconvert"][..],
+        ] {
+            for service in alternatives {
+                if let Ok(filter) = Filter::new(&self.profile, service, None) {
+                    let _ = attach_filter(&mut producer, filter);
+                    break;
+                }
             }
         }
         for f in &entry.filters {
@@ -549,6 +619,27 @@ impl RenderBackend for MltBackend {
         self.preview.is_some()
     }
 
+    fn supports_varispeed(&self) -> bool {
+        true
+    }
+
+    fn set_rate(&mut self, rate: f64) -> Result<()> {
+        if !rate.is_finite() {
+            return Err(BackendError::Unavailable {
+                reason: "a playback rate must be a finite number".into(),
+            });
+        }
+        // Speed lives on the producer, not the consumer: the consumer keeps
+        // pulling at wall-clock rate and the producer decides which frame
+        // that is, which is what makes the audio clock stay the master.
+        let graph = self.require_graph()?;
+        graph.root.set_speed(rate);
+        if let Some(p) = self.preview.as_mut() {
+            p.consumer.properties().set_int("refresh", 1)?;
+        }
+        Ok(())
+    }
+
     fn next_preview_frame(&mut self) -> Result<Option<VideoFrame>> {
         let preview = self
             .preview
@@ -590,14 +681,37 @@ impl RenderBackend for MltBackend {
             });
         }
         let output = job.output.to_string_lossy().to_string();
-        let graph = self.require_graph()?;
-        let mut root = graph.root.clone_ref();
+
+        // An export that keeps audio tracks separate renders from its own
+        // graph: each audio track is routed onto its own channel pair before
+        // the mix sums them, and the consumer cuts the bus into streams.
+        let mut export_graph = None;
+        let mut layout: Option<AudioLayout> = None;
+        if job.settings.separate_audio_tracks
+            && let Some(mut routed) = self.projection.clone()
+        {
+            layout = routed.route_audio();
+            if layout.is_some() {
+                export_graph = Some(self.build_graph(&routed)?);
+            }
+        }
+
+        let mut root = match &export_graph {
+            Some(g) => g.root.clone_ref(),
+            None => self.require_graph()?.root.clone_ref(),
+        };
         root.set_in_and_out(start.get() as i32, end.get().saturating_sub(1) as i32);
         root.seek(start.get() as i32);
 
         let mut consumer = Consumer::new(&self.profile, "avformat", Some(&output))?;
         {
             let mut props = consumer.properties();
+            if let Some(layout) = &layout {
+                props.set_int("channels", i32::from(layout.total_channels))?;
+                for (n, route) in layout.routes.iter().enumerate() {
+                    props.set_int(&format!("channels.{n}"), i32::from(route.channels))?;
+                }
+            }
             // Not realtime: an export must drop nothing.
             props.set_int("real_time", 0)?;
             props.set_int("terminate_on_pause", 1)?;
@@ -618,6 +732,7 @@ impl RenderBackend for MltBackend {
             consumer,
             total: end.get().saturating_sub(start.get()),
             cancelled: false,
+            _graph: export_graph,
         });
         Ok(())
     }

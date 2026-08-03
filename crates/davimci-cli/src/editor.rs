@@ -12,14 +12,15 @@
 //! writes what is on screen, and `:bn` hands back a different timeline.
 
 use davimci_analysis::{FfprobeProber, ImportOptions, Placement, Prober};
-use davimci_app::{AppError, Host, JobState, JobUpdate, Message};
+use davimci_app::{AppError, Host, JobState, JobUpdate, Message, Waveform};
 use davimci_backend::{PreviewScale, RenderBackend};
 use davimci_cmd::{EditCommand, Session};
-use davimci_core::Frame;
+use davimci_core::{Frame, TrackId};
 use davimci_keys::MediaIntent;
 use davimci_keys::engine::TransportCmd;
 use davimci_present::{Presentation, Presenter};
 
+use crate::analyse::Analyser;
 use crate::autosave::OnRecovery;
 use crate::error::CliError;
 use crate::excmd::{ExCommand, ExOutcome};
@@ -43,8 +44,12 @@ pub struct Editor {
     notices: Vec<Message>,
     /// The preset registry and whatever export is running (Phase 8b).
     exporter: Exporter,
+    /// Background analysis of the audio tracks (Phase 9e).
+    analyser: Analyser,
     /// Job updates waiting for the app to collect on the next tick.
     job_updates: Vec<JobUpdate>,
+    /// Envelopes finished since the app last collected them.
+    pending_waveforms: Vec<(TrackId, Waveform)>,
     /// Job ids the app has already been told about.
     started_jobs: Vec<u64>,
     /// How picked media is inspected. Injected so the picker path is
@@ -71,6 +76,7 @@ impl Editor {
         presenter: Presenter,
     ) -> Self {
         Self {
+            analyser: Analyser::new(workspace.root()),
             workspace,
             backend,
             presenter,
@@ -81,6 +87,7 @@ impl Editor {
             notices: Vec::new(),
             exporter: Exporter::new(),
             job_updates: Vec::new(),
+            pending_waveforms: Vec::new(),
             started_jobs: Vec::new(),
             prober: Box::new(FfprobeProber),
             quit: false,
@@ -129,16 +136,12 @@ impl Editor {
         cmd: &ExCommand,
         session: &Session,
     ) -> Option<Result<String, CliError>> {
-        let props = session.timeline().props;
-        let duration = session.timeline().duration();
         match cmd {
             ExCommand::Export { path, preset } => Some(self.exporter.start(
                 self.backend.as_mut(),
                 path,
                 preset.as_deref(),
-                props.resolution,
-                props.fps,
-                duration,
+                session.timeline(),
             )),
             ExCommand::Render { preset } => {
                 let container = match self.exporter.presets().get(preset) {
@@ -155,15 +158,77 @@ impl Editor {
                     self.backend.as_mut(),
                     &out,
                     Some(preset),
-                    props.resolution,
-                    props.fps,
-                    duration,
+                    session.timeline(),
                 ))
             }
             ExCommand::Presets => Some(Ok(self.exporter.list_presets().join("  |  "))),
             ExCommand::CancelRender => Some(self.exporter.cancel(self.backend.as_mut())),
             _ => None,
         }
+    }
+
+    /// `:normalize` and `:duck` (spec §6.1).
+    ///
+    /// They live here rather than in the workspace for the same reason the
+    /// export commands do: they need something the workspace has no business
+    /// owning - in this case the analysis, which is what "how loud is this"
+    /// and "where is the other track audible" both come down to.
+    fn audio_command(
+        &mut self,
+        cmd: &ExCommand,
+        session: &mut Session,
+    ) -> Option<Result<String, CliError>> {
+        match cmd {
+            ExCommand::Normalize { target_db } => Some(self.normalize(*target_db, session)),
+            ExCommand::Duck { track, db } => Some(self.duck(track, *db, session)),
+            _ => None,
+        }
+    }
+
+    fn normalize(&mut self, target_db: f32, session: &mut Session) -> Result<String, CliError> {
+        let fps = session.timeline().props.fps;
+        let (track, clip) = crate::audio::clip_under_playhead(session.timeline(), "normalize")?;
+        let analysis = self
+            .analyser
+            .analysis(track)
+            .ok_or(CliError::AnalysisNotReady(":normalize"))?;
+        let gain = crate::audio::normalize_gain(&clip, analysis, fps, target_db)
+            .ok_or(CliError::AnalysisNotReady(":normalize"))?;
+        session.exec(&crate::audio::gain(track, &clip, gain))?;
+        Ok(format!(
+            "{} normalised to {target_db} dB ({gain:+.1} dB)",
+            clip.label
+        ))
+    }
+
+    fn duck(&mut self, name: &str, db: f32, session: &mut Session) -> Result<String, CliError> {
+        let reference = session
+            .timeline()
+            .track_by_name(name)
+            .map(|t| t.id)
+            .ok_or_else(|| CliError::NoSuchTrack(name.to_string()))?;
+        let target = session.timeline().playhead().track;
+        if target == reference {
+            return Err(CliError::NoSuchTrack(format!(
+                "{name}; a track cannot duck against itself"
+            )));
+        }
+        let analysis = self
+            .analyser
+            .analysis(reference)
+            .ok_or(CliError::AnalysisNotReady(":duck"))?;
+        let spans = crate::audio::loud_spans(session.timeline(), reference, analysis);
+        let needed = crate::audio::duck_ids_needed(session.timeline(), target, &spans);
+        let ids = session.reserve_ids(needed);
+        let mut ids = ids.into_iter();
+        // Built before anything is applied, so a duck that cannot land
+        // leaves the timeline untouched (Phase 0 user-error policy).
+        let plan = crate::audio::duck_plan(session.timeline(), target, &spans, db, &mut ids)?;
+        session.exec(&plan)?;
+        Ok(format!(
+            "ducked by {db} dB under {} region(s) of {name}",
+            spans.len()
+        ))
     }
 
     /// Import a picked file at the position the intent implies (spec §3.2).
@@ -370,10 +435,21 @@ impl Host for Editor {
         std::mem::take(&mut self.job_updates)
     }
 
+    fn waveforms(&mut self) -> Vec<(TrackId, Waveform)> {
+        std::mem::take(&mut self.pending_waveforms)
+    }
+
+    fn stale_waveforms(&mut self) -> Vec<TrackId> {
+        self.analyser.take_stale()
+    }
+
     fn command(&mut self, line: &str, session: &mut Session) -> Result<Option<String>, AppError> {
-        // Export commands never reach the workspace: it has no backend.
+        // Export and audio commands never reach the workspace: it has
+        // neither a backend nor the analysis.
         if let Ok(cmd) = crate::excmd::parse(line)
-            && let Some(result) = self.export_command(&cmd, session)
+            && let Some(result) = self
+                .export_command(&cmd, session)
+                .or_else(|| self.audio_command(&cmd, session))
         {
             return match result {
                 Ok(msg) => Ok(Some(msg)),
@@ -422,11 +498,11 @@ impl Host for Editor {
             }
             TransportCmd::ShuttleForward => {
                 self.transport
-                    .shuttle(true, self.backend.as_mut(), &session)
+                    .shuttle(true, self.backend.as_mut(), &session, self.scale)
             }
             TransportCmd::ShuttleBackward => {
                 self.transport
-                    .shuttle(false, self.backend.as_mut(), &session)
+                    .shuttle(false, self.backend.as_mut(), &session, self.scale)
             }
             TransportCmd::ShuttleStop => {
                 self.transport.shuttle_stop(self.backend.as_mut(), &session)
@@ -474,6 +550,11 @@ impl Host for Editor {
             self.scale,
         );
         self.poll_export();
+        // Analysis finishes on its own thread; this is where its results
+        // cross back onto the editor's.
+        let (updates, waves) = self.analyser.poll();
+        self.job_updates.extend(updates);
+        self.pending_waveforms.extend(waves);
         if let Some(frame) = result.playhead {
             let track = session.timeline().playhead().track;
             // Playback moves the playhead; that is navigation, never an edit.
@@ -495,6 +576,10 @@ impl Host for Editor {
 
     fn timeline_changed(&mut self, session: &Session) {
         self.project(session);
+        // Analysis follows the timeline: a new audio track is queued, and a
+        // gain or fade change invalidates what was measured before it
+        // (spec §6.1, §10.2).
+        self.analyser.sync(session.timeline());
     }
 
     fn playhead_moved(&mut self, session: &Session) {

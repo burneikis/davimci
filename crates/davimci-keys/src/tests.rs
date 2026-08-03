@@ -1,7 +1,7 @@
 //! End-to-end headless tests: feed keys, assert the resulting timeline
 //! (plan.md Phase 4 testing).
 
-#![allow(clippy::expect_used)]
+#![allow(clippy::expect_used, clippy::panic)]
 
 use davimci_cmd::Session;
 use davimci_core::testing::fixture;
@@ -241,4 +241,91 @@ fn a_plugin_binding_interrupts_only_when_it_opted_in() {
         .transport_policy()
         .interrupts()
     );
+}
+
+/// Spec §6.1: mute and solo are track state, toggled from the leader.
+#[test]
+fn space_m_and_space_s_toggle_the_current_track() {
+    let (mut e, mut s) = (
+        Engine::new(),
+        Session::new(fixture(&[
+            ("A1", &[(0, 100, "a")]),
+            ("A2", &[(0, 100, "b")]),
+        ])),
+    );
+    let a1 = davimci_core::testing::track_id(s.timeline(), "A1");
+    s.set_playhead(davimci_core::Frame::ZERO, a1)
+        .expect("A1 exists");
+
+    let out = feed(&mut e, &mut s, "<Space>m");
+    assert!(matches!(out.last(), Some(Outcome::Applied(_))), "{out:?}");
+    assert!(s.timeline().track(a1).expect("A1").muted);
+    feed(&mut e, &mut s, "<Space>m");
+    assert!(!s.timeline().track(a1).expect("A1").muted, "toggles back");
+
+    feed(&mut e, &mut s, "<Space>s");
+    assert!(s.timeline().track(a1).expect("A1").solo);
+}
+
+/// Muting is undoable like every other mutation, because it goes through the
+/// command layer rather than writing to the timeline directly.
+#[test]
+fn muting_a_track_can_be_undone() {
+    let (mut e, mut s) = (
+        Engine::new(),
+        Session::new(fixture(&[("A1", &[(0, 100, "a")])])),
+    );
+    let a1 = davimci_core::testing::track_id(s.timeline(), "A1");
+    s.set_playhead(davimci_core::Frame::ZERO, a1)
+        .expect("A1 exists");
+    feed(&mut e, &mut s, "<Space>m");
+    feed(&mut e, &mut s, "u");
+    assert!(!s.timeline().track(a1).expect("A1").muted);
+}
+
+/// A solo must not silently clear a mute: they are independent flags.
+#[test]
+fn soloing_a_muted_track_leaves_it_muted() {
+    let (mut e, mut s) = (
+        Engine::new(),
+        Session::new(fixture(&[("A1", &[(0, 100, "a")])])),
+    );
+    let a1 = davimci_core::testing::track_id(s.timeline(), "A1");
+    s.set_playhead(davimci_core::Frame::ZERO, a1)
+        .expect("A1 exists");
+    feed(&mut e, &mut s, "<Space>m");
+    feed(&mut e, &mut s, "<Space>s");
+    let t = s.timeline().track(a1).expect("A1");
+    assert!(t.muted && t.solo);
+}
+
+/// Spec §8: `i` on a subtitle clip edits its text; anywhere else it asks for
+/// media. Same key, decided by what is under the playhead.
+#[test]
+fn i_edits_text_on_a_subtitle_track_and_picks_media_elsewhere() {
+    use davimci_core::Frame;
+    let mut tl = fixture(&[("V1", &[(0, 100, "a")]), ("T1", &[])]);
+    let t1 = davimci_core::testing::track_id(&tl, "T1");
+    let id = tl.new_clip_id();
+    let mut clip = davimci_core::Clip::generated(id, "sub", Frame::ZERO, Frame(50));
+    clip.text = Some("hello".into());
+    tl.restore(t1, Frame::ZERO, &[clip], Frame(50), false)
+        .expect("a text clip");
+    let (mut e, mut s) = (Engine::new(), Session::new(tl));
+
+    let out = feed(&mut e, &mut s, "i");
+    assert!(
+        matches!(out.last(), Some(Outcome::PickMedia(_))),
+        "on a video track `i` still means media: {out:?}"
+    );
+
+    s.set_playhead(Frame::ZERO, t1).expect("T1 exists");
+    let out = feed(&mut e, &mut s, "i");
+    match out.last() {
+        Some(Outcome::EditText { clip, text }) => {
+            assert_eq!(*clip, id);
+            assert_eq!(text, "hello", "the buffer starts as what is there");
+        }
+        other => panic!("expected a text edit, got {other:?}"),
+    }
 }

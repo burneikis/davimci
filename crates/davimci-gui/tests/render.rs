@@ -177,3 +177,41 @@ fn the_picker_title_names_the_intent() {
         assert!(text.contains(want), "expected {want:?} in:\n{text}");
     }
 }
+
+/// Spec §6.1: an analysed audio lane draws its envelope, and only that lane.
+#[test]
+fn an_analysed_audio_lane_paints_a_waveform() {
+    let view = fixtures::waveform();
+    let l = layout(800, 600);
+    let list = paint_view(&view, &l, &Chrome::default());
+    let bars = list.rects(Fill::Waveform);
+    assert!(!bars.is_empty(), "the analysed lane painted no envelope");
+
+    // Every bar sits inside the one lane that has audio.
+    let row = view
+        .tracks
+        .iter()
+        .position(|t| !t.waveform.is_empty())
+        .expect("a lane has a waveform");
+    let lane_y = l.lane_y(row);
+    for bar in &bars {
+        assert!(bar.width == 1, "an envelope column is one pixel wide");
+        assert!(
+            bar.y >= lane_y && bar.y + bar.height as i32 <= lane_y + l.metrics.row_height as i32,
+            "an envelope bar escaped its lane: {bar:?}"
+        );
+    }
+    // The fixture ramps from quiet to loud, so the last bar is the tallest.
+    assert!(
+        bars.last().expect("bars").height > bars[0].height,
+        "the envelope ignored the levels it was given"
+    );
+}
+
+/// A lane with no analysis draws nothing rather than a flat line, so
+/// "not analysed yet" cannot be mistaken for "silent".
+#[test]
+fn an_unanalysed_lane_paints_no_envelope() {
+    let list = paint_view(&fixtures::normal(), &layout(800, 600), &Chrome::default());
+    assert!(list.rects(Fill::Waveform).is_empty());
+}

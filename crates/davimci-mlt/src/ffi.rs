@@ -325,6 +325,45 @@ impl Drop for Filter {
     }
 }
 
+/// An MLT transition, owned until planted in a tractor's field.
+#[derive(Debug)]
+pub struct Transition {
+    raw: sys::mlt_transition,
+}
+
+impl Transition {
+    pub fn new(profile: &Profile, service: &str) -> Result<Self, MltError> {
+        init()?;
+        let s = cstr(service)?;
+        // SAFETY: valid profile, NUL-terminated service, null means no arg.
+        let raw = unsafe { sys::mlt_factory_transition(profile.as_raw(), s.as_ptr(), ptr::null()) };
+        if raw.is_null() {
+            return Err(MltError::NoTransition {
+                service: service.into(),
+            });
+        }
+        Ok(Self { raw })
+    }
+
+    #[must_use]
+    pub fn properties(&self) -> Properties<'_> {
+        // SAFETY: the bag belongs to this transition.
+        unsafe { Properties::from_raw(sys::mlt_transition_properties(self.raw)) }
+    }
+
+    fn as_raw(&self) -> sys::mlt_transition {
+        self.raw
+    }
+}
+
+impl Drop for Transition {
+    fn drop(&mut self) {
+        // SAFETY: releases this wrapper's single reference. Planting takes a
+        // reference of its own, exactly as attaching a filter does.
+        unsafe { sys::mlt_transition_close(self.raw) };
+    }
+}
+
 /// An MLT playlist: one track's worth of entries and blanks.
 #[derive(Debug)]
 pub struct Playlist {
@@ -476,6 +515,33 @@ impl Tractor {
         let p = unsafe { Producer::from_raw(raw) };
         p.properties().inc_ref();
         p
+    }
+
+    /// Plant a transition between two planted tracks.
+    ///
+    /// MLT's field takes no reference of its own - it only points at the
+    /// transition's service - so the caller must keep the [`Transition`]
+    /// alive for as long as the tractor. Planting borrows for exactly that
+    /// reason.
+    pub fn plant(
+        &mut self,
+        transition: &Transition,
+        a_track: i32,
+        b_track: i32,
+    ) -> Result<(), MltError> {
+        // SAFETY: both handles live; the field belongs to this tractor.
+        let rc = unsafe {
+            let field = sys::mlt_tractor_field(self.raw);
+            if field.is_null() {
+                return Err(MltError::PlantFailed);
+            }
+            sys::mlt_field_plant_transition(field, transition.as_raw(), a_track, b_track)
+        };
+        if rc == 0 {
+            Ok(())
+        } else {
+            Err(MltError::PlantFailed)
+        }
     }
 
     #[must_use]

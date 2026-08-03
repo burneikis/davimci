@@ -121,6 +121,18 @@ impl eframe::App for Window {
         for (raw, mods) in egui_shell::translate_events(&events) {
             self.gui.push(GuiEvent::Key(raw, mods));
         }
+        // A press, not a release: clicking the timeline seeks there
+        // immediately, the way scrubbing feels in every editor.
+        if let Some(pos) = ctx.input(|i| {
+            i.pointer
+                .press_origin()
+                .filter(|_| i.pointer.primary_pressed())
+        }) {
+            self.gui.push(GuiEvent::Click {
+                x: (pos.x - screen.min.x) as i32,
+                y: (pos.y - screen.min.y) as i32,
+            });
+        }
         if ctx.input(|i| i.viewport().close_requested()) {
             self.gui.push(GuiEvent::CloseRequested);
         }

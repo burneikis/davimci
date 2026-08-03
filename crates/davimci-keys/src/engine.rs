@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 
 use davimci_cmd::{EditCommand, Session};
-use davimci_core::{Frame, Register, Timeline, TrackId};
+use davimci_core::{ClipId, Frame, Register, Timeline, TrackId};
 use davimci_motion::{
     BuiltinMotion, JumpConfig, Motion as MotionTrait, MotionCtx, Object as ObjectTrait, Resolved,
     Scope, TextObject, TimeRange, Zoom,
@@ -81,6 +81,13 @@ pub enum Outcome {
     /// no filesystem and no idea what media exists, so choosing the file is
     /// the host's job; this only says what the chosen file is *for*.
     PickMedia(MediaIntent),
+    /// `i` on a subtitle clip: INSERT mode is scoped to text editing there
+    /// (spec §8, §15.4), so the caller should open a text buffer rather than
+    /// a media picker.
+    EditText {
+        clip: ClipId,
+        text: String,
+    },
     /// A Lua-bound key fired; the host must run callback `.0` through
     /// `davimci_lua::Runtime::invoke` and execute the requests it returns.
     Plugin(u32),
@@ -250,7 +257,13 @@ impl Engine {
                 ripple,
                 register,
             } => self.do_paste(before, ripple, register, session),
-            Action::InsertMedia => Outcome::PickMedia(MediaIntent::Insert),
+            // `i` means two different things by context: on a text track it
+            // edits the subtitle under the playhead (spec §8), anywhere else
+            // it inserts media.
+            Action::InsertMedia => match text_clip_under_playhead(session) {
+                Some((clip, text)) => Outcome::EditText { clip, text },
+                None => Outcome::PickMedia(MediaIntent::Insert),
+            },
             Action::AppendMedia => Outcome::PickMedia(MediaIntent::Append),
             Action::Replace => {
                 // Replace needs something to replace; refusing here means the
@@ -306,6 +319,8 @@ impl Engine {
             }
             Action::TrimEdgeStep { .. } => Outcome::NotImplemented("jump-point edge trim"),
             Action::GainAdjust(step) => self.do_gain(step, session),
+            Action::ToggleMute => self.do_track_flags(session, true),
+            Action::ToggleSolo => self.do_track_flags(session, false),
             Action::CreateTransition | Action::DeleteTransition => {
                 Outcome::NotImplemented("transitions land in Phase 9f")
             }
@@ -672,6 +687,42 @@ impl Engine {
         }))
     }
 
+    /// Toggle mute or solo on the track the playhead is on (spec §6.1).
+    ///
+    /// Mute and solo are independent flags: soloing a muted track leaves it
+    /// muted, because silencing something is a stronger statement than
+    /// featuring it and undoing the solo must not unmute by accident.
+    fn do_track_flags(&mut self, session: &mut Session, mute: bool) -> Outcome {
+        let track = session.timeline().playhead().track;
+        let Some(t) = session.timeline().track(track) else {
+            return Outcome::Error("the playhead is not on a track".to_string());
+        };
+        let (name, muted, solo) = (t.name.clone(), t.muted, t.solo);
+        let cmd = if mute {
+            EditCommand::SetTrackFlags {
+                track,
+                muted: !muted,
+                solo,
+            }
+        } else {
+            EditCommand::SetTrackFlags {
+                track,
+                muted,
+                solo: !solo,
+            }
+        };
+        let state = match (mute, muted, solo) {
+            (true, false, _) => "muted",
+            (true, true, _) => "unmuted",
+            (false, _, false) => "soloed",
+            (false, _, true) => "unsoloed",
+        };
+        match run(session.exec(&cmd)) {
+            Outcome::Applied(_) => Outcome::Applied(format!("{name} {state}")),
+            other => other,
+        }
+    }
+
     fn do_jump_mark(&mut self, name: char, session: &mut Session) -> Outcome {
         let Some(mark) = session.timeline().marks.get(&name).copied() else {
             return Outcome::Error(format!("mark '{name}' is not set"));
@@ -715,6 +766,18 @@ fn interior(bounds: impl Iterator<Item = (Frame, Frame)>, frame: Frame) -> bool 
 
 fn clip_under(tl: &Timeline, track: TrackId, frame: Frame) -> Option<davimci_core::ClipId> {
     tl.track(track)?.clip_at(frame).map(|c| c.id)
+}
+
+/// The subtitle clip under the playhead, if the focused track is a text one.
+fn text_clip_under_playhead(session: &Session) -> Option<(ClipId, String)> {
+    let tl = session.timeline();
+    let head = tl.playhead();
+    let track = tl.track(head.track)?;
+    if track.kind != davimci_core::TrackKind::Text {
+        return None;
+    }
+    let clip = track.clip_at(head.frame)?;
+    Some((clip.id, clip.text.clone().unwrap_or_default()))
 }
 
 fn delta_of(from: Frame, to: Frame) -> i64 {

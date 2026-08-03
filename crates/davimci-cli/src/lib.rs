@@ -12,6 +12,8 @@
 //! transport at once. That has to live here rather than in a frontend,
 //! because no frontend may reference MLT (spec §10.1).
 
+pub mod analyse;
+pub mod audio;
 pub mod autosave;
 pub mod editor;
 pub mod error;
@@ -25,6 +27,8 @@ pub mod workspace;
 #[cfg(test)]
 mod tests;
 
+pub use analyse::Analyser;
+pub use audio::{FadeEnd, duck_plan, loud_spans};
 pub use autosave::{Autosave, OnRecovery, Recovery};
 pub use editor::Editor;
 pub use error::CliError;

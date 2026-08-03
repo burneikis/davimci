@@ -380,6 +380,114 @@ impl UndoTree {
     }
 }
 
+/// One node of a saved history (spec §10.4).
+///
+/// Intermediate snapshots are deliberately absent: they are a drift guard
+/// that can be rebuilt, not part of the history's meaning, and keeping them
+/// would multiply the size of a project file by its edit count.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SavedNode {
+    pub parent: Option<NodeId>,
+    pub seq: u64,
+    pub command: EditCommand,
+    pub inverse: EditCommand,
+    pub id_cursor: u64,
+}
+
+/// A whole undo tree, as it goes to disk.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SavedHistory {
+    /// The state every node is reachable from.
+    pub root: Timeline,
+    pub root_id_cursor: u64,
+    /// Nodes in id order, root excluded; `NodeId(n+1)` is `nodes[n]`.
+    pub nodes: Vec<SavedNode>,
+    pub current: NodeId,
+    pub next_seq: u64,
+}
+
+impl UndoTree {
+    /// The whole tree, ready to serialise.
+    ///
+    /// Saving only the current branch is what made a reopened project start
+    /// from a fresh root: `u` had nothing behind it and `g-` had no other
+    /// branches to visit.
+    #[must_use]
+    pub fn save(&self) -> Option<SavedHistory> {
+        let root = self.node(NodeId::ROOT)?;
+        let nodes = self
+            .nodes
+            .iter()
+            .skip(1)
+            .map(|n| {
+                n.edit.as_ref().map(|e| SavedNode {
+                    parent: n.parent,
+                    seq: n.seq,
+                    command: e.command.clone(),
+                    inverse: e.inverse.clone(),
+                    id_cursor: n.id_cursor,
+                })
+            })
+            .collect::<Option<Vec<_>>>()?;
+        Some(SavedHistory {
+            root: root.snapshot.clone()?,
+            root_id_cursor: root.id_cursor,
+            nodes,
+            current: self.current,
+            next_seq: self.next_seq,
+        })
+    }
+
+    /// Rebuild a tree from disk, with the timeline of the state it was left
+    /// in.
+    ///
+    /// The nodes are validated before anything is rebuilt: a parent that
+    /// points forwards, or a `current` that names no node, is corruption
+    /// rather than something to guess around (Phase 0).
+    pub fn restore(saved: SavedHistory) -> Result<(Self, Timeline), CmdError> {
+        let mut tree = Self::new(saved.root);
+        tree.next_seq = saved.next_seq;
+        if let Some(root) = tree.nodes.first_mut() {
+            root.id_cursor = saved.root_id_cursor;
+        }
+        for (i, n) in saved.nodes.into_iter().enumerate() {
+            let id = NodeId(i + 1);
+            let parent = n.parent.unwrap_or(NodeId::ROOT);
+            if parent.0 >= id.0 {
+                return Err(CmdError::ReplayFailed(format!(
+                    "state {} claims a parent that does not precede it",
+                    id.0
+                )));
+            }
+            tree.nodes.push(Node {
+                parent: Some(parent),
+                children: Vec::new(),
+                seq: n.seq,
+                edit: Some(Edit {
+                    command: n.command,
+                    inverse: n.inverse,
+                }),
+                snapshot: None,
+                id_cursor: n.id_cursor,
+            });
+            if let Some(p) = tree.nodes.get_mut(parent.0) {
+                p.children.push(id);
+            }
+        }
+        if saved.current.0 >= tree.nodes.len() {
+            return Err(CmdError::ReplayFailed(
+                "the history points at a state that does not exist".into(),
+            ));
+        }
+        tree.current = saved.current;
+        let mut timeline = tree.rebuild(saved.current)?;
+        if let Some(node) = tree.node(saved.current) {
+            timeline.set_id_cursor(node.id_cursor);
+        }
+        Ok((tree, timeline))
+    }
+}
+
 /// A failure while replaying history is corruption, not a user error.
 fn drift(e: CmdError) -> CmdError {
     match e {

@@ -23,6 +23,17 @@ pub struct MediaRef {
     pub length: Frame,
     /// Phase 0 offline-media policy: still editable, blocks export.
     pub offline: bool,
+    /// Which stream of the container this clip plays, as the demuxer numbers
+    /// them. `None` means "the file's default", which is all a single-stream
+    /// file ever needs. Spec §7 puts every stream on its own track, so a
+    /// track that does not name its stream would silently play stream zero.
+    #[serde(default)]
+    pub stream: Option<u32>,
+    /// Channel count of that stream, when it is an audio stream. Export needs
+    /// it to route each track to its own stream without guessing where an
+    /// upmix put the samples.
+    #[serde(default)]
+    pub channels: Option<u16>,
 }
 
 impl MediaRef {
@@ -33,7 +44,17 @@ impl MediaRef {
             source_fps,
             length,
             offline: false,
+            stream: None,
+            channels: None,
         }
+    }
+
+    /// The same reference, bound to one stream of the container.
+    #[must_use]
+    pub fn on_stream(mut self, stream: u32, channels: Option<u16>) -> Self {
+        self.stream = Some(stream);
+        self.channels = channels;
+        self
     }
 }
 

@@ -16,7 +16,10 @@ use crate::session::Session;
 /// Bumped whenever the on-disk schema changes. Every bump needs a migration
 /// arm in [`migrate`] and a test that loads a document written by the
 /// previous version.
-pub const FORMAT_VERSION: u32 = 1;
+///
+/// Version 2 added the undo tree: a reopened project keeps its history
+/// (spec §10.4).
+pub const FORMAT_VERSION: u32 = 2;
 
 /// A saved project.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -31,6 +34,11 @@ pub struct ProjectFile {
     /// ids, so it is recorded rather than derived - reload is then exact.
     #[serde(default)]
     pub id_cursor: Option<u64>,
+    /// The whole undo tree, so `u`, `Ctrl-r` and `g-` still work after a
+    /// reopen. Absent in version 1 documents and in a project saved from a
+    /// session whose history could not be represented.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history: Option<crate::undo::SavedHistory>,
 }
 
 /// Things that can go wrong reading or writing a project.
@@ -74,6 +82,7 @@ impl ProjectFile {
             snapshot,
             log,
             id_cursor: Some(session.timeline().id_cursor()),
+            history: session.saved_history(),
         }
     }
 
@@ -102,10 +111,16 @@ impl ProjectFile {
         Ok(tl)
     }
 
-    /// Open as a fresh session. History before the save is not persisted in
-    /// v1: the saved state becomes the new root.
+    /// Open the project, with its history when the file carries one.
+    ///
+    /// A version 1 document has none, and starts a fresh tree from the saved
+    /// state - which is what every davimci project did before version 2.
     pub fn into_session(self) -> Result<Session, ProjectError> {
-        Ok(Session::new(self.into_timeline()?))
+        match self.history.clone() {
+            Some(history) => Session::restored(history)
+                .map_err(|e: CmdError| ProjectError::Unreplayable(e.to_string())),
+            None => Ok(Session::new(self.into_timeline()?)),
+        }
     }
 }
 
@@ -135,6 +150,10 @@ pub fn migrate(mut value: Value) -> Result<Value, ProjectError> {
             ));
         }
         obj.entry("log").or_insert_with(|| Value::Array(vec![]));
+    }
+    // Version 1 has no `history`: the reader treats its absence as "start a
+    // fresh tree at the saved state", which is exactly what version 1 meant.
+    if version < FORMAT_VERSION {
         obj.insert("version".into(), Value::from(FORMAT_VERSION));
     }
     Ok(value)
@@ -189,15 +208,71 @@ mod tests {
     }
 
     #[test]
-    fn opening_a_project_starts_a_fresh_history() {
+    fn opening_a_project_keeps_the_history_it_was_saved_with() {
+        // Spec §10.4: undo does not stop at the save point.
         let s = saved_session();
+        let text = ProjectFile::from_session(&s).to_json().unwrap();
+        let mut opened = ProjectFile::from_json(&text)
+            .unwrap()
+            .into_session()
+            .unwrap();
+        assert_eq!(opened.timeline(), s.timeline());
+        assert_eq!(
+            opened.undolist().len(),
+            s.undolist().len(),
+            "the whole tree came back"
+        );
+
+        // And it is a working history, not a listing: undo walks it back to
+        // the state before the last edit.
+        let mut before = s.clone();
+        before.undo().unwrap();
+        opened.undo().unwrap();
+        assert_eq!(opened.timeline(), before.timeline());
+    }
+
+    #[test]
+    fn a_saved_branch_survives_the_round_trip() {
+        // `Ctrl-r` follows the newest branch, so a reopened project has to
+        // carry the branches, not only the path to the current state.
+        let mut s = saved_session();
+        s.undo().unwrap();
+        let track = track_id(s.timeline(), "V1");
+        s.exec(&EditCommand::Split {
+            track,
+            frame: Frame(150),
+            new_id: None,
+        })
+        .unwrap();
+        let listed = s.undolist().len();
+
         let text = ProjectFile::from_session(&s).to_json().unwrap();
         let opened = ProjectFile::from_json(&text)
             .unwrap()
             .into_session()
             .unwrap();
+        assert_eq!(opened.undolist().len(), listed, "a branch was dropped");
         assert_eq!(opened.timeline(), s.timeline());
-        assert!(opened.undolist().is_empty());
+    }
+
+    #[test]
+    fn a_version_one_document_opens_with_a_fresh_history() {
+        // What every project written before version 2 looks like.
+        let s = saved_session();
+        let mut value: Value =
+            serde_json::from_str(&ProjectFile::from_session(&s).to_json().unwrap()).unwrap();
+        let obj = value.as_object_mut().unwrap();
+        obj.remove("history");
+        obj.insert("version".into(), Value::from(1));
+        let opened = ProjectFile::from_json(&value.to_string())
+            .unwrap()
+            .into_session()
+            .unwrap();
+        assert_eq!(opened.timeline(), s.timeline());
+        assert!(
+            opened.undolist().is_empty(),
+            "there was no history to restore"
+        );
     }
 
     #[test]

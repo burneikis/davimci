@@ -563,11 +563,18 @@ Amendments made during implementation:
   ids and a recovered session would otherwise reissue ids the crashed one had
   already used.
 
-Not yet wired: there is still no frontend, so the binary is a thin driver -
-it opens a project, answers the recovery prompt, and runs `:` commands given
-with `-c`. `:analyze` is listed in spec §12 but belongs to Phase 9e and is
-not accepted yet, and undo history is still not persisted across a save
-(Phase 2's standing gap): a recovered log replays into a fresh tree.
+Undo history is now persisted (format version 2): `ProjectFile` carries the
+whole undo tree - every node's command and inverse, its parent, and which
+node was current - so reopening a project and pressing `u` steps back past
+the save point and `Ctrl-r` still follows the branches that existed then.
+Intermediate drift-guard snapshots are deliberately *not* saved: they are a
+rebuild-on-demand guard, and keeping them would multiply a project file by
+its edit count. A version 1 document has no history and opens the way it
+always did, with the saved state as a fresh root.
+
+Still not wired: `:analyze` is listed in spec §12 but is not accepted yet,
+and a *recovered autosave* replays into a fresh tree, since the autosave log
+is a flat list of commands rather than a tree.
 
 ---
 
@@ -816,14 +823,34 @@ Amendments made during implementation:
   status line that reads "100%" for thirty seconds is a lie about a file that
   does not exist yet.
 
-**Known gap, and M3 is not met until it closes.** Exporting a multi-audio
-MKV currently mixes every audio track down to one stream. MLT's avformat
-consumer can write up to 8 audio streams via `meta.map.audio.{N}.channels` /
-`.start`, but the tractor mixes the tracks before the consumer sees them, so
-there are no per-track channels left to map. The fix is per-track channel
-routing when the graph is built (`davimci-mlt`), not an export setting. The
-test that proves it is written, asserts the real requirement, and is
-`#[ignore]`d with that explanation rather than weakened.
+**The multi-audio gap is closed, and M3's export requirement with it.** An
+export that keeps audio tracks separate builds its own graph: each audio
+track is routed onto its own channel pair by `channelcopy` *swaps* (a swap
+leaves silence behind, so no track can leak into another's range), the
+tractor's `mix` transitions sum the now-disjoint bus, and the avformat
+consumer cuts it back into one stream per pair via `channels.N`. The
+previously-ignored slow test now runs, and it asserts content rather than
+stream count: each output stream must carry its own tone.
+
+Three findings, each a defect this work exposed:
+
+- The graph planted **no audio mix transitions at all**, so a tractor played
+  one track's audio and dropped the rest. That was a preview bug as much as
+  an export one.
+- Clips carried no stream selection, so three audio tracks off one container
+  all decoded stream zero (spec §7 says one track per stream).
+  `MediaRef` gained `stream` and `channels`, filled in at import.
+- The producers were missing MLT's *audio* normalisers. `loader.ini` lists
+  `swresample`/`audiochannels` and `resample`, and the loader always adds
+  `audioconvert`; davimci creates services directly, so it plants them
+  itself. Without them a frame keeps the source's channel count and sample
+  format, which is why a routed export encoded noise as soon as the codec
+  asked for anything but float.
+
+Routing supports mono and stereo sources and at most eight streams. Anything
+else is decided *before* the render, against the timeline, and reported as
+"audio tracks mixed to one stream: <reason>" rather than discovered in the
+file afterwards.
 
 ### Phase 5 leftover - the media picker opener
 
@@ -871,9 +898,18 @@ a round trip through the parser, and a single-path command's argument is the
 rest of the line (spec §12), because media filenames contain spaces
 constantly. Regression tests cover both spellings.
 
-Not yet wired: clicks are translated to columns but not to a seek, and the
-picker/subtitle modals have no production opener - `i`/`a`/`r` still report
-`NotImplemented` from `davimci-keys`.
+Both remaining seams are now wired:
+
+- **Click to seek.** The shell reports `Event::Click { column, row }` and the
+  app decides it means "seek there, and focus that lane"; deciding it in the
+  frontend would have been a second editor. It interrupts playback first,
+  since the pacer would otherwise drag the playhead back on the next tick.
+- **The subtitle modal has an opener.** `i` means two things by context: on a
+  text track the engine answers `Outcome::EditText` with the clip's current
+  text, and the frontend opens its buffer; anywhere else it still asks for
+  media. Committing sends `Event::TextEdited`, which the app applies as
+  `EditCommand::SetClipText` - so text editing is one undo step, and an edit
+  that ends equal to the original commits nothing (spec §15.4).
 
 ### Wiring and transport (the glue)
 
@@ -906,10 +942,13 @@ Amendments made during implementation:
   before a `:` command and pulled back after
   (`set_current_session`/`current_session`), so `:w` writes what is on screen
   and `:bn` hands back a different timeline.
-- Shuttle is a stepped scrub, not varispeed: `RenderBackend` has no rate
-  control, so `J`/`L` stop audio and step the playhead, doubling to a capped
-  rate and slowing through 1x before reversing. Real varispeed needs a trait
-  method and is deferred rather than faked.
+- Shuttle is varispeed where the backend supports it. `RenderBackend` gained
+  `supports_varispeed`/`set_rate`, and `davimci-mlt` implements it with
+  `mlt_producer_set_speed`, which is the right place for it: the consumer
+  keeps pulling at wall-clock rate and the producer decides which frame that
+  is, so the audio clock stays the master. A backend without rate control -
+  `MockBackend`, and so most tests - keeps the stepped scrub, and stopping
+  always restores 1x so the next `<Space><Space>` cannot inherit a rate.
 - `TransportCmd::LoopSelection` is refused with a sentence rather than
   silently ignored: looping needs the visual selection, which lives in the
   key engine and is not on the `Host` seam yet.
@@ -948,6 +987,8 @@ Testing:
 
 ## Phase 9e - Audio Operations (`davimci-core` + `davimci-mlt`)
 
+Status: implemented, with the selection-scope gap named below.
+
 Deferred to here deliberately (spec §6.1): these are clip properties applied as
 render-time filters, so they need the backend and a UI to be worth having.
 
@@ -966,6 +1007,29 @@ Testing:
 - Solo/mute matrix test across multi-track fixtures.
 - Cache-invalidation test: change gain, assert predicate motions report stale
   until `:analyze` re-runs.
+
+Amendments made during implementation:
+
+- Mute and solo became `EditCommand::SetTrackFlags`, because "track state,
+  not a clip edit" still has to be undoable, repeatable and scriptable, and
+  the command layer is the only write path. They are independent flags:
+  soloing a muted track leaves it muted.
+- `davimci-analysis` finally has a caller. `davimci_cli::Analyser` watches
+  the timeline after every edit, queues one job per audio source, and drops
+  a track's envelope when its audible signature (gain, fades, in-points)
+  changes - which is the cache invalidation the spec asks for, done without
+  waiting for the user to type `:analyze`.
+- Waveforms reach the screen the way job progress does, through the `Host`
+  seam and a tick, since analysis finishes whenever it finishes. Sampling a
+  column from an envelope is `davimci-app`'s arithmetic, not a frontend's,
+  so the GUI and the TUI cannot disagree about it.
+- `:gain`, `:fade` are workspace commands; `:normalize` and `:duck` are
+  editor commands, because they need a measurement. Ducking is expressed as
+  splits plus gain in one `Sequence`, since gain is one value per clip.
+
+Gap: these act on the clip under the playhead, not on a visual selection.
+The selection lives in the key engine and is not on the `Host` seam yet -
+the same missing seam that `<Space>l` waits on.
 
 ---
 

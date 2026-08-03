@@ -14,9 +14,56 @@ use std::path::{Path, PathBuf};
 use davimci_backend::{
     Container, PresetRegistry, RenderBackend, RenderJob, RenderSettings, RenderState,
 };
-use davimci_core::{Fps, Frame, Resolution};
+use davimci_core::{Frame, Timeline, TrackKind};
 
 use crate::error::CliError;
+
+/// The most audio streams the backend can route onto one channel bus.
+const MAX_SEPARATE_AUDIO_TRACKS: usize = 8;
+
+/// Whether this timeline's audio can be kept in separate streams, and why not
+/// when it cannot.
+///
+/// Separate streams are built by routing each track onto its own channel
+/// pair, which only works for sources whose channel count is known and no
+/// wider than a pair. Deciding it here, against the timeline, means the user
+/// is told before the render rather than handed a file that quietly mixed.
+pub fn audio_stream_plan(timeline: &Timeline) -> Result<(), String> {
+    let audio: Vec<_> = timeline
+        .tracks()
+        .iter()
+        .filter(|t| t.kind == TrackKind::Audio)
+        .collect();
+    if audio.len() < 2 {
+        return Err("there is only one audio track".into());
+    }
+    if audio.len() > MAX_SEPARATE_AUDIO_TRACKS {
+        return Err(format!(
+            "a file can carry at most {MAX_SEPARATE_AUDIO_TRACKS} separate audio streams"
+        ));
+    }
+    for track in audio {
+        for clip in track.clips() {
+            // A generated clip has no source and so no layout to get wrong.
+            let Some(media) = clip.media.as_ref() else {
+                continue;
+            };
+            match media.channels {
+                Some(1 | 2) => {}
+                Some(n) => {
+                    return Err(format!(
+                        "{} has {n} channels and only mono or stereo sources can be routed",
+                        clip.label
+                    ));
+                }
+                None => {
+                    return Err(format!("the channel count of {} is unknown", clip.label));
+                }
+            }
+        }
+    }
+    Ok(())
+}
 
 /// A job id that will not collide with anything else the app shows. Exports
 /// are the only job kind so far, so they count from a fixed base.
@@ -90,10 +137,10 @@ impl Exporter {
         backend: &mut dyn RenderBackend,
         output: &Path,
         preset: Option<&str>,
-        resolution: Resolution,
-        fps: Fps,
-        duration: Frame,
+        timeline: &Timeline,
     ) -> Result<String, CliError> {
+        let duration = timeline.duration();
+        let (resolution, fps) = (timeline.props.resolution, timeline.props.fps);
         // One at a time: two consumers writing at once would fight over the
         // graph, and the second would silently produce a broken file.
         if let Some(r) = &self.running {
@@ -118,8 +165,17 @@ impl Exporter {
         // A path with no extension gets the preset's; a path that names a
         // different one is left alone, because the user was explicit.
         let output = with_extension_if_missing(output, preset.container);
-        let settings: RenderSettings = preset.settings(resolution, fps);
-        let multitrack = preset.container.keeps_audio_tracks_separate();
+        let mut settings: RenderSettings = preset.settings(resolution, fps);
+        // The preset asks; the timeline decides. A source that cannot be
+        // routed mixes, and says so, rather than producing a file whose audio
+        // silently collapsed to one stream.
+        let plan = audio_stream_plan(timeline);
+        let multitrack = settings.separate_audio_tracks && plan.is_ok();
+        let mixed_reason = match (settings.separate_audio_tracks, &plan) {
+            (true, Err(reason)) if audio_track_count(timeline) > 1 => Some(reason.clone()),
+            _ => None,
+        };
+        settings.separate_audio_tracks = multitrack;
 
         backend
             .render(RenderJob::new(output.clone(), settings))
@@ -139,10 +195,12 @@ impl Exporter {
             duration.get(),
             output.display(),
             preset.name,
-            if multitrack {
-                " (audio tracks stay separate)"
-            } else {
-                ""
+            match (multitrack, &mixed_reason) {
+                (true, _) => " (audio tracks stay separate)".to_string(),
+                (false, Some(reason)) => {
+                    format!(" (audio tracks mixed to one stream: {reason})")
+                }
+                (false, None) => String::new(),
             }
         ))
     }
@@ -208,6 +266,14 @@ impl Exporter {
     }
 }
 
+fn audio_track_count(timeline: &Timeline) -> usize {
+    timeline
+        .tracks()
+        .iter()
+        .filter(|t| t.kind == TrackKind::Audio)
+        .count()
+}
+
 /// Progress in tenths of a percent, never rounding up to 1000 before the
 /// backend says the render is done.
 fn permille(done: u64, total: u64) -> u16 {
@@ -244,20 +310,19 @@ mod tests {
 
     use super::*;
     use davimci_backend::MockBackend;
+    use davimci_core::Resolution;
+    use davimci_core::testing::multi_audio_fixture as tl_with_audio;
 
     fn backend() -> MockBackend {
         MockBackend::new(Resolution::HD_1080)
     }
 
+    fn timeline() -> Timeline {
+        tl_with_audio(2, Some(1))
+    }
+
     fn start(e: &mut Exporter, b: &mut MockBackend, out: &str) -> Result<String, CliError> {
-        e.start(
-            b,
-            Path::new(out),
-            None,
-            Resolution::HD_1080,
-            Fps::FPS_60,
-            Frame(100),
-        )
+        e.start(b, Path::new(out), None, &timeline())
     }
 
     #[test]
@@ -280,6 +345,37 @@ mod tests {
     }
 
     #[test]
+    fn a_source_that_cannot_be_routed_mixes_and_says_why() {
+        // Mixing behind the user's back is the failure this message exists to
+        // prevent: the file is still written, but it is not a multi-audio one.
+        let mut e = Exporter::new();
+        let tl = tl_with_audio(2, Some(6));
+        let msg = e
+            .start(&mut backend(), Path::new("/tmp/out.mkv"), None, &tl)
+            .unwrap();
+        assert!(msg.contains("mixed to one stream"), "{msg}");
+        assert!(msg.contains("6 channels"), "{msg}");
+    }
+
+    #[test]
+    fn one_audio_track_is_not_reported_as_a_mixdown() {
+        // Nothing was merged, so there is nothing to warn about.
+        let mut e = Exporter::new();
+        let tl = tl_with_audio(1, Some(2));
+        let msg = e
+            .start(&mut backend(), Path::new("/tmp/out.mkv"), None, &tl)
+            .unwrap();
+        assert!(!msg.contains("mixed to one stream"), "{msg}");
+        assert!(!msg.contains("stay separate"), "{msg}");
+    }
+
+    #[test]
+    fn nine_audio_tracks_are_more_than_a_file_can_carry() {
+        let err = audio_stream_plan(&tl_with_audio(9, Some(2))).unwrap_err();
+        assert!(err.contains("at most 8"), "{err}");
+    }
+
+    #[test]
     fn the_extension_picks_the_preset_when_none_is_named() {
         let (mut e, mut b) = (Exporter::new(), backend());
         let msg = start(&mut e, &mut b, "/tmp/clip.webm").unwrap();
@@ -290,14 +386,7 @@ mod tests {
     fn a_missing_extension_is_filled_in_from_the_preset() {
         let (mut e, mut b) = (Exporter::new(), backend());
         let msg = e
-            .start(
-                &mut b,
-                Path::new("/tmp/out"),
-                Some("mp4"),
-                Resolution::HD_1080,
-                Fps::FPS_60,
-                Frame(10),
-            )
+            .start(&mut b, Path::new("/tmp/out"), Some("mp4"), &timeline())
             .unwrap();
         assert!(msg.contains("/tmp/out.mp4"), "{msg}");
     }
@@ -319,9 +408,7 @@ mod tests {
                 &mut b,
                 Path::new("/tmp/out.mkv"),
                 None,
-                Resolution::HD_1080,
-                Fps::FPS_60,
-                Frame::ZERO,
+                &Timeline::default(),
             )
             .unwrap_err();
         assert!(err.to_string().contains("nothing to export"), "{err}");
@@ -335,9 +422,7 @@ mod tests {
                 &mut b,
                 Path::new("/tmp/out.mkv"),
                 Some("youtube"),
-                Resolution::HD_1080,
-                Fps::FPS_60,
-                Frame(10),
+                &timeline(),
             )
             .unwrap_err();
         let msg = err.to_string();

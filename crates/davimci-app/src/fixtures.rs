@@ -98,6 +98,27 @@ pub fn zoomed_out() -> ViewState {
     )
 }
 
+/// An analysed audio lane: `A1` has a waveform, the video lanes do not
+/// (spec §6.1). Frontends render this to prove the envelope reaches the
+/// screen.
+#[must_use]
+pub fn waveform() -> ViewState {
+    let s = session();
+    let a1 = track_id(s.timeline(), "A1");
+    let mut waves = crate::waveform::Waveforms::default();
+    // A ramp from silence to full scale over the analysed span, so a
+    // renderer that drops or reorders columns fails visibly.
+    let peaks: Vec<f32> = (0..600)
+        .map(|i| -60.0 + (i as f32 / 600.0) * 60.0)
+        .collect();
+    waves.insert(a1, crate::waveform::Waveform::from_db(10, &peaks));
+    let inputs = ViewInputs {
+        waveforms: Some(&waves),
+        ..ViewInputs::default()
+    };
+    ViewState::build(&s, viewport(Zoom::new(8)), &JumpConfig::default(), &inputs)
+}
+
 /// Every golden view, with a stable name for snapshot files.
 #[must_use]
 pub fn all() -> Vec<(&'static str, ViewState)> {
@@ -106,5 +127,6 @@ pub fn all() -> Vec<(&'static str, ViewState)> {
         ("scrolled", scrolled()),
         ("visual_block", visual_block()),
         ("zoomed_out", zoomed_out()),
+        ("waveform", waveform()),
     ]
 }

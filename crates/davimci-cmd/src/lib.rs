@@ -20,4 +20,4 @@ pub use error::CmdError;
 pub use macros::MacroRecorder;
 pub use project::{FORMAT_VERSION, ProjectError, ProjectFile};
 pub use session::Session;
-pub use undo::{DEFAULT_SNAPSHOT_INTERVAL, NodeId, UndoEntry, UndoTree};
+pub use undo::{DEFAULT_SNAPSHOT_INTERVAL, NodeId, SavedHistory, SavedNode, UndoEntry, UndoTree};

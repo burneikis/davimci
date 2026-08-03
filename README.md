@@ -12,13 +12,16 @@ remappable keys, and hookable events.
 
 <!-- Keep this current. It must never claim more than the code does. -->
 
-**Phase 9a-9c complete: davimci opens a window and edits video.** Keys drive
-the command layer, edits reproject the MLT graph, motions seek and present,
-`<Space><Space>`/`H`/`L` play and shuttle, and the timeline is painted
-from the shared view state. This is the first build that can be used by
-pointing it at a file, though it is a prototype, not a product: see M3 in
-plan.md for what still separates the two. Phase 8b (export presets and `:render`) and the windowed shell
-are next. Workspace builds; `just test` and `just lint` are green, and
+**M3 is met: davimci opens a window, edits video, and exports a multi-audio
+MKV.** Keys drive the command layer, edits reproject the MLT graph, motions
+seek and present, `<Space><Space>`/`H`/`L` play and shuttle (varispeed, with
+audio, through MLT), clicks seek, and the timeline is painted from the shared
+view state with waveforms on analysed audio lanes. Export keeps every audio
+track as its own stream, verified by decoding the result and checking each
+stream carries its own tone. Phase 9e (audio operations) landed with it:
+`<Space>m`/`<Space>s`, `+`/`-`, `f`, `:gain`, `:fade`, `:normalize`,
+`:duck`. Phase 9f (transitions) and 9d (TUI) are what remain of the plan.
+Workspace builds; `just test` and `just lint` are green, and
 `just fixtures && just test-slow` passes against generated media, including
 real decode, preview, and export through MLT.
 
@@ -120,56 +123,64 @@ it is linked dynamically, since davimci is GPL-3.0 over LGPL-2.1 MLT.
 | egui key translation, including `Space` and Control chords | implemented, tested |
 | Export: presets, `:export`/`:render`/`:presets`/`:cancel`, background jobs | implemented, real files |
 | Media picker opener (`i`/`a`/`r`): insert, append, replace | implemented, tested |
-| Multi-audio MKV export (audio tracks are still mixed to one) | **not working** |
-| Click-to-seek, TUI frontend (9d) | not started |
+| Multi-audio MKV export: one stream per track, per-track channel routing | implemented, tested (slow) |
+| One track per source stream, on import and in the graph | implemented, tested |
+| Mute/solo (`<Space>m`/`<Space>s`) as undoable commands | implemented, tested |
+| Gain, fades, `:gain`/`:fade`/`:normalize`/`:duck` | implemented, tested |
+| Background analysis with a live caller; waveforms on audio lanes | implemented, tested |
+| Analysis invalidated when gain or fades change | implemented, tested |
+| Click-to-seek, and `i` opening the subtitle editor on a text clip | implemented, tested |
+| Varispeed shuttle (`H`/`L`) through backend rate control | implemented, tested |
+| Undo history persisted across save and reopen (format v2) | implemented, tested |
+| Transitions (9f), TUI frontend (9d) | not started |
 | Everything else | placeholder crates |
 
-Caveats worth knowing: undo history is not persisted - reopening a project
-starts a fresh tree from the saved state - and `ac` resolves to the same range
-as `ic` until transitions land in Phase 9f. In `davimci-keys`: `i`/`a`/`r` need
-the media picker that comes with the GUI in Phase 9c and report
-`NotImplemented` - the picker exists as state but has no production opener
-until the window does; `gx`/`dax` wait on Phase 9f transitions the same way; `<`/`>`
+Caveats worth knowing: `ac` resolves to the same range as `ic` until
+transitions land in Phase 9f, and `gx`/`dax` wait on the same phase. `<`/`>`
 jump-point edge trims are parsed but not yet wired to a command; visual-mode
 track-object narrowing (typing `it`/`at` while a selection is live) is not
-implemented - operators in a `VISUAL*` mode act on the whole selection.
+implemented - operators in a `VISUAL*` mode act on the whole selection. The
+audio commands act on the clip under the playhead rather than on a visual
+selection, because the selection is not on the `Host` seam yet - the same
+missing seam `<Space>l` waits on.
 
-In `davimci-analysis`: import and analysis work end to end, but nothing calls
-them yet, since there is no frontend to import *into*. Analysis measures the
-source, not the post-gain signal, so the cache-invalidation hook for gain and
-fade changes has no caller until Phase 9e; predicate searches by clip tag
-match nothing until clip tags arrive with the Lua API. Decode, scene
-detection, and proxy encoding shell out to `ffmpeg`/`ffprobe`; MLT is used for
-preview and export, not for analysis.
+In `davimci-analysis`: the editor now drives it. Every audio track is queued
+after an import, results arrive as waveforms on the next tick, and a change
+to a track's gain, fades or in-points drops its envelope and re-queues the
+work - analysis measures the source, so a measurement of the pre-gain signal
+would be a lie. Predicate searches by clip tag still match nothing until clip
+tags arrive with the Lua API. Decode, scene detection, and proxy encoding
+shell out to `ffmpeg`/`ffprobe`; MLT is used for preview and export, not for
+analysis.
 
-In `davimci-cli`: the lifecycle is complete but the binary is a driver, not an
-editor - it has no keymap and no display, so `-c` is the only input. `:analyze`
-is in spec §12 but belongs to Phase 9e and is not accepted yet, and a recovered
-autosave replays into a fresh undo tree, since history is still not persisted.
+In `davimci-cli`: `:analyze` is in spec §12 and is still not accepted - the
+analyser re-runs by itself when the audio changes, which covers the reason it
+exists, but the command should exist too. A recovered autosave still replays
+into a fresh undo tree: the autosave log is a flat list of commands rather
+than a tree, so only a saved *project* carries its history.
 
-In `davimci-cli`: shuttle is a stepped scrub rather than varispeed, because
-`RenderBackend` has no rate control - `H`/`L` stop audio and step the
-playhead. `<Space>l` (loop selection) is refused with a message, since the
-selection is not on the `Host` seam yet. Running a `:` command clones the
-session to hand it between the app and the workspace.
+In `davimci-cli`: `<Space>l` (loop selection) is refused with a message,
+since the selection is not on the `Host` seam yet. Running a `:` command
+clones the session to hand it between the app and the workspace.
 
 In `davimci-present` and `davimci-gui`: composition is software and integral
 on purpose, so the parity and pacing tests are byte-exact rather than
 tolerance-based; the shell uploads those pixels as a texture rather than
 recomputing them. The window is not covered by automated tests - the
 rasteriser's input (`DrawList`) and its key translation are, but nothing
-asserts on what reaches the screen. Clicks translate to timeline columns but
-not yet to seeks, and the subtitle modal still has no opener.
+asserts on what reaches the screen.
 
 Export writes real files - h264/h265/vp9/prores into mkv/mp4/webm/mov, driven
 by presets that name codecs rather than encoders, with progress in the status
-line and `:cancel` to stop one. **It does not yet keep audio tracks separate:**
-a multi-track project exports with its audio mixed to a single stream, so M3's
-"export a multi-audio MKV" is not met. The test for it is written and asserts
-the real requirement; it is `#[ignore]`d, not weakened, and plan.md says why.
+line and `:cancel` to stop one. A Matroska export keeps every audio track as
+its own stream by routing each track onto its own channel pair before the mix
+and cutting the bus back up at the consumer. That needs sources whose channel
+layout is known and no wider than stereo, and at most eight of them; anything
+else is decided before the render and reported as "audio tracks mixed to one
+stream: <reason>" rather than found in the file afterwards.
 
-In `davimci-mlt`: transitions are not projected until Phase 9f, and export
-presets arrive in Phase 8b (`RenderSettings` is currently filled in by hand).
+In `davimci-mlt`: transitions other than the audio `mix` are not projected
+until Phase 9f.
 `just sanitize` runs clean (ASan/LSan, nightly + `rust-src` via `rustup`) with
 a narrow, documented suppression file for MLT's own module-init and
 blank-producer state; the refcount guarantees ultimately rest on the wrapper

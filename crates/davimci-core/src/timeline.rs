@@ -393,6 +393,36 @@ impl Timeline {
         Ok(())
     }
 
+    /// Set a subtitle clip's text, returning what it said before (spec §8).
+    ///
+    /// Only a clip that already carries text: a media clip has no text
+    /// payload, and inventing one would put a subtitle on a video.
+    pub fn set_clip_text(
+        &mut self,
+        track: TrackId,
+        clip: ClipId,
+        text: impl Into<String>,
+    ) -> Result<String, CoreError> {
+        let t = self.require_track(track)?;
+        let c = t
+            .clip(clip)
+            .ok_or_else(|| CoreError::NoSuchClip(clip.to_string()))?;
+        if c.text.is_none() {
+            return Err(CoreError::InvalidProps {
+                reason: "that clip carries no text to edit".to_string(),
+            });
+        }
+        let text = text.into();
+        let mut previous = String::new();
+        if let Some(t) = self.track_mut(track)
+            && let Some(c) = t.clip_mut(clip)
+        {
+            previous = c.text.replace(text).unwrap_or_default();
+        }
+        self.debug_assert_invariants();
+        Ok(previous)
+    }
+
     /// Set a track's mute flag (spec §6.1, `<Space>m`).
     ///
     /// Track state, not clip state: muting changes what the backend renders

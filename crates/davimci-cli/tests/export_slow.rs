@@ -16,8 +16,6 @@ use std::process::Command;
 use davimci_app::{App, Event};
 use davimci_backend::RenderBackend;
 use davimci_cli::{Editor, Workspace};
-use davimci_cmd::Session;
-use davimci_core::{Fps, Resolution};
 use davimci_present::{Host as PresentHost, Presenter};
 
 fn fixture(name: &str) -> PathBuf {
@@ -86,20 +84,14 @@ fn drain_export(app: &mut App, editor: &mut Editor) {
     panic!("the export never finished");
 }
 
-/// Known gap, deliberately left failing-but-ignored rather than weakened.
+/// The M3 claim, checked rather than assumed.
 ///
-/// MLT's avformat consumer *can* write up to 8 audio streams, via
-/// `meta.map.audio.{N}.channels` / `.start` describing how output streams
-/// carve up the consumer's channel layout. What is missing is upstream of
-/// that: the tractor currently mixes every audio track down to one stereo
-/// pair, so there are no per-track channels left to map. Making this pass
-/// means routing each audio track to its own channel range when the graph is
-/// built (`davimci-mlt`), which is a graph change, not an export setting.
-///
-/// M3 is not met until this runs. The assertion below is the specification;
-/// do not relax it.
+/// Each audio track is routed onto its own channel pair before the tractor's
+/// `mix` transitions sum them, and the avformat consumer cuts that bus back
+/// into one stream per pair (`channels.N`). The routing is what makes it
+/// work: the tractor mixes, so tracks that shared channels would arrive as
+/// one stream no matter what the consumer was told.
 #[test]
-#[ignore = "multi-track audio routing is not implemented in the MLT graph yet"]
 fn exporting_a_multi_audio_mkv_keeps_every_audio_track_separate() {
     let src = fixture("multitrack.mkv");
     let want_audio = stream_count(&src, "a");
@@ -127,7 +119,59 @@ fn exporting_a_multi_audio_mkv_keeps_every_audio_track_separate() {
         "audio tracks were merged instead of kept separate"
     );
     assert_eq!(stream_count(&out, "v"), 1, "expected one video stream");
+
+    // Separate streams that all carry the same mix would pass a stream count
+    // and fail the user, so check the *content*: the fixture's tracks are
+    // 220, 440 and 660 Hz sines, and each stream must be its own tone.
+    for (n, want) in [220.0_f64, 440.0, 660.0].iter().enumerate() {
+        let got = dominant_hz(&out, n);
+        assert!(
+            (got - want).abs() < want * 0.05,
+            "audio stream {n} carries {got:.0} Hz, expected {want:.0} Hz - the tracks were \
+             mixed together rather than routed to their own streams"
+        );
+    }
     let _ = std::fs::remove_file(&out);
+}
+
+/// The dominant frequency of one audio stream, by zero-crossing rate.
+///
+/// The fixture's tracks are pure sines, so crossings per second is twice the
+/// frequency - exact enough to tell 220 from 440 without an FFT.
+fn dominant_hz(path: &Path, stream: usize) -> f64 {
+    const RATE: usize = 48_000;
+    let out = Command::new("ffmpeg")
+        .args(["-v", "error", "-i"])
+        .arg(path)
+        .args([
+            "-map",
+            &format!("0:a:{stream}"),
+            "-ac",
+            "1",
+            "-ar",
+            &RATE.to_string(),
+            "-f",
+            "f32le",
+            "-",
+        ])
+        .output()
+        .expect("ffmpeg should be installed for slow tests");
+    let samples: Vec<f32> = out
+        .stdout
+        .chunks_exact(4)
+        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        .skip(RATE / 2)
+        .take(RATE)
+        .collect();
+    assert!(
+        samples.len() > RATE / 2,
+        "audio stream {stream} is too short to measure"
+    );
+    let crossings = samples
+        .windows(2)
+        .filter(|w| (w[0] < 0.0) != (w[1] < 0.0))
+        .count();
+    crossings as f64 / 2.0 * (RATE as f64 / samples.len() as f64)
 }
 
 #[test]

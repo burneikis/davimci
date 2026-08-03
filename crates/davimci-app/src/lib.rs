@@ -17,6 +17,7 @@ pub mod job;
 pub mod message;
 pub mod view;
 pub mod viewport;
+pub mod waveform;
 
 #[cfg(any(test, feature = "testing"))]
 pub mod fixtures;
@@ -29,3 +30,4 @@ pub use job::{Job, JobList, JobState, JobUpdate};
 pub use message::{Message, MessageQueue, Severity};
 pub use view::{ClipView, PlayheadView, SelectionView, Tick, TrackView, ViewInputs, ViewState};
 pub use viewport::Viewport;
+pub use waveform::{Waveform, Waveforms};

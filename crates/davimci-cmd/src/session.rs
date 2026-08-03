@@ -9,7 +9,7 @@ use davimci_core::{Frame, Mark, Register, Timeline, TrackId};
 use crate::command::{Command, EditCommand};
 use crate::error::CmdError;
 use crate::macros::MacroRecorder;
-use crate::undo::{NodeId, UndoEntry, UndoTree};
+use crate::undo::{NodeId, SavedHistory, UndoEntry, UndoTree};
 
 /// An open timeline and everything that has been done to it.
 #[derive(Debug, Clone, PartialEq)]
@@ -30,6 +30,27 @@ impl Session {
             last_edit: None,
             macros: MacroRecorder::new(),
         }
+    }
+
+    /// Reopen a session with the history it was saved with (spec §10.4).
+    ///
+    /// Undo does not stop at the save point: reopening a project and pressing
+    /// `u` steps back through what was done before it was saved, the same way
+    /// vim's persistent undo does.
+    pub fn restored(saved: SavedHistory) -> Result<Self, CmdError> {
+        let (history, timeline) = UndoTree::restore(saved)?;
+        Ok(Self {
+            history,
+            timeline,
+            last_edit: None,
+            macros: MacroRecorder::new(),
+        })
+    }
+
+    /// This session's history, ready to save.
+    #[must_use]
+    pub fn saved_history(&self) -> Option<SavedHistory> {
+        self.history.save()
     }
 
     #[must_use]

@@ -73,6 +73,24 @@ pub trait RenderBackend {
 
     fn is_previewing(&self) -> bool;
 
+    /// Whether this backend can play at a rate other than 1x.
+    ///
+    /// Asked rather than assumed: a backend without it shuttles by stepping
+    /// the playhead, which is a different feature with the same key
+    /// (spec §3.2.1).
+    fn supports_varispeed(&self) -> bool {
+        false
+    }
+
+    /// Set the playback rate: `1.0` is normal, `2.0` double speed, negative
+    /// plays backwards. Only meaningful while previewing.
+    fn set_rate(&mut self, rate: f64) -> Result<()> {
+        let _ = rate;
+        Err(BackendError::Unavailable {
+            reason: "this backend cannot play at other than normal speed".into(),
+        })
+    }
+
     /// The next frame due for presentation, or `None` if none is ready yet.
     fn next_preview_frame(&mut self) -> Result<Option<VideoFrame>>;
 

@@ -210,6 +210,8 @@ pub fn default_bindings() -> Vec<(Vec<Key>, LeafAction)> {
         (k("f"), op(Operator::Fade)),
         (k("+"), standalone(Action::GainAdjust(1))),
         (k("-"), standalone(Action::GainAdjust(-1))),
+        (k("<Space>m"), standalone(Action::ToggleMute)),
+        (k("<Space>s"), standalone(Action::ToggleSolo)),
         // -- transitions (§6.2) --
         (k("gx"), standalone(Action::CreateTransition)),
         (k("dax"), standalone(Action::DeleteTransition)),

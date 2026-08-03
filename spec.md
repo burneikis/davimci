@@ -85,6 +85,11 @@ is also the easiest to reach without spending a dedicated key.
 | `<Space>p` | Play from playhead, return playhead to origin on stop (preview-and-return) |
 | `<Space>l` | Loop the current selection (or current clip in NORMAL) |
 
+Shuttle is varispeed playback where the backend can vary its rate: the audio
+clock keeps running and the rate steps, so a shuttle sounds like a shuttle. A
+backend without rate control degrades to a silent stepped scrub at the same
+speeds and on the same keys, rather than refusing.
+
 Shuttle is `H`/`L` rather than the JKL of other NLEs: the fingers are already
 on `h`/`l` for frame motion, so the shifted pair is the same gesture at speed.
 Lowercase `h`/`j`/`k`/`l` keep their vim meanings (frame/jump motion, track
@@ -314,11 +319,23 @@ edits to clips, and they change only what the backend renders.
 | `:fade in\|out <ms>` | Explicit fade with a duration |
 | `:duck <track> <db>` | Duck this track wherever another track is above a threshold |
 
+Audio lanes draw the analysed peak envelope of the source under each clip,
+mapped through the clip's in-point so a trimmed clip shows its own audio. A
+lane whose analysis has not landed draws nothing, since an empty lane and a
+silent one must not look alike.
+
 Gain and fades are **clip properties**, not destructive edits - they are stored
 on the clip, apply as filters at render time, and are undoable like any other
-command. Because they change the audio, they invalidate the analysis cache for
-that clip and require a re-run of `:analyze` for accurate predicate motions
-(spec §10.2).
+command. Because they change the audio, they invalidate the analysis of that
+track: the envelope is dropped and analysis re-runs in the background, so
+predicate motions report `Pending` rather than a measurement of the pre-gain
+signal (§10.2). `:analyze` forces the same thing by hand.
+
+`:gain`, `:normalize` and `:fade` act on the clip under the playhead; acting
+on a whole visual selection waits on the selection reaching the host seam.
+`:duck` lowers every part of the current track that overlaps a region where
+the named track is above the silence threshold, splitting the clip around
+those regions - one command, so one `u` undoes the whole duck.
 
 ## 6.2 Transitions
 
@@ -347,6 +364,12 @@ map onto MLT transitions.
   import added - tracks included - and redo reproduces the same ids. An import
   into an empty project also sets the timeline properties (§7.1) as part of
   that same command.
+Every audio track is exported as its own stream where the container allows it
+(Matroska). Tracks are routed to their own channel range before they are
+mixed, so this needs sources whose channel layout is known and no wider than
+stereo, and at most eight of them; anything else exports as one mixed stream
+and says so before the render starts rather than after it.
+
 ### 7.1 Timeline normalization (single framerate and resolution)
 
 **The timeline has exactly one framerate and one resolution.** They are fixed
@@ -651,7 +674,11 @@ The inverse is produced *by* applying, not derived from the command alone: the i
 
 **Shape:**
 - Undo is a **tree**, not a stack - branching history is cheap here and fits the vim model (`u`, `Ctrl-r`, `g-`/`g+`, `:undolist`). `Ctrl-r` follows the most recently created branch; `g-`/`g+` step through every state in change order, across branches.
-- Project file = a compacted timeline state plus the command log since it.
+- Project file = a compacted timeline state plus the command log since it,
+  **plus the undo tree itself**: reopening a project and pressing `u` steps
+  back through what was done before it was saved, and `Ctrl-r` still follows
+  the branches that existed then. Intermediate drift-guard snapshots are not
+  saved - they are rebuilt on demand.
 - **Redo is exact, ids included.** A logged command never mints an identifier the log does not record, so an edit that incidentally cuts a clip - inserting mid-clip, deleting a part-range - is recorded as an explicit split followed by the edit. Undoing it joins the cut back up, so undo of a whole-clip delete leaves no seam, while undo of a part-range delete correctly keeps the cut its two remaining halves need.
 - **Drift guard:** a full state snapshot every N commands (default 100) and on every save, so undo cost is bounded and a buggy `invert` can never lose the project - only the commands since the last snapshot.
 
@@ -803,6 +830,12 @@ order.
   width, and scrolls to frame 0. This applies only when the timeline was
   empty beforehand - a later import never moves the user's view - and, like
   every zoom, is view state rather than an edit.
+
+- **Click to seek:** a click in the ruler or a lane moves the playhead to
+  that column, and a click in a lane also focuses that track. A click is
+  navigation, so it interrupts playback, never enters the undo log, and is
+  decided above the frontends - a frontend reports where the click landed and
+  nothing else.
 
 ### 15.3 Command line
 

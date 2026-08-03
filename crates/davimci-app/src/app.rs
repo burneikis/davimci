@@ -6,7 +6,7 @@
 //! frontend that skipped this would be a second editor.
 
 use davimci_cmd::Session;
-use davimci_core::Frame;
+use davimci_core::{ClipId, Frame, TrackId};
 use davimci_keys::engine::{Outcome, TransportCmd};
 use davimci_keys::{Engine, Key, Keymap, MediaIntent, Mode, ZoomIntent};
 use davimci_motion::{JumpConfig, Zoom};
@@ -17,6 +17,7 @@ use crate::job::{JobList, JobUpdate};
 use crate::message::{Message, MessageQueue};
 use crate::view::{ViewInputs, ViewState};
 use crate::viewport::Viewport;
+use crate::waveform::{Waveform, Waveforms};
 
 /// The host's hook for things the editor core deliberately does not own:
 /// `:` commands (`davimci-cli` owns the vocabulary), transport (the backend
@@ -100,6 +101,21 @@ pub trait Host {
         Vec::new()
     }
 
+    /// Audio analysed since the last call, per track (spec §6.1).
+    ///
+    /// Analysis runs in the background and finishes whenever it finishes, so
+    /// it arrives the same way job progress does rather than as a return
+    /// value of the edit that triggered it.
+    fn waveforms(&mut self) -> Vec<(TrackId, Waveform)> {
+        Vec::new()
+    }
+
+    /// Tracks whose audio changed, so any published envelope is now stale
+    /// (spec §6.1: gain and fades invalidate the analysis).
+    fn stale_waveforms(&mut self) -> Vec<TrackId> {
+        Vec::new()
+    }
+
     /// True once the host wants the loop to stop (`:q` succeeded).
     fn wants_quit(&self) -> bool {
         false
@@ -121,9 +137,12 @@ pub struct App {
     jump_cfg: JumpConfig,
     messages: MessageQueue,
     jobs: JobList,
+    waveforms: Waveforms,
     command_line: Option<String>,
     /// What an `i`/`a`/`r` picker, if one is open, will do with its answer.
     pending_pick: Option<MediaIntent>,
+    /// The subtitle clip a frontend is editing the text of, if any.
+    editing_text: Option<ClipId>,
     quit: bool,
 }
 
@@ -142,8 +161,10 @@ impl App {
             jump_cfg: JumpConfig::default(),
             messages: MessageQueue::default(),
             jobs: JobList::default(),
+            waveforms: Waveforms::default(),
             command_line: None,
             pending_pick: None,
+            editing_text: None,
             quit: false,
         }
     }
@@ -261,8 +282,41 @@ impl App {
             message: self.messages.current().cloned(),
             job: self.jobs.foreground().cloned(),
             recording: self.session.macros().recording(),
+            waveforms: (!self.waveforms.is_empty()).then_some(&self.waveforms),
         };
         ViewState::build(&self.session, self.viewport, &self.jump_cfg, &inputs)
+    }
+
+    /// Seek to a clicked column, and to a clicked lane when there is one.
+    ///
+    /// A click is navigation, so it takes the same path a motion does: the
+    /// playhead moves, the host seeks and presents, and nothing reaches the
+    /// undo log. Playback owns the clock, so it is interrupted first -
+    /// otherwise the next tick would drag the playhead back.
+    fn click(&mut self, column: u32, row: Option<usize>, host: &mut dyn Host) -> Response {
+        host.interrupt_transport(&self.session);
+        let duration = self.session.timeline().duration();
+        if duration == Frame::ZERO {
+            return Response::Continue;
+        }
+        // The viewport quantises to whole columns, so the frame under a click
+        // is the first frame of that column, clamped to the timeline.
+        let frame = self
+            .viewport
+            .frame_at_column(column)
+            .min(Frame(duration.get().saturating_sub(1)));
+        let track = row
+            .map(|r| r.saturating_add(self.viewport.top_track()))
+            .and_then(|i| self.session.timeline().tracks().get(i))
+            .map_or_else(|| self.session.timeline().playhead().track, |t| t.id);
+        match self.session.set_playhead(frame, track) {
+            Ok(()) => {
+                host.playhead_moved(&self.session);
+                self.follow();
+            }
+            Err(e) => self.messages.push(Message::error(e.to_string())),
+        }
+        Response::Continue
     }
 
     /// Feed one key. The single entry point for every frontend's input path.
@@ -350,12 +404,63 @@ impl App {
                 self.pending_pick = None;
                 Response::Continue
             }
+            Event::Click { column, row } => self.click(column, row, host),
+            Event::TextEdited { clip, text } => {
+                let Some(open) = self.editing_text.take() else {
+                    // Nothing asked for this text, so committing it would be
+                    // a write the user never requested.
+                    self.messages
+                        .push(Message::error("no subtitle is being edited".to_string()));
+                    return Response::Continue;
+                };
+                if open != clip {
+                    self.messages.push(Message::error(
+                        "that text belongs to a different subtitle".to_string(),
+                    ));
+                    return Response::Continue;
+                }
+                let track = self
+                    .session
+                    .timeline()
+                    .find_clip(clip)
+                    .map(|(track, _)| track);
+                let Some(track) = track else {
+                    self.messages
+                        .push(Message::error("that subtitle is gone".to_string()));
+                    return Response::Continue;
+                };
+                // Editing text is an ordinary edit: one command, one undo
+                // step (spec §15.4).
+                match self.session.exec(&davimci_cmd::EditCommand::SetClipText {
+                    track,
+                    clip,
+                    text,
+                }) {
+                    Ok(label) => {
+                        self.messages.push(Message::info(label));
+                        host.timeline_changed(&self.session);
+                        host.playhead_moved(&self.session);
+                    }
+                    Err(e) => self.messages.push(Message::error(e.to_string())),
+                }
+                Response::Continue
+            }
+            Event::TextEditCancelled => {
+                self.editing_text = None;
+                Response::Continue
+            }
             Event::Tick => {
                 host.tick(&mut self.session);
                 // Jobs report on the clock, not on the edit: an export runs
                 // in the background and the status line has to keep up.
                 for update in host.jobs() {
                     self.jobs.apply(update);
+                }
+                for track in host.stale_waveforms() {
+                    self.waveforms.invalidate(track);
+                }
+                for (track, waveform) in host.waveforms() {
+                    self.waveforms.insert(track, waveform);
                 }
                 self.follow();
                 Response::Continue
@@ -417,6 +522,11 @@ impl App {
                 self.pending_pick = Some(intent);
                 self.follow();
                 return Response::OpenPicker(intent);
+            }
+            Outcome::EditText { clip, text } => {
+                self.editing_text = Some(clip);
+                self.follow();
+                return Response::EditText { clip, text };
             }
             Outcome::EnterCommandMode => {
                 self.command_line = Some(String::new());

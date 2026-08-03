@@ -76,6 +76,44 @@ pub fn media_fixture(spec: &[(u64, u64, u64, u64)]) -> Timeline {
     tl
 }
 
+/// A video track plus `audio` audio tracks, each holding one media clip off
+/// the same container but a different stream - the shape a multi-stream file
+/// imports into (spec §7).
+#[must_use]
+pub fn multi_audio_fixture(audio: usize, channels: Option<u16>) -> Timeline {
+    let mut tl = media_fixture(&[(0, 100, 0, 600)]);
+    // A default timeline ships with an empty A1; the caller asked for an
+    // exact number of audio tracks, so it goes.
+    let empty: Vec<TrackId> = tl
+        .tracks()
+        .iter()
+        .filter(|t| t.kind == TrackKind::Audio && t.clips().is_empty())
+        .map(|t| t.id)
+        .collect();
+    for id in empty {
+        let _ = tl.remove_track(id);
+    }
+    for n in 0..audio {
+        let track = tl.add_track(TrackKind::Audio);
+        let cid = tl.new_clip_id();
+        let mut media = MediaRef::new("/media/multi.mkv", Fps::FPS_60, Frame(600));
+        media.stream = Some(n as u32 + 1);
+        media.channels = channels;
+        let clip = Clip::from_media(
+            cid,
+            format!("a{n}"),
+            media,
+            Frame::ZERO,
+            Frame::ZERO,
+            Frame(100),
+        );
+        if let Some(t) = tl.track_mut(track) {
+            t.insert_sorted(clip);
+        }
+    }
+    tl
+}
+
 /// Id of a track by name, or `TrackId(0)` if absent (which every primitive
 /// rejects, so a typo in a fixture fails loudly rather than silently).
 #[must_use]

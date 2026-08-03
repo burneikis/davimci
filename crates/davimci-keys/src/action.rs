@@ -169,6 +169,10 @@ pub enum Action {
     },
     /// `+` / `-`: adjust gain in dB.
     GainAdjust(i32),
+    /// `<Space>m`: toggle mute on the current track (spec §6.1).
+    ToggleMute,
+    /// `<Space>s`: toggle solo on the current track (spec §6.1).
+    ToggleSolo,
     /// `gx`: create a transition at the nearest cut.
     CreateTransition,
     /// `dax`: delete the transition at the nearest cut.
@@ -232,6 +236,8 @@ impl Action {
             | Self::ToggleVisualTrack
             | Self::TrimEdgeStep { .. }
             | Self::GainAdjust(_)
+            | Self::ToggleMute
+            | Self::ToggleSolo
             | Self::CreateTransition
             | Self::DeleteTransition
             | Self::InterruptTransport => Interrupt,

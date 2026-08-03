@@ -298,7 +298,13 @@ fn media_clip(
     conformed: &Conformed,
     at: Frame,
 ) -> Clip {
-    let media = MediaRef::new(&info.path, conformed.source_fps, conformed.length);
+    // Bind the clip to the stream it came from: three audio tracks off one
+    // container are three different streams, not three copies of stream zero
+    // (spec §7).
+    let media = MediaRef::new(&info.path, conformed.source_fps, conformed.length).on_stream(
+        stream.index,
+        stream.channels.map(|c| c.min(u32::from(u16::MAX)) as u16),
+    );
     Clip::from_media(id, stream.label(), media, at, Frame::ZERO, conformed.length)
 }
 

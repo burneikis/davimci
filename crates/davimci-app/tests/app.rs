@@ -323,3 +323,136 @@ fn spec_section_3_2_1_an_ex_command_interrupts_before_it_runs() {
     assert_eq!(host.calls.first(), Some(&"interrupt"));
     assert!(host.calls.contains(&"command"));
 }
+
+/// A click seeks: navigation, not an edit (spec §15.2).
+#[test]
+fn clicking_the_timeline_moves_the_playhead_without_touching_the_undo_log() {
+    let mut app = App::new(Session::new(timeline()));
+    app.resize(Surface {
+        columns: 50,
+        rows: 3,
+    });
+    let undo_before = app.session().history().len();
+    app.event(
+        Event::Click {
+            column: 10,
+            row: None,
+        },
+        &mut NullHost,
+    );
+    let head = app.session().timeline().playhead();
+    let duration = app.session().timeline().duration();
+    let want = app
+        .viewport()
+        .frame_at_column(10)
+        .min(Frame(duration.get() - 1));
+    assert_eq!(head.frame, want, "the click landed on its own column");
+    assert_eq!(
+        app.session().history().len(),
+        undo_before,
+        "seeking is not an edit"
+    );
+}
+
+/// Clicking a lane focuses that track, which is what makes click-to-seek
+/// usable on a multi-track timeline.
+#[test]
+fn clicking_a_lane_focuses_that_track() {
+    let mut app = App::new(Session::new(timeline()));
+    app.resize(Surface {
+        columns: 50,
+        rows: 3,
+    });
+    let want = app.session().timeline().tracks()[1].id;
+    app.event(
+        Event::Click {
+            column: 5,
+            row: Some(1),
+        },
+        &mut NullHost,
+    );
+    assert_eq!(app.session().timeline().playhead().track, want);
+}
+
+/// A click past the end of the timeline lands on the last frame rather than
+/// somewhere no frame exists.
+#[test]
+fn a_click_past_the_end_clamps_to_the_last_frame() {
+    let mut app = App::new(Session::new(timeline()));
+    app.resize(Surface {
+        columns: 50,
+        rows: 3,
+    });
+    let duration = app.session().timeline().duration();
+    app.event(
+        Event::Click {
+            column: 49,
+            row: None,
+        },
+        &mut NullHost,
+    );
+    assert!(app.session().timeline().playhead().frame < duration);
+}
+
+/// Spec §15.4: INSERT on a subtitle clip edits text, and Esc commits it as an
+/// ordinary undoable command.
+#[test]
+fn a_committed_subtitle_edit_is_one_undoable_command() {
+    let mut tl = fixture(&[("V1", &[(0, 100, "a")]), ("T1", &[])]);
+    let t1 = davimci_core::testing::track_id(&tl, "T1");
+    let id = tl.new_clip_id();
+    let mut clip = davimci_core::Clip::generated(id, "sub", Frame::ZERO, Frame(50));
+    clip.text = Some("hello".into());
+    tl.restore(t1, Frame::ZERO, &[clip], Frame(50), false)
+        .unwrap();
+    let mut session = Session::new(tl);
+    session.set_playhead(Frame::ZERO, t1).unwrap();
+    let mut app = App::new(session);
+
+    let response = app.key(Key::parse_str("i").remove(0), &mut NullHost);
+    assert_eq!(
+        response,
+        Response::EditText {
+            clip: id,
+            text: "hello".into()
+        }
+    );
+
+    app.event(
+        Event::TextEdited {
+            clip: id,
+            text: "goodbye".into(),
+        },
+        &mut NullHost,
+    );
+    let text = app
+        .session()
+        .timeline()
+        .find_clip(id)
+        .map(|(_, c)| c.text.clone().unwrap_or_default());
+    assert_eq!(text.as_deref(), Some("goodbye"));
+
+    app.key(Key::parse_str("u").remove(0), &mut NullHost);
+    let text = app
+        .session()
+        .timeline()
+        .find_clip(id)
+        .map(|(_, c)| c.text.clone().unwrap_or_default());
+    assert_eq!(text.as_deref(), Some("hello"), "the edit was undoable");
+}
+
+/// Text arriving with no editor open is refused: it is a write nobody asked
+/// for.
+#[test]
+fn unsolicited_text_is_refused() {
+    let mut app = App::new(Session::new(timeline()));
+    app.event(
+        Event::TextEdited {
+            clip: davimci_core::ClipId(1),
+            text: "x".into(),
+        },
+        &mut NullHost,
+    );
+    let msg = app.view().message.expect("a message");
+    assert_eq!(msg.severity, Severity::Error);
+}

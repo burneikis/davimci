@@ -5,6 +5,7 @@
 //! [`ViewState`]. It contains no view logic, so anything a GUI and a TUI would
 //! both have to implement belongs above this line, not below it.
 
+use davimci_core::ClipId;
 use davimci_keys::{Key, MediaIntent};
 
 use crate::error::AppError;
@@ -38,11 +39,30 @@ pub enum Event {
     Command(String),
     /// The `:` line was abandoned.
     CommandCancelled,
+    /// A click landed on the timeline at this column, and on this lane when
+    /// the click was inside the track area rather than on the ruler.
+    ///
+    /// A frontend reports *where*, never *what it means*: seeking is
+    /// navigation and the app owns navigation, exactly as it owns what a key
+    /// means (spec §15.2).
+    Click {
+        column: u32,
+        row: Option<usize>,
+    },
     /// A media file was chosen in the picker. The frontend owns browsing
     /// (it has the list widget); the app owns what the choice means.
     MediaChosen(std::path::PathBuf),
     /// The picker was closed without choosing anything.
     PickerCancelled,
+    /// A subtitle edit was committed. The frontend owns the text buffer (it
+    /// has the widget); the app owns turning the result into a command
+    /// (spec §15.4).
+    TextEdited {
+        clip: ClipId,
+        text: String,
+    },
+    /// The subtitle editor closed without changing anything.
+    TextEditCancelled,
     /// Time passed: repaint, poll jobs, pull a preview frame.
     Tick,
     Quit,
@@ -60,6 +80,13 @@ pub enum Response {
     /// `i`/`a`/`r`: the frontend should open the media picker and answer with
     /// [`Event::MediaChosen`] or [`Event::PickerCancelled`].
     OpenPicker(MediaIntent),
+    /// `i` on a subtitle clip: the frontend should open a text buffer holding
+    /// `text` and answer with [`Event::TextEdited`] or
+    /// [`Event::TextEditCancelled`] (spec §15.4).
+    EditText {
+        clip: ClipId,
+        text: String,
+    },
     Quit,
 }
 

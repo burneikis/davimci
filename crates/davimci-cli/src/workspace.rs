@@ -118,6 +118,13 @@ impl Workspace {
         self
     }
 
+    /// The directory that owns `.davimci/` - where the analysis cache and
+    /// the autosave log live.
+    #[must_use]
+    pub fn root(&self) -> &std::path::Path {
+        &self.root
+    }
+
     #[must_use]
     pub fn autosave_dir(&self) -> PathBuf {
         self.root.join(".davimci").join("autosave")

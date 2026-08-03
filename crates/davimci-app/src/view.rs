@@ -15,6 +15,7 @@ use davimci_motion::{JumpConfig, JumpPoints, Zoom};
 use crate::job::Job;
 use crate::message::Message;
 use crate::viewport::Viewport;
+use crate::waveform::Waveforms;
 
 /// Everything the app knows that is not derivable from the session: mode,
 /// pending input, and the command line. Assembled by [`crate::App`], or by a
@@ -30,6 +31,8 @@ pub struct ViewInputs<'a> {
     pub message: Option<Message>,
     pub job: Option<Job>,
     pub recording: Option<char>,
+    /// Analysed audio, when the host has published any (spec §6.1).
+    pub waveforms: Option<&'a Waveforms>,
 }
 
 impl Default for ViewInputs<'_> {
@@ -44,6 +47,7 @@ impl Default for ViewInputs<'_> {
             message: None,
             job: None,
             recording: None,
+            waveforms: None,
         }
     }
 }
@@ -86,6 +90,10 @@ pub struct TrackView {
     /// (spec §6.1).
     pub silenced_by_solo: bool,
     pub clips: Vec<ClipView>,
+    /// Peak level per visible column, `0..=255`, for audio lanes whose
+    /// source has been analysed. Empty means "nothing to draw" - either the
+    /// lane carries no audio or its analysis has not landed yet.
+    pub waveform: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -188,6 +196,11 @@ impl ViewState {
                         })
                     })
                     .collect(),
+                waveform: inputs
+                    .waveforms
+                    .and_then(|w| w.get(t.id))
+                    .map(|w| track_waveform(t, w, &viewport, tl.props.fps))
+                    .unwrap_or_default(),
             })
             .collect();
 
@@ -302,6 +315,38 @@ impl ViewState {
         }
         s
     }
+}
+
+/// One lane's envelope: peak level per visible column.
+///
+/// A column is answered from the *clip under it*, mapped back through
+/// `source_in`, because the analysis measures the source. Doing it any other
+/// way makes a trimmed or slipped clip draw somebody else's audio.
+fn track_waveform(
+    track: &davimci_core::Track,
+    waveform: &crate::waveform::Waveform,
+    viewport: &Viewport,
+    fps: davimci_core::Fps,
+) -> Vec<u8> {
+    let columns = viewport.columns();
+    let mut out = vec![0u8; columns as usize];
+    let ms = |frame: Frame| -> u64 { (fps.frame_to_nanos(frame) / 1_000_000) as u64 };
+    for column in 0..columns {
+        let start = viewport.frame_at_column(column);
+        let end = viewport
+            .frame_at_column(column + 1)
+            .max(Frame(start.get() + 1));
+        let Some(clip) = track.clip_at(start) else {
+            continue;
+        };
+        let into_source = |f: Frame| -> Frame {
+            Frame(clip.source_in.get() + f.get().saturating_sub(clip.start.get()))
+        };
+        let from = into_source(start);
+        let to = into_source(end.min(clip.end()));
+        out[column as usize] = waveform.level(ms(from), ms(to));
+    }
+    out
 }
 
 fn column_span(viewport: &Viewport, start: Frame, end: Frame) -> Option<(u32, u32)> {

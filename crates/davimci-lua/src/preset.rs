@@ -150,6 +150,10 @@ impl ExportPreset {
                 .unwrap_or("aac")
                 .to_string(),
             container: self.container.clone(),
+            // Matroska is the container that keeps every audio track as its
+            // own stream (spec §7); anywhere else they are mixed.
+            separate_audio_tracks: matches!(self.container.as_str(), "mkv" | "matroska")
+                && self.audio_tracks != TrackSelection::None,
             extra: Vec::new(),
         }
     }

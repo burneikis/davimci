@@ -39,6 +39,9 @@ pub struct Transport {
     /// flash to the start of the timeline before jumping back.
     origin: Frame,
     clock_locked: bool,
+    /// True while shuttling with real varispeed rather than by stepping the
+    /// playhead. Decided by the backend, once, when the shuttle starts.
+    varispeed: bool,
 }
 
 impl Default for Transport {
@@ -55,6 +58,7 @@ impl Transport {
             return_to: None,
             origin: Frame::ZERO,
             clock_locked: false,
+            varispeed: false,
         }
     }
 
@@ -117,12 +121,8 @@ impl Transport {
         forward: bool,
         backend: &mut dyn RenderBackend,
         session: &Session,
+        scale: PreviewScale,
     ) -> Result<String, String> {
-        // Shuttling is a scrub, not varispeed playback: `RenderBackend` has
-        // no rate control, so audio is stopped rather than pitched.
-        if self.is_playing() {
-            self.stop(backend, session)?;
-        }
         let want = if forward { 1 } else { -1 };
         let rate = match self.state {
             TransportState::Shuttling(r) if r.signum() == want => {
@@ -134,6 +134,21 @@ impl Transport {
             }
             _ => want,
         };
+        // A backend with rate control shuttles by *playing faster*, audio
+        // and all; one without it steps the playhead and stops the audio,
+        // because a scrub with the wrong sound is worse than a silent one.
+        if backend.supports_varispeed() {
+            if !backend.is_previewing() {
+                self.start(backend, session, scale)?;
+            }
+            backend
+                .set_rate(f64::from(rate))
+                .map_err(|e| e.to_string())?;
+            self.varispeed = true;
+            self.clock_locked = rate > 0;
+        } else if self.is_playing() {
+            self.stop(backend, session)?;
+        }
         self.state = TransportState::Shuttling(rate);
         Ok(format!("shuttle {rate:+}x"))
     }
@@ -150,6 +165,10 @@ impl Transport {
     pub fn interrupt(&mut self, backend: &mut dyn RenderBackend) -> Result<bool, String> {
         if self.state == TransportState::Stopped {
             return Ok(false);
+        }
+        if self.varispeed {
+            let _ = backend.set_rate(1.0);
+            self.varispeed = false;
         }
         if backend.is_previewing() {
             backend.preview_stop().map_err(|e| e.to_string())?;
@@ -195,11 +214,22 @@ impl Transport {
         session: &Session,
     ) -> Result<Option<Frame>, String> {
         let _ = session;
+        if self.varispeed {
+            // Leave the graph at normal speed: the next play must not
+            // inherit the last shuttle's rate.
+            let _ = backend.set_rate(1.0);
+            self.varispeed = false;
+        }
         if backend.is_previewing() {
             backend.preview_stop().map_err(|e| e.to_string())?;
         }
         self.state = TransportState::Stopped;
         Ok(self.return_to.take())
+    }
+
+    /// Whether the current shuttle runs backwards.
+    fn state_is_reverse(&self) -> bool {
+        matches!(self.state, TransportState::Shuttling(r) if r < 0)
     }
 
     /// One presentation tick. Returns the frame the playhead should now sit
@@ -236,6 +266,28 @@ impl Transport {
                 // Running off the end stops playback rather than wedging at
                 // the last frame.
                 if presentation.is_none() || at.is_some_and(|f| f >= duration) {
+                    let back = self.stop(backend, session).unwrap_or(None);
+                    return TickResult {
+                        playhead: Some(back.unwrap_or(duration).min(duration)),
+                        stopped: true,
+                        presentation,
+                    };
+                }
+                TickResult {
+                    playhead: at,
+                    stopped: false,
+                    presentation,
+                }
+            }
+            // Varispeed: the clock is still the master, exactly as in
+            // playback - only faster, slower or backwards.
+            TransportState::Shuttling(_) if self.varispeed => {
+                let presentation = presenter.present(backend).ok();
+                let at = backend.audio_clock_position();
+                let ended = presentation.is_none()
+                    || at.is_some_and(|f| f >= duration)
+                    || at == Some(Frame::ZERO) && self.state_is_reverse();
+                if ended {
                     let back = self.stop(backend, session).unwrap_or(None);
                     return TickResult {
                         playhead: Some(back.unwrap_or(duration).min(duration)),
@@ -324,6 +376,132 @@ mod tests {
         )
     }
 
+    /// A backend with rate control, wrapping the deterministic mock. It is
+    /// what a real varispeed backend looks like from up here: a rate goes
+    /// down, and the audio clock keeps running.
+    #[derive(Debug)]
+    struct RateBackend {
+        inner: MockBackend,
+        rate: f64,
+        rates: Vec<f64>,
+    }
+
+    impl RateBackend {
+        fn new() -> Self {
+            Self {
+                inner: MockBackend::new(Resolution {
+                    width: 4,
+                    height: 2,
+                }),
+                rate: 1.0,
+                rates: Vec::new(),
+            }
+        }
+    }
+
+    impl RenderBackend for RateBackend {
+        fn probe(
+            &mut self,
+            p: &std::path::Path,
+        ) -> davimci_backend::Result<davimci_backend::SourceInfo> {
+            self.inner.probe(p)
+        }
+        fn set_timeline(&mut self, tl: &davimci_core::Timeline) -> davimci_backend::Result<()> {
+            self.inner.set_timeline(tl)
+        }
+        fn seek(&mut self, f: Frame) -> davimci_backend::Result<()> {
+            self.inner.seek(f)
+        }
+        fn frame_at(
+            &mut self,
+            f: Frame,
+            s: PreviewScale,
+        ) -> davimci_backend::Result<davimci_backend::VideoFrame> {
+            self.inner.frame_at(f, s)
+        }
+        fn preview_start(&mut self, from: Frame, s: PreviewScale) -> davimci_backend::Result<()> {
+            self.inner.preview_start(from, s)
+        }
+        fn preview_stop(&mut self) -> davimci_backend::Result<()> {
+            self.inner.preview_stop()
+        }
+        fn is_previewing(&self) -> bool {
+            self.inner.is_previewing()
+        }
+        fn supports_varispeed(&self) -> bool {
+            true
+        }
+        fn set_rate(&mut self, rate: f64) -> davimci_backend::Result<()> {
+            self.rate = rate;
+            self.rates.push(rate);
+            Ok(())
+        }
+        fn next_preview_frame(
+            &mut self,
+        ) -> davimci_backend::Result<Option<davimci_backend::VideoFrame>> {
+            self.inner.next_preview_frame()
+        }
+        fn audio_clock_position(&self) -> Option<Frame> {
+            self.inner.audio_clock_position()
+        }
+        fn render(&mut self, job: davimci_backend::RenderJob) -> davimci_backend::Result<()> {
+            self.inner.render(job)
+        }
+        fn progress(&self) -> davimci_backend::RenderProgress {
+            self.inner.progress()
+        }
+        fn cancel_render(&mut self) -> davimci_backend::Result<()> {
+            self.inner.cancel_render()
+        }
+    }
+
+    /// spec §3.2.1: with rate control, `L` is varispeed playback - the audio
+    /// keeps running and the rate steps, rather than the playhead jumping.
+    #[test]
+    fn shuttling_a_rate_capable_backend_plays_faster_instead_of_stepping() {
+        let mut b = RateBackend::new();
+        let s = session();
+        let mut t = Transport::new();
+
+        t.shuttle(true, &mut b, &s, PreviewScale::Full).unwrap();
+        assert!(b.is_previewing(), "varispeed shuttles with audio running");
+        assert_eq!(b.rate, 1.0);
+        t.shuttle(true, &mut b, &s, PreviewScale::Full).unwrap();
+        assert_eq!(b.rate, 2.0, "L doubles the rate");
+        t.shuttle(false, &mut b, &s, PreviewScale::Full).unwrap();
+        assert_eq!(b.rate, 1.0, "H decelerates through 1x before reversing");
+        t.shuttle(false, &mut b, &s, PreviewScale::Full).unwrap();
+        assert_eq!(b.rate, -1.0, "and then plays backwards");
+    }
+
+    /// Stopping must leave the graph at normal speed, or the next `<Space>`
+    /// would inherit the last shuttle's rate.
+    #[test]
+    fn stopping_a_varispeed_shuttle_restores_normal_speed() {
+        let mut b = RateBackend::new();
+        let s = session();
+        let mut t = Transport::new();
+        t.shuttle(true, &mut b, &s, PreviewScale::Full).unwrap();
+        t.shuttle(true, &mut b, &s, PreviewScale::Full).unwrap();
+        t.stop(&mut b, &s).unwrap();
+        assert_eq!(b.rate, 1.0);
+        assert!(!b.is_previewing());
+        assert_eq!(t.state(), TransportState::Stopped);
+    }
+
+    /// A backend without rate control keeps the old behaviour: a silent
+    /// stepped scrub, which is a different feature on the same key.
+    #[test]
+    fn a_backend_without_rate_control_still_steps_the_playhead() {
+        let (mut b, mut p) = parts();
+        let s = session();
+        let mut t = Transport::new();
+        t.shuttle(true, &mut b, &s, PreviewScale::Full).unwrap();
+        assert!(!b.is_previewing(), "a stepped shuttle has no audio");
+        let r = t.tick(&mut b, &mut p, &s, PreviewScale::Full);
+        assert_eq!(r.playhead, Some(Frame(1)));
+    }
+
     #[test]
     fn interrupt_stops_playback_and_reports_whether_anything_was_running() {
         let (mut b, _) = parts();
@@ -337,7 +515,7 @@ mod tests {
         assert!(!b.is_previewing());
         assert_eq!(t.state(), TransportState::Stopped);
         // A shuttle is motion too, so it is interrupted the same way.
-        t.shuttle(true, &mut b, &s).unwrap();
+        t.shuttle(true, &mut b, &s, PreviewScale::Full).unwrap();
         assert!(t.interrupt(&mut b).unwrap());
         assert_eq!(t.state(), TransportState::Stopped);
     }
@@ -477,7 +655,7 @@ mod tests {
         let s = session();
         let mut t = Transport::new();
         for expected in [1, 2, 4, 8, 8] {
-            t.shuttle(true, &mut b, &s).unwrap();
+            t.shuttle(true, &mut b, &s, PreviewScale::Full).unwrap();
             assert_eq!(t.state(), TransportState::Shuttling(expected));
         }
     }
@@ -487,12 +665,12 @@ mod tests {
         let (mut b, _) = parts();
         let s = session();
         let mut t = Transport::new();
-        t.shuttle(true, &mut b, &s).unwrap();
-        t.shuttle(true, &mut b, &s).unwrap();
+        t.shuttle(true, &mut b, &s, PreviewScale::Full).unwrap();
+        t.shuttle(true, &mut b, &s, PreviewScale::Full).unwrap();
         assert_eq!(t.state(), TransportState::Shuttling(2));
-        t.shuttle(false, &mut b, &s).unwrap();
+        t.shuttle(false, &mut b, &s, PreviewScale::Full).unwrap();
         assert_eq!(t.state(), TransportState::Shuttling(1));
-        t.shuttle(false, &mut b, &s).unwrap();
+        t.shuttle(false, &mut b, &s, PreviewScale::Full).unwrap();
         assert_eq!(t.state(), TransportState::Shuttling(-1));
     }
 
@@ -502,7 +680,7 @@ mod tests {
         let s = session();
         let mut t = Transport::new();
         t.play_pause(&mut b, &s, PreviewScale::Full).unwrap();
-        t.shuttle(true, &mut b, &s).unwrap();
+        t.shuttle(true, &mut b, &s, PreviewScale::Full).unwrap();
         assert!(!b.is_previewing(), "shuttle left audio running");
     }
 
@@ -511,12 +689,12 @@ mod tests {
         let (mut b, mut p) = parts();
         let s = session();
         let mut t = Transport::new();
-        t.shuttle(true, &mut b, &s).unwrap();
+        t.shuttle(true, &mut b, &s, PreviewScale::Full).unwrap();
         let r = t.tick(&mut b, &mut p, &s, PreviewScale::Full);
         assert_eq!(r.playhead, Some(Frame(1)));
         // A shuttle backwards from zero has nowhere to go and stops.
         let mut t2 = Transport::new();
-        t2.shuttle(false, &mut b, &s).unwrap();
+        t2.shuttle(false, &mut b, &s, PreviewScale::Full).unwrap();
         let r2 = t2.tick(&mut b, &mut p, &s, PreviewScale::Full);
         assert_eq!(r2.playhead, Some(Frame::ZERO));
         assert!(r2.stopped);
@@ -529,8 +707,8 @@ mod tests {
         let (mut b, _) = parts();
         let s = session();
         let mut t = Transport::new();
-        t.shuttle(true, &mut b, &s).unwrap();
-        t.shuttle(true, &mut b, &s).unwrap();
+        t.shuttle(true, &mut b, &s, PreviewScale::Full).unwrap();
+        t.shuttle(true, &mut b, &s, PreviewScale::Full).unwrap();
         t.play_pause(&mut b, &s, PreviewScale::Full).unwrap();
         assert_eq!(t.state(), TransportState::Stopped);
     }
