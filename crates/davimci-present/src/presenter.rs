@@ -7,6 +7,8 @@
 //! described - the *video pixels are identical*, which the host-parity test
 //! asserts directly.
 
+use std::sync::Arc;
+
 use davimci_backend::{PreviewScale, RenderBackend, VideoFrame};
 use davimci_core::{Fps, Frame, Resolution};
 
@@ -41,7 +43,15 @@ pub struct Presentation {
     pub surface: Resolution,
     /// `surface.width * surface.height * 4`, RGBA8. Letterbox bars are
     /// opaque black.
-    pub pixels: Vec<u8>,
+    ///
+    /// Shared rather than owned: a held picture is handed out again by
+    /// reference, so repeating a frame costs a refcount instead of a
+    /// multi-megabyte copy per tick.
+    pub pixels: Arc<Vec<u8>>,
+    /// Identifies the pixel buffer. Two presentations with the same id have
+    /// byte-identical pixels, which is how a host skips re-uploading a
+    /// texture for a repeated frame.
+    pub pixels_id: u64,
     /// Where the video landed inside the surface.
     pub quad: Quad,
     /// The frame on screen, or `None` if nothing has been presented.
@@ -60,6 +70,7 @@ impl std::fmt::Debug for Presentation {
             .field("position", &self.position)
             .field("pace", &self.pace)
             .field("overlay", &self.overlay)
+            .field("pixels_id", &self.pixels_id)
             .field("bytes", &self.pixels.len())
             .finish()
     }
@@ -89,6 +100,11 @@ pub struct Presenter {
     scale: PreviewScale,
     overlay_cfg: OverlayConfig,
     pacer: Pacer,
+    /// The last composition, reused when a tick changes nothing about the
+    /// picture. Compositing is a per-pixel scale of the whole surface; doing
+    /// it again for a frame already on screen is pure waste at refresh rate.
+    cache: Option<Presentation>,
+    next_pixels_id: u64,
 }
 
 impl Presenter {
@@ -101,6 +117,8 @@ impl Presenter {
             scale: PreviewScale::Full,
             overlay_cfg: OverlayConfig::default(),
             pacer: Pacer::new(),
+            cache: None,
+            next_pixels_id: 0,
         }
     }
 
@@ -115,6 +133,9 @@ impl Presenter {
     }
 
     pub fn resize(&mut self, surface: Resolution) {
+        if surface != self.surface {
+            self.cache = None;
+        }
         self.surface = surface;
     }
 
@@ -145,6 +166,7 @@ impl Presenter {
 
     pub fn set_overlay_config(&mut self, cfg: OverlayConfig) {
         self.overlay_cfg = cfg;
+        self.cache = None;
     }
 
     #[must_use]
@@ -159,6 +181,7 @@ impl Presenter {
 
     pub fn clear(&mut self) {
         self.pacer.clear();
+        self.cache = None;
     }
 
     /// Present one tick of playback: pace against the clock, then compose.
@@ -185,7 +208,17 @@ impl Presenter {
         self.compose(Pace::Presented(at))
     }
 
-    fn compose(&self, pace: Pace) -> Result<Presentation, PresentError> {
+    fn compose(&mut self, pace: Pace) -> Result<Presentation, PresentError> {
+        // A repeat is the same picture on the same surface: hand back what
+        // was already composed rather than scaling every pixel again.
+        if let Pace::Repeated(_) = pace
+            && let Some(cached) = &self.cache
+            && cached.surface == self.surface
+        {
+            let mut out = cached.clone();
+            out.pace = pace;
+            return Ok(out);
+        }
         let px = (self.surface.width as usize) * (self.surface.height as usize);
         let mut pixels = vec![0u8; px * 4];
         for p in pixels.chunks_exact_mut(4) {
@@ -222,14 +255,18 @@ impl Presenter {
             Overlay::default()
         };
 
-        Ok(Presentation {
+        let out = Presentation {
             surface: self.surface,
-            pixels,
+            pixels: Arc::new(pixels),
+            pixels_id: self.next_pixels_id,
             quad,
             position,
             overlay,
             pace,
-        })
+        };
+        self.next_pixels_id = self.next_pixels_id.wrapping_add(1);
+        self.cache = Some(out.clone());
+        Ok(out)
     }
 }
 

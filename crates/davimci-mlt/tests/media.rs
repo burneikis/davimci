@@ -127,6 +127,74 @@ fn consecutive_pulls_are_monotonic_and_never_duplicate() {
     }
 }
 
+/// Stepping backwards used to re-seek per frame, and a seek re-decodes from
+/// the preceding keyframe - so walking back through a GOP cost a GOP per
+/// frame. The run-ahead makes it one decode per frame, exactly as forwards.
+#[test]
+fn stepping_backwards_decodes_each_frame_once_and_is_exact() {
+    let res = Resolution {
+        width: 640,
+        height: 480,
+    };
+    let tl = timeline_of("scene_cut.mkv", 240, res);
+    let mut b = MltBackend::new(tl.props).unwrap();
+    b.set_timeline(&tl).unwrap();
+
+    // Land on 130 (blue), then walk back over the cut into red.
+    let start = 130u64;
+    b.frame_at(Frame(start), PreviewScale::Half).unwrap();
+    let baseline = b.decodes;
+
+    let steps = 24u64;
+    for n in (start - steps..start).rev() {
+        let f = b.frame_at(Frame(n), PreviewScale::Half).unwrap();
+        assert_eq!(f.position, Frame(n), "a backward step returned frame {n:?}");
+        let want = if n >= 120 { 2 } else { 0 };
+        assert_eq!(
+            dominant(&f),
+            want,
+            "frame {n} came back with the wrong picture"
+        );
+    }
+    let decoded = b.decodes - baseline;
+    assert!(
+        decoded <= steps as usize + b.backstep_run as usize,
+        "{steps} backward steps decoded {decoded} frames; the cache is not being hit"
+    );
+    assert!(
+        b.cache_hits >= steps as usize - (steps as usize).div_ceil(b.backstep_run as usize),
+        "backward steps never hit the cache"
+    );
+}
+
+/// A cached still of an edited timeline is a picture of a timeline that no
+/// longer exists, so any graph change must throw the cache away.
+#[test]
+fn editing_the_timeline_invalidates_cached_stills() {
+    let res = Resolution {
+        width: 640,
+        height: 480,
+    };
+    let tl = timeline_of("scene_cut.mkv", 240, res);
+    let mut b = MltBackend::new(tl.props).unwrap();
+    b.set_timeline(&tl).unwrap();
+    b.frame_at(Frame(200), PreviewScale::Half).unwrap();
+    let hits = b.cache_hits;
+    assert_eq!(
+        b.frame_at(Frame(200), PreviewScale::Half).map(|_| ()),
+        Ok(()),
+    );
+    assert_eq!(b.cache_hits, hits + 1, "the still was not cached at all");
+
+    // A different source entirely: the frame at 200 is now another picture.
+    let other = timeline_of("sync_flash.mkv", 240, res);
+    b.set_timeline(&other).unwrap();
+    let hits = b.cache_hits;
+
+    b.frame_at(Frame(200), PreviewScale::Half).unwrap();
+    assert_eq!(b.cache_hits, hits, "a stale still survived an edit");
+}
+
 #[test]
 fn probe_reports_the_stream_graph_of_a_multitrack_mkv() {
     let mut b = MltBackend::new(TimelineProps::default()).unwrap();

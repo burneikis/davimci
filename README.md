@@ -25,6 +25,13 @@ Workspace builds; `just test` and `just lint` are green, and
 `just fixtures && just test-slow` passes against generated media, including
 real decode, preview, and export through MLT.
 
+Playback pacing and backward stepping were both fixed after running against
+real media: dropping a late frame is now a skip *towards* the audio clock
+rather than a discard (the old rule threw away every frame and froze the
+picture), a held frame is no longer recomposed or re-uploaded at refresh
+rate, and `davimci-mlt` caches decoded stills and decodes a backward step's
+leading run in one pass instead of re-seeking per frame.
+
 Everything a frontend would otherwise decide now lives above the frontends:
 `davimci-app` owns zoom, scroll-follow, ruler ticks, the mode line and the
 event loop; `davimci-present` owns pacing, letterboxing and composition for
@@ -107,6 +114,7 @@ it is linked dynamically, since davimci is GPL-3.0 over LGPL-2.1 MLT.
 | Golden view-state fixtures, reused by every frontend's rendering tests | implemented, tested |
 | Headless frontend: scripted events in, view dumps out | implemented, tested |
 | Frame pacing: drop-late, repeat-on-starve, counters, jitter-tested | implemented, tested |
+| Preview still cache: backward stepping decodes each frame once | implemented, tested |
 | Letterbox fit and RGBA composition, integral and float-free | implemented, tested |
 | Host parity: `Embedded` and `Detached` produce identical video pixels | implemented, tested |
 | Overlay model: timecode string, safe-area rects, embedded host only | implemented, tested |

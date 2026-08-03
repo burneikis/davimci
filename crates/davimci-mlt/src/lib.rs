@@ -12,10 +12,14 @@
 //! - [`ffi`] is the RAII layer over the C API, and [`backend`] is the
 //!   `RenderBackend` implementation on top of it.
 //!
+//! [`cache`] sits beside them: decoded preview frames, kept so that stepping
+//! backwards does not re-seek and re-decode a GOP per frame.
+//!
 //! `libmlt` is linked **dynamically** and `melt`/`melted` are never vendored:
 //! davimci is GPL-3.0 over LGPL-2.1 MLT (spec §13).
 
 pub mod backend;
+mod cache;
 pub mod error;
 pub mod ffi;
 pub mod patch;

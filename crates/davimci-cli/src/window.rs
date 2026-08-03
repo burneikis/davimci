@@ -25,6 +25,10 @@ pub struct Window {
     editor: Editor,
     gui: Gui,
     texture: Option<egui::TextureHandle>,
+    /// `pixels_id` of the composition already on the GPU. A held frame is
+    /// handed back with the same id every tick, and re-uploading it at
+    /// refresh rate is what a repeated frame must not cost.
+    uploaded: Option<u64>,
     /// Size of the video pane last frame, so the presenter is resized only
     /// when it actually changed.
     video_size: Resolution,
@@ -49,6 +53,7 @@ impl Window {
             editor,
             gui: Gui::new(1280, 720),
             texture: None,
+            uploaded: None,
             video_size: Resolution {
                 width: 0,
                 height: 0,
@@ -87,9 +92,10 @@ impl Window {
         let Some(p) = self.editor.presentation() else {
             return;
         };
-        if p.pixels.is_empty() {
+        if p.pixels.is_empty() || self.uploaded == Some(p.pixels_id) {
             return;
         }
+        let id = p.pixels_id;
         let image = egui::ColorImage::from_rgba_unmultiplied(
             [p.surface.width as usize, p.surface.height as usize],
             &p.pixels,
@@ -101,6 +107,7 @@ impl Window {
                     Some(ctx.load_texture("davimci-video", image, egui::TextureOptions::LINEAR));
             }
         }
+        self.uploaded = Some(id);
     }
 }
 

@@ -857,9 +857,18 @@ order.
 
 ### 15.5 Video preview
 
-- Audio is the master clock. Video is fitted to it: a decoded frame older than
-  the clock is **dropped**, and a tick with nothing ready **repeats** the last
-  frame rather than going black.
+- Audio is the master clock. Video is fitted to it: when several decoded
+  frames are waiting, the ones the clock has already passed are **dropped**
+  and only the newest is shown, and a tick with nothing ready **repeats** the
+  last frame rather than going black. Dropping is a skip *towards* the clock,
+  never below it: the newest frame that is not in the future is always shown,
+  even when the clock has already passed it, and a frame pulled before it is
+  due waits for the tick it falls due on rather than being shown early. The
+  picture never steps backwards.
+- Preview stills are cached, and a step backwards decodes the run leading up
+  to its target in one pass, so walking backwards frame by frame costs one
+  decode per frame rather than one seek per frame. Any change to the timeline
+  invalidates the cache.
 - The playhead follows the audio clock only once that clock has reached the
   frame playback started from. An audio consumer reports its pre-roll
   position until its first frame is shown, so before the clock locks the

@@ -698,6 +698,26 @@ Amendments made during implementation:
   Rasterising here would give the GUI and the TUI two different-looking
   timecodes for the same frame. Spec §15.5 says so now, along with the
   drop/repeat policy and the drop-frame-free timecode format.
+
+Defects found and fixed by running it against real media:
+
+- **Drop-late dropped everything.** A frame reaches the pacer stamped with the
+  position the clock has *just* passed, so "older than the clock, therefore
+  discard" threw away every frame and the picture froze while audio ran on -
+  the reported "laggy playback". Dropping is now a skip *towards* the clock:
+  the newest frame that is not in the future is always presented, frames it
+  overtakes are counted as dropped, and a frame pulled before it is due is
+  held in `Pacer::pending` for the tick it falls due on instead of being shown
+  early or lost. Regression tests:
+  `a_frame_the_clock_has_already_passed_is_still_shown`,
+  `a_frame_ahead_of_the_clock_waits_instead_of_being_shown_early`,
+  `the_picture_never_steps_backwards`.
+- **A repeated frame was recomposed and re-uploaded at refresh rate.** Holding
+  a picture now costs nothing: `Presenter` caches its last composition and
+  hands it back on `Pace::Repeated`, `Presentation::pixels` is an `Arc` so
+  passing it on is a refcount rather than a multi-megabyte copy, and
+  `Presentation::pixels_id` lets the window skip a texture upload for pixels
+  the GPU already has.
 - Scale selection is one-directional (`auto_scale` never decodes below what is
   drawn), so a small window is cheap without being soft.
 
@@ -958,6 +978,16 @@ Defect found and fixed by running it: `Transport::tick` composed a frame and
 counters read roughly double. The presentation is now returned from the tick
 that made it, with a regression test (`a_tick_presents_exactly_once`) naming
 the bug.
+
+Stepping backwards was the other half of the lag: `frame_at` re-seeked per
+step, and a seek re-decodes from the preceding keyframe, so walking back
+through a GOP cost a GOP per frame. `davimci-mlt` now keeps a byte-bounded
+`FrameCache` of decoded stills, and a request that moves backwards decodes the
+run leading up to its target in a single pass so the following steps are hits.
+The cache is dropped on any graph change. Tested by
+`stepping_backwards_decodes_each_frame_once_and_is_exact` and
+`editing_the_timeline_invalidates_cached_stills` against real media, plus unit
+tests for the budget and scale-invalidation rules.
 
 ---
 

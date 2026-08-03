@@ -18,6 +18,7 @@ use davimci_backend::{
 use davimci_core::{Fps, Frame, Resolution, Timeline, TimelineProps};
 use davimci_mlt_sys as sys;
 
+use crate::cache::FrameCache;
 use crate::ffi::{
     Consumer, EventHandle, Filter, Playlist, Producer, Profile, Tractor, Transition, attach_filter,
 };
@@ -84,6 +85,18 @@ pub struct MltBackend {
     /// rebuild (spec §10.1).
     pub rebuilds: usize,
     pub patches: usize,
+    /// Decoded stills, so a backward step is a lookup rather than a seek.
+    frames: FrameCache,
+    /// The last frame asked of [`RenderBackend::frame_at`], which is how a
+    /// backward step is recognised as one.
+    last_request: Option<Frame>,
+    /// How many frames a backward step decodes in one pass. Public for the
+    /// media tests, which assert the seek count rather than a wall clock.
+    pub backstep_run: u64,
+    /// Counts of decoded and served-from-cache stills, so the media tests can
+    /// assert that walking backwards decodes each frame once.
+    pub decodes: usize,
+    pub cache_hits: usize,
 }
 
 impl MltBackend {
@@ -106,6 +119,11 @@ impl MltBackend {
             finished: None,
             rebuilds: 0,
             patches: 0,
+            frames: FrameCache::default(),
+            last_request: None,
+            backstep_run: 12,
+            decodes: 0,
+            cache_hits: 0,
         })
     }
 
@@ -113,6 +131,13 @@ impl MltBackend {
     #[must_use]
     pub fn to_xml(&self) -> Option<String> {
         self.projection.as_ref().map(crate::xml::to_xml)
+    }
+
+    /// Throw away decoded stills. Any change to the graph makes every cached
+    /// picture a picture of a timeline that no longer exists.
+    fn invalidate_frames(&mut self) {
+        self.frames.clear();
+        self.last_request = None;
     }
 
     fn require_graph(&mut self) -> Result<&mut Graph> {
@@ -527,10 +552,19 @@ impl RenderBackend for MltBackend {
         match self.projection.take() {
             Some(prev) if self.graph.is_some() => match diff(&prev, &next) {
                 Patch::None => {}
-                Patch::Rebuild => self.rebuild(&next)?,
-                Patch::Tracks(patches) => self.apply_patch(&patches, &prev)?,
+                Patch::Rebuild => {
+                    self.invalidate_frames();
+                    self.rebuild(&next)?;
+                }
+                Patch::Tracks(patches) => {
+                    self.invalidate_frames();
+                    self.apply_patch(&patches, &prev)?;
+                }
             },
-            _ => self.rebuild(&next)?,
+            _ => {
+                self.invalidate_frames();
+                self.rebuild(&next)?;
+            }
         }
         self.projection = Some(next);
         Ok(())
@@ -543,23 +577,65 @@ impl RenderBackend for MltBackend {
     }
 
     fn frame_at(&mut self, frame: Frame, scale: PreviewScale) -> Result<VideoFrame> {
+        let previous = self.last_request.replace(frame);
+        if let Some(hit) = self.frames.get(frame, scale) {
+            self.cache_hits = self.cache_hits.saturating_add(1);
+            return Ok(hit.clone());
+        }
+
+        // Decoding backwards one frame at a time is the pathological case: a
+        // seek to `n - 1` discards the decoder state and re-decodes from the
+        // preceding keyframe, so each step costs a whole GOP. When the
+        // request is a step backwards, decode the run *leading up to* the
+        // target instead - one seek, then sequential decodes - so the steps
+        // that follow are cache hits.
+        let stepping_back = previous.is_some_and(|p| p > frame);
+        let start = if stepping_back {
+            frame
+                .get()
+                .saturating_sub(self.backstep_run.saturating_sub(1))
+        } else {
+            frame.get()
+        };
+
         let res = scale.apply(self.props.resolution);
+        let count = frame.get().saturating_sub(start).saturating_add(1);
+        let mut run: Vec<VideoFrame> = Vec::new();
         let graph = self.require_graph()?;
-        graph.root.seek(frame.get() as i32);
-        let mut pulled = graph
-            .root
-            .next_frame()
-            .map_err(|_| BackendError::Seek { frame: frame.get() })?;
-        match pulled.rgba(res.width, res.height) {
-            Ok((rgba, width, height)) => Ok(VideoFrame {
-                position: frame,
-                width,
-                height,
-                rgba,
-            }),
-            // Phase 0: one bad frame degrades to black, it does not end the
-            // session.
-            Err(_) => Ok(VideoFrame::black(frame, res)),
+        graph.root.seek(start as i32);
+        for i in 0..count {
+            let at = Frame(start.saturating_add(i));
+            let decoded = match graph.root.next_frame() {
+                Ok(mut pulled) => match pulled.rgba(res.width, res.height) {
+                    Ok((rgba, width, height)) => VideoFrame {
+                        position: at,
+                        width,
+                        height,
+                        rgba,
+                    },
+                    // Phase 0: one bad frame degrades to black, it does not
+                    // end the session.
+                    Err(_) => VideoFrame::black(at, res),
+                },
+                // The run is an optimisation: only failing on the frame that
+                // was actually asked for is an error.
+                Err(_) if at != frame => break,
+                Err(_) => return Err(BackendError::Seek { frame: frame.get() }),
+            };
+            run.push(decoded);
+        }
+
+        let mut wanted: Option<VideoFrame> = None;
+        for decoded in run {
+            self.decodes = self.decodes.saturating_add(1);
+            if decoded.position == frame {
+                wanted = Some(decoded.clone());
+            }
+            self.frames.insert(scale, decoded);
+        }
+        match wanted {
+            Some(f) => Ok(f),
+            None => Err(BackendError::Seek { frame: frame.get() }),
         }
     }
 
