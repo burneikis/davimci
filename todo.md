@@ -1,5 +1,6 @@
 # Human
-- auto previewheight, preview enabled by default
+- previewheight seems to be capped / doesnt get much bigger when changing the value passed in set
+- auto previewheight
 - persist previewprotocol choice / allow set in config
 - allow passing a percentage to previewheight, e.g. `:set previewheight 50%` (needs to handle terminal resize)
 - the audio levels are rendering the same for all tracks, even when each track has different audio/levels
