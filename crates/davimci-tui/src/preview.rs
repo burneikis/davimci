@@ -298,29 +298,39 @@ fn kitty(image: &Image, layout: Layout) -> Vec<u8> {
     out
 }
 
-/// Sixel, quantised to the 6x6x6 cube: 216 registers is a fixed palette, so
-/// encoding cost does not depend on the picture.
+/// Sixel, with a palette chosen per frame.
+///
+/// A fixed colour cube bands badly: video occupies a narrow part of the gamut,
+/// so most of the cube goes unused while the entries that are used sit a fifth
+/// of the range from the pixel they stand for. Median cut over the frame's own
+/// histogram spends all 256 registers where the picture actually is, and costs
+/// one extra pass on the encoder thread.
 fn sixel(image: &Image) -> Vec<u8> {
+    let (palette, index_of) = quantise(image);
     let mut out = format!("\x1bPq\"1;1;{};{}", image.width, image.height).into_bytes();
-    let mut declared = [false; 216];
+    for (i, [r, g, b]) in palette.iter().enumerate() {
+        // Sixel components are percentages, so rounding matters: truncating
+        // here is a systematic darkening of the whole picture.
+        let pc = |v: u8| (u32::from(v) * 100 + 127) / 255;
+        out.extend_from_slice(format!("#{i};2;{};{};{}", pc(*r), pc(*g), pc(*b)).as_bytes());
+    }
+
+    let width = image.width as usize;
+    // One row of bits per palette entry, reused band to band: the format wants
+    // a register selected and then its whole row written.
+    let mut mask = vec![0u8; width * palette.len()];
     for band in 0..image.height.div_ceil(6) {
-        // One pass per colour present in the band, which is what the format
-        // requires: a register is selected, then its whole row written.
-        let mut used = [false; 216];
-        let mut mask: Vec<Vec<u8>> = vec![Vec::new(); 216];
+        mask.iter_mut().for_each(|b| *b = 0);
+        let mut used = vec![false; palette.len()];
         for x in 0..image.width {
             for dy in 0..6u32 {
                 let y = band * 6 + dy;
                 if y >= image.height {
                     continue;
                 }
-                let index = cube_index(image.pixel(x, y));
+                let index = usize::from(index_of[bucket(image.pixel(x, y))]);
                 used[index] = true;
-                let row = &mut mask[index];
-                if row.len() <= x as usize {
-                    row.resize(x as usize + 1, 0);
-                }
-                row[x as usize] |= 1 << dy;
+                mask[index * width + x as usize] |= 1 << dy;
             }
         }
         let mut first = true;
@@ -332,17 +342,12 @@ fn sixel(image: &Image) -> Vec<u8> {
                 out.push(b'$');
             }
             first = false;
-            if !declared[index] {
-                declared[index] = true;
-                let (r, g, b) = cube_colour(index);
-                out.extend_from_slice(format!("#{index};2;{r};{g};{b}").as_bytes());
-            } else {
-                out.extend_from_slice(format!("#{index}").as_bytes());
-            }
-            for x in 0..image.width as usize {
-                let bits = mask[index].get(x).copied().unwrap_or(0);
-                out.push(b'?' + bits);
-            }
+            out.extend_from_slice(format!("#{index}").as_bytes());
+            let row = &mask[index * width..(index + 1) * width];
+            // Trailing empties say nothing: a colour that stops halfway across
+            // just ends its row there.
+            let end = row.iter().rposition(|b| *b != 0).map_or(0, |i| i + 1);
+            run_length(&row[..end], &mut out);
         }
         out.push(b'-');
     }
@@ -350,16 +355,165 @@ fn sixel(image: &Image) -> Vec<u8> {
     out
 }
 
-/// Index into the 6x6x6 colour cube.
-fn cube_index(px: [u8; 3]) -> usize {
-    let q = |v: u8| (u32::from(v) * 5 / 255) as usize;
-    q(px[0]) * 36 + q(px[1]) * 6 + q(px[2])
+/// Sixel's own repeat form, `!<count><char>`.
+///
+/// Preview payloads are megabytes of mostly flat picture, and the pty is the
+/// narrowest part of the path: a run of one character costs three bytes plus
+/// its digits, so anything longer than four is worth collapsing.
+fn run_length(row: &[u8], out: &mut Vec<u8>) {
+    let mut i = 0;
+    while i < row.len() {
+        let bits = row[i];
+        let mut run = 1;
+        while i + run < row.len() && row[i + run] == bits {
+            run += 1;
+        }
+        let ch = b'?' + bits;
+        if run > 4 {
+            out.extend_from_slice(format!("!{run}").as_bytes());
+            out.push(ch);
+        } else {
+            out.extend(std::iter::repeat_n(ch, run));
+        }
+        i += run;
+    }
 }
 
-/// The cube entry as sixel's percentage components.
-fn cube_colour(index: usize) -> (u32, u32, u32) {
-    let step = |v: usize| (v as u32) * 100 / 5;
-    (step(index / 36), step((index / 6) % 6), step(index % 6))
+/// A 6-bit-per-channel histogram bin. Binning first keeps the median cut over
+/// the bins rather than the pixels, so its cost depends on the number of
+/// distinct colours and not on the size of the band.
+///
+/// Six bits, because the bin is the floor on accuracy: a bin four levels wide
+/// matches sixel's own colour precision, which is a percentage per channel and
+/// so ~2.5 levels. Fewer bits banded a gradient the palette could have
+/// resolved; more would cost a megabyte of histogram per frame for accuracy
+/// the format cannot carry.
+const BINS: usize = 64 * 64 * 64;
+
+/// Sixel allows 256 colour registers, and there is no reason to use fewer.
+const MAX_COLOURS: usize = 256;
+
+fn bucket(px: [u8; 3]) -> usize {
+    let q = |v: u8| usize::from(v >> 2);
+    (q(px[0]) << 12) | (q(px[1]) << 6) | q(px[2])
+}
+
+/// One occupied histogram bin: how many pixels fell in it and their totals, so
+/// a box of bins can report the average colour of the pixels inside it rather
+/// than the centre of the box.
+#[derive(Clone, Copy)]
+struct Bin {
+    bucket: u32,
+    count: u32,
+    sum: [u32; 3],
+}
+
+/// The frame's palette, and the bin-to-entry map that assigns every pixel to
+/// it.
+///
+/// Median cut partitions the bins, so each bin belongs to exactly one entry by
+/// construction - there is no nearest-colour search per pixel, which is what
+/// would make an adaptive palette too slow for preview.
+fn quantise(image: &Image) -> (Vec<[u8; 3]>, Vec<u8>) {
+    let mut bins: Vec<Bin> = Vec::new();
+    let mut at = vec![u32::MAX; BINS];
+    for y in 0..image.height {
+        for x in 0..image.width {
+            let px = image.pixel(x, y);
+            let b = bucket(px);
+            let slot = at[b];
+            if slot == u32::MAX {
+                at[b] = bins.len() as u32;
+                bins.push(Bin {
+                    bucket: b as u32,
+                    count: 1,
+                    sum: [u32::from(px[0]), u32::from(px[1]), u32::from(px[2])],
+                });
+            } else if let Some(bin) = bins.get_mut(slot as usize) {
+                bin.count += 1;
+                for (total, v) in bin.sum.iter_mut().zip(px) {
+                    *total += u32::from(v);
+                }
+            }
+        }
+    }
+
+    let mut boxes = vec![(0usize, bins.len())];
+    while boxes.len() < MAX_COLOURS {
+        // Split the box that costs the most: pixels inside it times how far
+        // its widest channel spreads. Weighting by pixel count is what keeps
+        // registers off a handful of stray highlights.
+        let pick = boxes
+            .iter()
+            .enumerate()
+            .filter(|(_, (s, e))| e - s > 1)
+            .max_by_key(|(_, (s, e))| cost(&bins[*s..*e]))
+            .map(|(i, _)| i);
+        let Some(pick) = pick else { break };
+        let (start, end) = boxes[pick];
+        let axis = widest_axis(&bins[start..end]);
+        bins[start..end].sort_unstable_by_key(|b| channel(b, axis));
+        // The weighted median, so both halves carry a similar share of the
+        // pixels rather than a similar share of the colours.
+        let total: u64 = bins[start..end].iter().map(|b| u64::from(b.count)).sum();
+        let mut acc = 0u64;
+        let mut mid = start + 1;
+        for (i, bin) in bins[start..end].iter().enumerate() {
+            acc += u64::from(bin.count);
+            if acc * 2 >= total {
+                mid = (start + i + 1).clamp(start + 1, end - 1);
+                break;
+            }
+        }
+        boxes[pick] = (start, mid);
+        boxes.push((mid, end));
+    }
+
+    let mut palette = Vec::with_capacity(boxes.len());
+    let mut index_of = vec![0u8; BINS];
+    for (i, (start, end)) in boxes.iter().enumerate() {
+        let mut count = 0u64;
+        let mut sum = [0u64; 3];
+        for bin in &bins[*start..*end] {
+            count += u64::from(bin.count);
+            for (total, v) in sum.iter_mut().zip(bin.sum) {
+                *total += u64::from(v);
+            }
+            index_of[bin.bucket as usize] = i as u8;
+        }
+        palette.push(sum.map(|total| {
+            // An empty box only happens when the frame itself is empty.
+            total.checked_div(count).unwrap_or(0) as u8
+        }));
+    }
+    (palette, index_of)
+}
+
+fn channel(bin: &Bin, axis: usize) -> u32 {
+    (bin.bucket >> (12 - 6 * axis as u32)) & 0x3f
+}
+
+fn widest_axis(bins: &[Bin]) -> usize {
+    (0..3)
+        .max_by_key(|axis| {
+            let (lo, hi) = extent(bins, *axis);
+            hi - lo
+        })
+        .unwrap_or(0)
+}
+
+fn extent(bins: &[Bin], axis: usize) -> (u32, u32) {
+    bins.iter().fold((u32::MAX, 0), |(lo, hi), bin| {
+        let v = channel(bin, axis);
+        (lo.min(v), hi.max(v))
+    })
+}
+
+fn cost(bins: &[Bin]) -> u64 {
+    let pixels: u64 = bins.iter().map(|b| u64::from(b.count)).sum();
+    let axis = widest_axis(bins);
+    let (lo, hi) = extent(bins, axis);
+    pixels * u64::from(hi - lo)
 }
 
 /// Standard base64, no padding omitted, no line breaks.
@@ -618,11 +772,114 @@ mod tests {
             rgb: vec![255, 0, 0, 255, 0, 0],
         };
         let bytes = sixel(&image);
-        // Red is cube entry 5*36 = 180; both rows set, so bits 0b11 -> '?'+3.
+        // One colour, so one register, declared then selected; both rows are
+        // set, so the bits are 0b11 -> '?'+3. One column is shorter than the
+        // repeat form, so it is written plainly.
         assert_eq!(
             String::from_utf8_lossy(&bytes),
-            "\x1bPq\"1;1;1;2#180;2;100;0;0B-\x1b\\"
+            "\x1bPq\"1;1;1;2#0;2;100;0;0#0B-\x1b\\"
         );
+    }
+
+    /// The repeat form and the short-row rule are what keep a preview frame
+    /// inside a pty: a flat band is a handful of bytes, not one per column.
+    #[test]
+    fn flat_runs_collapse_to_the_repeat_form() {
+        let image = Image {
+            width: 10,
+            height: 1,
+            rgb: [17u8, 34, 51].repeat(10),
+        };
+        assert_eq!(
+            String::from_utf8_lossy(&sixel(&image)),
+            "\x1bPq\"1;1;10;1#0;2;7;13;20#0!10@-\x1b\\"
+        );
+
+        // Four or fewer is written plainly, since `!4@` is no shorter.
+        let mut out = Vec::new();
+        run_length(&[1, 1, 1, 1, 2, 2, 2, 2, 2, 2], &mut out);
+        assert_eq!(String::from_utf8_lossy(&out), "@@@@!6A");
+
+        // A colour that covers only the left of the band ends its row there
+        // rather than writing empty columns.
+        let mut out = Vec::new();
+        run_length(&[3, 3], &mut out);
+        assert_eq!(String::from_utf8_lossy(&out), "BB");
+    }
+
+    /// The whole point of the adaptive palette: a picture with few colours
+    /// gets them back exactly, where a fixed cube rounded each to a fifth of
+    /// the range.
+    #[test]
+    fn a_frame_of_few_colours_is_quantised_exactly() {
+        let colours = [[13u8, 200, 47], [201, 4, 99], [7, 7, 7]];
+        let mut rgb = Vec::new();
+        for c in &colours {
+            rgb.extend_from_slice(c);
+        }
+        let image = Image {
+            width: 3,
+            height: 1,
+            rgb,
+        };
+        let (palette, index_of) = quantise(&image);
+        assert_eq!(palette.len(), 3);
+        for c in &colours {
+            let entry = palette[usize::from(index_of[bucket(*c)])];
+            assert_eq!(entry, *c, "{c:?} came back as {entry:?}");
+        }
+    }
+
+    /// A gradient reaches the histogram's own resolution rather than the
+    /// palette's, and every pixel still lands within a few levels of itself -
+    /// the fixed cube was out by up to 25.
+    #[test]
+    fn a_gradient_stays_close_to_the_colours_it_was_given() {
+        let mut rgb = Vec::new();
+        for i in 0..1024u32 {
+            let v = (i * 255 / 1023) as u8;
+            rgb.extend_from_slice(&[v, v / 2, 255 - v]);
+        }
+        let image = Image {
+            width: 1024,
+            height: 1,
+            rgb,
+        };
+        let (palette, index_of) = quantise(&image);
+        let mut worst = 0i32;
+        for i in 0..1024u32 {
+            let v = (i * 255 / 1023) as u8;
+            let want = [v, v / 2, 255 - v];
+            let got = palette[usize::from(index_of[bucket(want)])];
+            for c in 0..3 {
+                worst = worst.max((i32::from(got[c]) - i32::from(want[c])).abs());
+            }
+        }
+        assert!(worst <= 4, "a gradient pixel was out by {worst} levels");
+    }
+
+    /// More distinct colours than sixel has registers: the palette stops at
+    /// the format's limit instead of overrunning it.
+    #[test]
+    fn a_frame_of_many_colours_fills_the_palette_and_no_more() {
+        let mut rgb = Vec::new();
+        for i in 0..4096u32 {
+            // Spread over the cube rather than along a line, so the bins do
+            // not collapse the way a gradient's do.
+            rgb.extend_from_slice(&[
+                (i * 37 % 256) as u8,
+                (i * 91 % 256) as u8,
+                (i * 151 % 256) as u8,
+            ]);
+        }
+        let image = Image {
+            width: 4096,
+            height: 1,
+            rgb,
+        };
+        let (palette, index_of) = quantise(&image);
+        assert_eq!(palette.len(), MAX_COLOURS);
+        assert!(index_of.iter().all(|i| usize::from(*i) < palette.len()));
     }
 
     #[test]
@@ -719,5 +976,42 @@ mod tests {
         let pres = presentation(16, 16, [0, 0, 0, 255]);
         assert!(paint(&pres, layout(Protocol::Kitty, 40, 0)).is_empty());
         assert!(paint(&pres, layout(Protocol::Blocks, 0, 4)).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod perf {
+    use super::*;
+
+    /// A band the width of a wide terminal, full of distinct colours: the
+    /// pathological case for both the palette and the payload.
+    ///
+    /// The budget is the pty, not the CPU. Frames that miss it are dropped
+    /// rather than queued, so the number that matters is how much a terminal
+    /// has to parse before the next one is ready.
+    #[test]
+    #[ignore = "perf"]
+    fn a_worst_case_sixel_band_encodes_within_its_budget() {
+        let (w, h) = (1600u32, 300u32);
+        let mut rgb = Vec::with_capacity((w * h * 3) as usize);
+        for y in 0..h {
+            for x in 0..w {
+                rgb.extend_from_slice(&[(x % 256) as u8, (y % 256) as u8, ((x + y) % 256) as u8]);
+            }
+        }
+        let image = Image {
+            width: w,
+            height: h,
+            rgb,
+        };
+        let start = std::time::Instant::now();
+        let bytes = sixel(&image);
+        let took = start.elapsed();
+        println!("{w}x{h} -> {} bytes in {took:?}", bytes.len());
+        assert!(
+            took < std::time::Duration::from_millis(40),
+            "encode took {took:?}"
+        );
+        assert!(bytes.len() < 400_000, "payload was {} bytes", bytes.len());
     }
 }

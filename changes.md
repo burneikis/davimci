@@ -932,3 +932,22 @@ The half-block floor is what keeps the feature from depending on a query:
 detection reads the environment once, anything unrecognised gets blocks, and a
 terminal with graphics behind an unusual `TERM` - a patched alacritty, say -
 is one `:set previewprotocol sixel` away.
+
+Sixel's colours came out visibly wrong on first use, and the fixed 6x6x6 cube
+was the reason: video sits in a narrow part of the gamut, so most of a fixed
+cube goes unused while the entries in use stand as much as a fifth of the range
+from the pixel they replace, and the truncating conversion to sixel's
+percentages darkened everything besides. The palette is now chosen per frame by
+median cut over a 6-bit histogram, which is cheap because median cut partitions
+the *bins*: every pixel's palette entry is known from its bin, so there is no
+nearest-colour search anywhere. Six bits is deliberate - a bin four levels wide
+is already finer than sixel's own per-channel percentage, so the format is the
+floor on accuracy rather than our histogram, and a gradient that the 5-bit
+first attempt banded now lands within four levels.
+
+That left the payload, which is the real constraint: a wide band of noise
+encoded to 2.3 MB, and the pty is the narrowest part of the path. Sixel's
+repeat form and dropping each colour's trailing empty columns took the same
+band to 148 KB, a sixteenth, and real footage compresses further. The perf
+test asserts both the time and the byte count, because a preview that is fast
+to build and impossible to write is not fast.
