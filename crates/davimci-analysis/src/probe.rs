@@ -1,4 +1,4 @@
-//! Container probing (spec 7, plan.md Phase 5).
+//! Container probing.
 //!
 //! Probing answers one question: what streams are in this file, and what
 //! shape is each one? Every audio and subtitle stream in an MKV must be
@@ -46,7 +46,7 @@ pub struct StreamInfo {
     pub channels: Option<u32>,
     /// Length in *source* frames or samples, when the container states it.
     pub frames: Option<u64>,
-    /// Bit depth, when stated. Part of the proxy threshold rule (spec 10.3).
+    /// Bit depth, when stated. Part of the proxy threshold rule.
     pub bit_depth: Option<u32>,
 }
 
@@ -104,7 +104,7 @@ impl MediaInfo {
 /// Anything that can answer "what is in this file?".
 ///
 /// A trait so the import pipeline can be tested against fixed answers with
-/// no media present, per plan.md standing rule 1.
+/// no media present.
 pub trait Prober: std::fmt::Debug {
     fn probe(&self, path: &Path) -> Result<MediaInfo, AnalysisError>;
 }

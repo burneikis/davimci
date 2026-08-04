@@ -1,5 +1,5 @@
 //! End-to-end headless tests: feed keys, assert the resulting timeline
-//! (plan.md Phase 4 testing).
+//!.
 
 #![allow(clippy::expect_used, clippy::panic)]
 
@@ -167,7 +167,7 @@ fn visual_mode_yank_also_exits_visual() {
 }
 
 /// `+` in VISUAL adjusts every clip in the selection, as one undoable
-/// command (spec 6.1).
+/// command.
 #[test]
 fn gain_adjust_acts_on_the_visual_selection_not_only_the_playhead_clip() {
     let (mut e, mut s) = (
@@ -212,7 +212,7 @@ fn zoom_keys_report_intents_and_never_touch_the_timeline() {
         vec![ZoomIntent::In, ZoomIntent::Out, ZoomIntent::Reset],
         "{out:?}"
     );
-    // Zoom is view state (spec 15.2): no edit, so no undo entry either.
+    // Zoom is view state: no edit, so no undo entry either.
     assert_eq!(s.timeline().dump(), before);
     assert!(s.undo().is_err());
 }
@@ -228,7 +228,7 @@ fn z0_is_a_zoom_reset_not_a_count_then_timeline_start() {
     assert_eq!(s.timeline().playhead().frame, davimci_core::Frame(50));
 }
 
-/// Spec 3.2.1: a bind pressed during playback either takes the clock or
+/// A bind pressed during playback either takes the clock or
 /// deliberately leaves it alone. Table-driven so a new action cannot quietly
 /// inherit the wrong default - `transport_policy` is exhaustive, so adding
 /// one without a decision fails to compile, and this pins the decisions.
@@ -276,7 +276,7 @@ fn spec_section_3_2_1_transport_policy_per_key() {
         );
     }
     // The explicit action exists but is unbound by default, like
-    // `shuttle_stop` (spec 3.2.1).
+    // `shuttle_stop`.
     let (mut e, mut s) = scene();
     let fed = e.execute_action(crate::action::Action::InterruptTransport, &mut s);
     assert_eq!(fed, Outcome::Transport(TransportCmd::Interrupt));
@@ -287,7 +287,7 @@ fn spec_section_3_2_1_transport_policy_per_key() {
     );
 }
 
-/// A Lua callback keeps the clock unless its binding opted in (spec 9.2).
+/// A Lua callback keeps the clock unless its binding opted in.
 #[test]
 fn a_plugin_binding_interrupts_only_when_it_opted_in() {
     use crate::action::Action;
@@ -309,7 +309,7 @@ fn a_plugin_binding_interrupts_only_when_it_opted_in() {
     );
 }
 
-/// Spec 6.1: mute and solo are track state, toggled from the leader.
+/// Mute and solo are track state, toggled from the leader.
 #[test]
 fn space_m_and_space_s_toggle_the_current_track() {
     let (mut e, mut s) = (
@@ -365,7 +365,7 @@ fn soloing_a_muted_track_leaves_it_muted() {
     assert!(t.muted && t.solo);
 }
 
-/// Spec 8: `i` on a subtitle clip edits its text; anywhere else it asks for
+/// `i` on a subtitle clip edits its text; anywhere else it asks for
 /// media. Same key, decided by what is under the playhead.
 #[test]
 fn i_edits_text_on_a_subtitle_track_and_picks_media_elsewhere() {
@@ -396,7 +396,7 @@ fn i_edits_text_on_a_subtitle_track_and_picks_media_elsewhere() {
     }
 }
 
-/// Spec 6.2: `gx` puts a default dissolve on the nearest cut, `dax` takes it
+/// `gx` puts a default dissolve on the nearest cut, `dax` takes it
 /// away, and `u` undoes either as one step.
 #[test]
 fn gx_and_dax_add_and_remove_a_transition_at_the_nearest_cut() {
@@ -453,13 +453,13 @@ fn dax_on_a_track_with_no_transition_says_so() {
     assert!(matches!(out.last(), Some(Outcome::Error(_))), "{out:?}");
 }
 
-// `<` / `>` jump-point edge trims (spec 4.0.1)
+// `<` / `>` jump-point edge trims
 
 /// Table-driven landing positions: the nearest edge moves by whole jump
 /// points, and the count multiplies the step.
 #[test]
 fn angle_brackets_trim_the_nearest_edge_by_jump_points() {
-    // Zoomed in far enough that jump points subdivide (spec 3.2): the step
+    // Zoomed in far enough that jump points subdivide: the step
     // is 8 frames here, so the landings are exactly one step apart.
     let cases: &[(&str, u64)] = &[(">", 208), ("<", 192), ("2>", 216), ("3<", 176)];
     for (keys, want) in cases {
@@ -497,7 +497,7 @@ fn an_edge_trim_with_no_jump_point_that_way_is_refused_intact() {
     }
 }
 
-// `it` / `at` in VISUAL (spec 6)
+// `it` / `at` in VISUAL
 
 #[test]
 fn typing_it_in_visual_narrows_the_selection_to_the_focused_track() {

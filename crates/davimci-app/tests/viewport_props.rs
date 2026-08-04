@@ -1,4 +1,4 @@
-//! Viewport invariants under arbitrary motion/zoom sequences (plan.md 9a).
+//! Viewport invariants under arbitrary motion/zoom sequences.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 

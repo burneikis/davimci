@@ -1,4 +1,4 @@
-//! Every scripted session in `tests/sessions/` is a test (plan.md 2).
+//! Every scripted session in `tests/sessions/` is a test.
 //!
 //! Adding a case means adding a `.dvs` file - which is also the file a bug
 //! report can carry and `davimci --script` can replay.

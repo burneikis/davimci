@@ -1,5 +1,5 @@
 //! Re-conform: changing the timeline's framerate with clips already on it
-//! (spec 7.1, plan.md Phase 5).
+//!.
 //!
 //! The timeline has exactly one framerate. Changing it retimes every clip,
 //! marker, mark, register and the playhead, so there is still one and only
@@ -58,7 +58,7 @@ impl Timeline {
         }
     }
 
-    /// Retime the whole timeline to `props` (spec 7.1).
+    /// Retime the whole timeline to `props`.
     ///
     /// Returns the state as it was, which is the only exact inverse.
     pub fn reconform(&mut self, props: TimelineProps) -> Result<ConformState, CoreError> {

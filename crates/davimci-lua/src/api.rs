@@ -1,4 +1,4 @@
-//! The `davimci.*` module surface (spec 9.2 to 9.8).
+//! The `davimci.*` module surface.
 //!
 //! Every module is a plain table published into `package.loaded`, so the
 //! documented `require("davimci.keymap")` form works without a `package.path`
@@ -19,7 +19,7 @@ use crate::preset::{ExportPreset, SubtitleSelection, TrackSelection, parse_resol
 use crate::registry::{Autocmd, KeyBinding, ObjectDef, Rhs, State, parse_mode};
 use crate::request::{OptValue, Opts, Request, parse_editor_command};
 
-/// The v1 event list (spec 9.8). A typo in an event name binds a handler
+/// The v1 event list. A typo in an event name binds a handler
 /// that would never fire, so it is rejected at registration.
 pub const EVENTS: &[&str] = &[
     "PlayheadMoved",
@@ -210,7 +210,7 @@ fn textobject_module(lua: &Lua, state: &Shared) -> mlua::Result<Table> {
 }
 
 /// `davimci.transition.register(name, { service = ..., <prop> = ... })`
-/// (spec 9.10).
+///.
 fn transition_module(lua: &Lua, state: &Shared) -> mlua::Result<Table> {
     let t = lua.create_table()?;
     let st = Rc::clone(state);
@@ -498,7 +498,7 @@ fn editor_module(lua: &Lua, state: &Shared) -> mlua::Result<Table> {
         "set",
         // Queued as a request like every other change, so a config-set
         // property goes through the same registry, validation and undo rules
-        // as one typed at `:` (spec 9.9). The name and value are not checked
+        // as one typed at `:`. The name and value are not checked
         // here because this crate does not own the registry.
         lua.create_function(move |_, (property, value): (String, Value)| {
             let value = match value {

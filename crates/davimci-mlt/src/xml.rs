@@ -123,7 +123,7 @@ fn write_producer(out: &mut String, id: &str, c: &ClipEntry) {
     if let crate::projection::Resource::Offline { path } = &c.resource {
         prop(out, "davimci.offline", path);
     }
-    // One track per stream (spec 7): without these a multi-stream file
+    // One track per stream: without these a multi-stream file
     // would decode its default stream on every track.
     match c.stream {
         Some(crate::projection::StreamSelect::Audio(s)) => {
@@ -147,7 +147,7 @@ fn write_producer(out: &mut String, id: &str, c: &ClipEntry) {
 /// The overlap: a two-track tractor with the transition planted across it.
 ///
 /// MLT composites tracks, not playlist entries, so an in-playlist transition
-/// has to be its own little tractor (spec 6.2).
+/// has to be its own little tractor.
 fn write_transition_tractor(
     out: &mut String,
     ti: usize,
@@ -270,7 +270,7 @@ mod tests {
         insta::assert_snapshot!(to_xml(&p));
     }
 
-    /// Golden shape for spec 6.2: the overlap is a nested two-track tractor
+    /// Golden transition shape: the overlap is a nested two-track tractor
     /// with the transition planted across it.
     #[test]
     fn golden_transition_between_two_clips() {

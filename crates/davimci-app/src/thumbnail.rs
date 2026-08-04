@@ -1,4 +1,4 @@
-//! Clip thumbnails for the timeline (idea.md, spec 15.2).
+//! Clip thumbnails for the timeline.
 //!
 //! A clip is drawn as a filmstrip: several pictures across its width, each
 //! one of the media at *that* point, so a strip reads as the shot changing

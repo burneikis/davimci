@@ -1,4 +1,4 @@
-//! Stable identifiers for timeline entities (plan.md Phase 1).
+//! Stable identifiers for timeline entities.
 //!
 //! Ids are opaque and monotonic per timeline. They are never reused, so a
 //! command log can refer to a clip that a later command deleted without
@@ -32,11 +32,7 @@ macro_rules! define_id {
 
 define_id!(ClipId, "c", "Identifies a clip within one timeline.");
 define_id!(TrackId, "t", "Identifies a track within one timeline.");
-define_id!(
-    GroupId,
-    "g",
-    "Identifies a per-clip linkage group (spec 5)."
-);
+define_id!(GroupId, "g", "Identifies a per-clip linkage group.");
 
 /// Monotonic id source. Held by the timeline; never reset.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

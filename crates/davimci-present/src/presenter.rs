@@ -1,4 +1,4 @@
-//! The presenter: one video path, two hosts (plan.md Phase 9b).
+//! The presenter: one video path, two hosts.
 //!
 //! This is the anti-duplication keystone. Both frontends hand frames to the
 //! same [`Presenter`], which paces them against the audio clock, letterboxes

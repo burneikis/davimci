@@ -1,7 +1,7 @@
 //! davimci command layer: commands, undo tree, macros, project format.
 //!
-//! Everything that changes a timeline is an [`EditCommand`] (plan.md Phase 2,
-//! Spec 10.4). One representation buys undo/redo, `.`-repeat, macros, the
+//! Everything that changes a timeline is an [`EditCommand`].
+//! One representation buys undo/redo, `.`-repeat, macros, the
 //! Lua API surface, and the project file.
 //!
 //! Like `davimci-core`, this crate has no backend and no I/O.

@@ -1,7 +1,7 @@
 //! Locate libmlt and emit link flags.
 //!
 //! MLT is LGPL-2.1 and davimci is GPL-3.0, so the link is dynamic and
-//! `melt`/`melted` are never vendored (spec 13). `pkg-config` is asked for
+//! `melt`/`melted` are never vendored. `pkg-config` is asked for
 //! the shared library only; a static link here would be a licence defect, not
 //! a build preference.
 

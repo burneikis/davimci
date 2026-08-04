@@ -1,4 +1,4 @@
-//! Analysis and import errors, classified per plan.md Phase 0.
+//! Analysis and import errors, classified by recovery policy.
 //!
 //! Import is the one place where all four error classes meet: a missing file
 //! is offline media, an unsupported container is a user error, a crashed

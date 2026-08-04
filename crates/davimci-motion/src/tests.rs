@@ -1,4 +1,4 @@
-//! Table-driven motion tests (plan.md Phase 3 test strategy).
+//! Table-driven motion tests.
 
 use davimci_core::testing::{clip_ids, fixture, track_id};
 use davimci_core::{Frame, Marker, Timeline, TrackId};
@@ -219,7 +219,7 @@ fn resolve_object(tl: &Timeline, o: &O) -> Result<(TimeRange, Vec<TrackId>), Mot
     }
 }
 
-/// Spec 4.1: the object decides the scope, not the verb.
+/// The object decides the scope, not the verb.
 #[test]
 fn object_scope_matrix() {
     // Ungrouped: every object stays on the focused track.

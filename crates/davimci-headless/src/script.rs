@@ -1,4 +1,4 @@
-//! The scripted-session format: keystrokes plus assertions (plan.md 2).
+//! The scripted-session format: keystrokes plus assertions.
 //!
 //! One text file drives a real [`App`] over a real [`Host`] and states what
 //! must be true afterwards, so the same artefact is both a test case and a

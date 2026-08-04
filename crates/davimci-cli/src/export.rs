@@ -1,4 +1,4 @@
-//! Driving an export (plan.md Phase 8b).
+//! Driving an export.
 //!
 //! The backend already knows how to render; what was missing was everything
 //! around it - which preset, to what file, and how the user hears about it.
@@ -94,11 +94,11 @@ struct Running {
     /// Reported so a finished job can say how long it was.
     total: u64,
     /// The subtitle file written beside the render, and what is to become of
-    /// it once the render lands (spec 8).
+    /// it once the render lands.
     subtitles: Option<(SubtitleMode, PathBuf)>,
 }
 
-/// The timeline's text tracks as subtitle cues, in timeline time (spec 8).
+/// The timeline's text tracks as subtitle cues, in timeline time.
 ///
 /// Pure: the same timeline always gives the same cues, so the sidecar can be
 /// tested with no render and no ffmpeg.
@@ -393,7 +393,7 @@ fn with_extension_if_missing(path: &Path, container: Container) -> PathBuf {
 }
 
 /// The default output name for `:render <preset>`: the project's name with
-/// the preset's container extension (spec 12).
+/// the preset's container extension.
 #[must_use]
 pub fn default_output(project: Option<&Path>, container: Container) -> PathBuf {
     let stem = project
@@ -602,7 +602,7 @@ mod subtitle_tests {
     }
 
     /// `sidecar` writes an SRT next to the output and keeps the text out of
-    /// the picture; `burned` does neither (spec 8).
+    /// the picture; `burned` does neither.
     #[test]
     fn sidecar_writes_an_srt_and_stops_burning_the_text_in() {
         let dir = std::env::temp_dir().join(format!("davimci-sidecar-{}", std::process::id()));

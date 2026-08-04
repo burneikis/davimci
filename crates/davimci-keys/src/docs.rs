@@ -1,4 +1,4 @@
-//! The default keymap, rendered as documentation (plan.md 2).
+//! The default keymap, rendered as documentation.
 //!
 //! The reference table in `docs/keymap.md` is generated from
 //! [`crate::keymap::default_bindings`] and checked against it by a test, so a

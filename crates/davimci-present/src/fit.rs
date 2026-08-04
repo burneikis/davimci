@@ -1,4 +1,4 @@
-//! Aspect fitting (plan.md Phase 9b).
+//! Aspect fitting.
 //!
 //! A video quad is letterboxed into its surface: never stretched, never
 //! cropped, always centred, and always integral - a half-pixel quad would

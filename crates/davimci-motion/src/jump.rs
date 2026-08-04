@@ -1,4 +1,4 @@
-//! The jump-point engine (spec 3.2).
+//! The jump-point engine.
 //!
 //! `h`/`l` do not move by a fixed distance: they move to the next *jump
 //! point*, and the point set depends on the zoom level and on which sources
@@ -56,7 +56,7 @@ impl Default for Zoom {
 /// [`Zoom::MAX`] is one frame per column and cannot go finer.
 ///
 /// This lives beside [`Zoom`] rather than in the viewport because the
-/// jump-point set is defined in terms of on-screen density (spec 3.2): a
+/// jump-point set is defined in terms of on-screen density: a
 /// subdivision every N columns, whatever the zoom.
 pub const BASE_FRAMES_PER_COLUMN: u64 = 4096;
 
@@ -69,7 +69,7 @@ pub fn frames_per_column(zoom: Zoom) -> u64 {
         .max(1)
 }
 
-/// Which sources contribute jump points (spec 3.2, `jump_point_density`).
+/// Which sources contribute jump points.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct JumpSources {
     pub clip_bounds: bool,
@@ -127,7 +127,7 @@ impl JumpConfig {
         }
         // `fpc(zoom) * columns` for as long as a column is wider than a
         // frame, then keeps halving so the finest levels reach one frame per
-        // point as spec 3.2 requires.
+        // point.
         let spacing = BASE_FRAMES_PER_COLUMN
             .saturating_mul(u64::from(self.columns_per_subdivision))
             .checked_shr(u32::from(zoom.level()))
@@ -211,7 +211,7 @@ impl JumpPoints {
     /// The nearest point strictly after `from`.
     ///
     /// The set is sorted and deduplicated, so this is a binary search: `l`
-    /// must stay O(log n) even with a dense subdivision set (spec 3.2).
+    /// must stay O(log n) even with a dense subdivision set.
     #[must_use]
     pub fn next(&self, from: Frame) -> Option<Frame> {
         let i = self.points.partition_point(|p| *p <= from);
@@ -387,7 +387,7 @@ mod tests {
         assert!(jp.points().iter().all(|p| *p <= tl.duration()));
     }
 
-    /// Spec 3.2: denser as you zoom in, and never sparser.
+    /// Denser as you zoom in, and never sparser.
     #[test]
     fn density_is_monotonic_in_zoom() {
         let tl = tl();

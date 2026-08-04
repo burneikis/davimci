@@ -1,4 +1,4 @@
-//! Lua-driven integration test (plan.md Phase 7): a config file registers a
+//! Lua-driven integration test: a config file registers a
 //! motion and keymaps, the harness feeds keys through `davimci-keys`, and the
 //! assertion is the resulting timeline.
 //!

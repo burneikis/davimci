@@ -2,12 +2,12 @@
 //!
 //! The counterpart to [`crate::window`]: the one place that holds the
 //! terminal frontend *and* a render backend, because no frontend may
-//! reference MLT (spec 10.1). It decides nothing - the rows were computed by
+//! reference MLT. It decides nothing - the rows were computed by
 //! `davimci-tui` from a view state `davimci-app` assembled.
 //!
 //! The presenter runs in `Detached` mode, which only means overlays are
 //! refused: the composited picture it produces is downsampled into the
-//! terminal's own preview band (spec 15.6). `:set preview off` stops the pulls
+//! terminal's own preview band. `:set preview off` stops the pulls
 //! altogether for a session with no display, and `:set previewheight 0` keeps
 //! them while drawing nothing.
 

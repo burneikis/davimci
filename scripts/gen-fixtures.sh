@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Generate test media with known ground truth (plan.md standing rule 4:
-# test media is generated, never committed).
+# Generate test media with known ground truth; media is generated, never
+# committed.
 #
 # Everything here has a property the tests can assert exactly: known silence
 # spans, known scene-change frames, known track counts, known frame counts.
@@ -65,7 +65,7 @@ gen scene_cut.mkv "hard cut at frame 120 @60fps" \
 
 # --- multi-track MKV --------------------------------------------------------
 # One video, three distinguishable audio tracks, two subtitle tracks.
-# Exercises spec §7 import: every stream must become its own track.
+# Exercises import: every stream must become its own track.
 if [ ! -f "$OUT/multitrack.mkv" ]; then
   printf '  gen   %-28s %s\n' "multitrack.mkv" "1 video, 3 audio, 2 subtitle"
   for i in 1 2 3; do

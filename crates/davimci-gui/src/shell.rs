@@ -1,4 +1,4 @@
-//! The window shell's state machine (plan.md Phase 9c).
+//! The window shell's state machine.
 //!
 //! [`Gui`] is a [`Frontend`]: it turns window events into `davimci-app`
 //! events and draws the [`ViewState`] it is handed. Modal input - the `:`

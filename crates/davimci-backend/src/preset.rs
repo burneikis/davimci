@@ -1,13 +1,13 @@
-//! Export presets (spec 7 "Export options", 9.5).
+//! Export presets.
 //!
 //! A preset names a *codec* - `h264`, `vp9`, `opus` - and never an ffmpeg
 //! encoder. The mapping from one to the other lives here and nowhere else, so
-//! Spec 10.3 holds: a user writes what they mean and the editor picks the
+//! A user writes what they mean and the editor picks the
 //! encoder.
 //!
 //! Container/codec pairings are validated where a preset is defined, not
 //! where it runs. A misspelled container is a user error, and finding it out
-//! after a forty-minute render is not acceptable (spec 9.5).
+//! after a forty-minute render is not acceptable.
 //!
 //! This module is pure data. It knows nothing about MLT, so the whole preset
 //! system is testable with no media, no backend, and no window.
@@ -39,7 +39,7 @@ impl VideoCodec {
         }
     }
 
-    /// The ffmpeg encoder this codec maps to (spec 10.3).
+    /// The ffmpeg encoder this codec maps to.
     #[must_use]
     pub fn encoder(self) -> &'static str {
         match self {
@@ -143,7 +143,7 @@ impl Container {
     /// Whether this container can legally carry these codecs.
     ///
     /// Only Matroska keeps every audio track as a separate stream, which is
-    /// why multi-track audio export (spec 7) is an MKV feature here.
+    /// why multi-track audio export is an MKV feature here.
     #[must_use]
     pub fn accepts(self, video: VideoCodec, audio: AudioCodec) -> bool {
         match self {
@@ -165,14 +165,14 @@ impl Container {
         }
     }
 
-    /// True when every audio track survives as its own stream (spec 7).
+    /// True when every audio track survives as its own stream.
     #[must_use]
     pub fn keeps_audio_tracks_separate(self) -> bool {
         self == Self::Mkv
     }
 }
 
-/// Which audio tracks reach the file (spec 9.5).
+/// Which audio tracks reach the file.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum TrackSelection {
     /// Every audio track, each as its own stream where the container allows.
@@ -183,7 +183,7 @@ pub enum TrackSelection {
     Named(Vec<String>),
 }
 
-/// What happens to subtitle tracks (spec 8, 9.5).
+/// What happens to subtitle tracks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SubtitleMode {
     Burned,
@@ -214,7 +214,7 @@ pub struct Preset {
     pub container: Container,
     pub video: VideoCodec,
     pub audio: AudioCodec,
-    /// `None` means "the timeline's", resolved at render time (spec 9.5).
+    /// `None` means "the timeline's", resolved at render time.
     pub resolution: Option<Resolution>,
     pub fps: Option<Fps>,
     pub audio_tracks: TrackSelection,
@@ -225,7 +225,7 @@ pub struct Preset {
 
 impl Preset {
     /// Define a preset, validating the container/codec pairing now rather
-    /// than after a long render (spec 9.5).
+    /// than after a long render.
     pub fn new(
         name: impl Into<String>,
         container: Container,
@@ -255,7 +255,7 @@ impl Preset {
     }
 
     /// Resolve to encoder settings against a timeline's properties. This is
-    /// where `resolution = nil` becomes the timeline's resolution (spec 9.5).
+    /// where `resolution = nil` becomes the timeline's resolution.
     #[must_use]
     pub fn settings(&self, timeline_res: Resolution, timeline_fps: Fps) -> RenderSettings {
         RenderSettings {
@@ -269,7 +269,7 @@ impl Preset {
             separate_audio_tracks: self.container.keeps_audio_tracks_separate()
                 && self.audio_tracks != TrackSelection::None,
             // Only `burned` paints the text into the picture; the other
-            // modes keep it out of the graph entirely (spec 8).
+            // modes keep it out of the graph entirely.
             burn_subtitles: self.subtitles == SubtitleMode::Burned,
             extra: self.extra.clone(),
         }
@@ -432,20 +432,20 @@ mod tests {
     fn a_preset_names_codecs_and_resolves_to_encoders() {
         let p = Preset::new("x", Container::Mkv, VideoCodec::H264, AudioCodec::Flac).unwrap();
         let s = p.settings(Resolution::HD_1080, Fps::FPS_60);
-        // The user wrote h264; the backend is handed libx264 (spec 10.3).
+        // The user wrote h264; the backend is handed libx264.
         assert_eq!(s.video_codec, "libx264");
         assert_eq!(s.audio_codec, "flac");
     }
 
     #[test]
     fn an_encoder_name_is_not_a_codec_name() {
-        // Accepting this would make spec 10.3 advisory.
+        // Accepting this would make the proxy rule advisory.
         assert!(VideoCodec::parse("libx264").is_err());
     }
 
     #[test]
     fn an_impossible_pairing_is_refused_when_the_preset_is_defined() {
-        // vp9 in mp4 - caught now, not after the render (spec 9.5).
+        // vp9 in mp4 - caught now, not after the render.
         let e = Preset::new("bad", Container::Mp4, VideoCodec::Vp9, AudioCodec::Aac).unwrap_err();
         let msg = e.to_string();
         assert!(msg.contains("cannot carry"), "{msg}");

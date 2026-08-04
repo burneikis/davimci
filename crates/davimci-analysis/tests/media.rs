@@ -1,4 +1,4 @@
-//! Tests that need real media (plan.md standing rule 3).
+//! Tests that need real media.
 //!
 //! Everything here runs against the generated fixtures from
 //! `scripts/gen-fixtures.sh` - nothing is committed - and is gated behind

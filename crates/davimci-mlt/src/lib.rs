@@ -1,4 +1,4 @@
-//! The MLT render backend (plan.md Phase 6, spec 10.1).
+//! The MLT render backend.
 //!
 //! This is the only crate in the workspace allowed to know that MLT exists.
 //! It has four layers, deliberately separated by how testable they are:
@@ -16,7 +16,7 @@
 //! backwards does not re-seek and re-decode a GOP per frame.
 //!
 //! `libmlt` is linked dynamically and `melt`/`melted` are never vendored:
-//! davimci is GPL-3.0 over LGPL-2.1 MLT (spec 13).
+//! davimci is GPL-3.0 over LGPL-2.1 MLT.
 
 pub mod backend;
 mod cache;

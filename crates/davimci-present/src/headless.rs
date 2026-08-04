@@ -1,4 +1,4 @@
-//! A presenter host that writes frames to memory (plan.md Phase 9b).
+//! A presenter host that writes frames to memory.
 //!
 //! Used by tests and by the parity harness: it is the same [`Presenter`] the
 //! GUI and TUI drive, so what it records is what they draw.

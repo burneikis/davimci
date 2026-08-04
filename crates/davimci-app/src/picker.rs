@@ -1,4 +1,4 @@
-//! The media picker behind `i` / `a` / `r` (spec 11).
+//! The media picker behind `i` / `a` / `r`.
 //!
 //! State only: a frontend draws a list and the host supplies its entries. It
 //! lives here rather than in a frontend because the GUI and the TUI both

@@ -1,4 +1,4 @@
-//! Playback and shuttle (spec 3.2.1, 15.5; plan.md Phase 9a/9b).
+//! Playback and shuttle.
 //!
 //! Transport is not an edit. Nothing here produces a `Command` and
 //! nothing reaches the undo log: playing a timeline changes the playhead,
@@ -42,7 +42,7 @@ pub struct Transport {
     /// True while shuttling with real varispeed rather than by stepping the
     /// playhead. Decided by the backend, once, when the shuttle starts.
     varispeed: bool,
-    /// The half-open range `<Space>l` is looping (spec 3.2.1). Transport
+    /// The half-open range `<Space>l` is looping. Transport
     /// state, never an edit: it outlives a pause and a seek inside itself,
     /// and never reaches the undo log.
     loop_range: Option<(Frame, Frame)>,
@@ -155,7 +155,7 @@ impl Transport {
     ) -> Result<String, String> {
         match self.state {
             // A shuttle is motion too, so play/pause stops it. With no
-            // default stop key (spec 3.2.1) this is the way out of a
+            // default stop key this is the way out of a
             // shuttle other than decelerating through zero.
             TransportState::Playing | TransportState::Shuttling(_) => {
                 self.stop(backend, session)?;
@@ -212,7 +212,7 @@ impl Transport {
         // and all; one without it steps the playhead and stops the audio,
         // because a scrub with the wrong sound is worse than a silent one.
         //
-        // Backwards is always stepped (spec 3.2.1): audio consumers do not
+        // Backwards is always stepped: audio consumers do not
         // run in reverse, and a negative producer speed stalls the clock -
         // the preview froze and the playhead was then committed to the end
         // of the timeline.
@@ -232,7 +232,7 @@ impl Transport {
         Ok(format!("shuttle {rate:+}x"))
     }
 
-    /// Stop playback because something else wants the playhead (spec 3.2.1).
+    /// Stop playback because something else wants the playhead.
     ///
     /// Unlike [`Transport::play_pause`] this never toggles, and unlike
     /// [`Transport::preview_and_return`] it *commits*: a motion typed during
@@ -275,7 +275,7 @@ impl Transport {
         scale: PreviewScale,
     ) -> Result<(), String> {
         let from = session.timeline().playhead().frame;
-        // The playhead may legally sit at or past the end (spec 15.2), and
+        // The playhead may legally sit at or past the end, and
         // starting there gives a consumer that ends on its first frame -
         // which reads as "playing" and never moves. Say so instead.
         let duration = session.timeline().duration();
@@ -573,7 +573,7 @@ mod tests {
         }
     }
 
-    /// Spec 3.2.1: with rate control, `L` is varispeed playback - the audio
+    /// With rate control, `L` is varispeed playback - the audio
     /// keeps running and the rate steps, rather than the playhead jumping.
     #[test]
     fn shuttling_a_rate_capable_backend_plays_faster_instead_of_stepping() {
@@ -656,7 +656,7 @@ mod tests {
         let s = session();
         let mut t = Transport::new();
         // Nothing playing: silent no-op, so a bind never announces a pause
-        // that did not happen (spec 3.2.1).
+        // that did not happen.
         assert!(!t.interrupt(&mut b).unwrap());
         t.play_pause(&mut b, &s, PreviewScale::Full).unwrap();
         assert!(t.interrupt(&mut b).unwrap());
@@ -668,7 +668,7 @@ mod tests {
         assert_eq!(t.state(), TransportState::Stopped);
     }
 
-    /// Spec 3.2.1: interrupting commits where playback reached, so a
+    /// Interrupting commits where playback reached, so a
     /// `<Space>p` preview interrupted by a motion does not snap back.
     #[test]
     fn interrupt_discards_a_pending_preview_return() {

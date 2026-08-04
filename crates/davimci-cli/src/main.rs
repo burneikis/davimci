@@ -1,6 +1,6 @@
 //! davimci binary entrypoint.
 //!
-//! There is no *window* yet (plan.md Phase 9c's shell), but the editor is
+//! There is no *window* yet, but the editor is
 //! assembled: `-k` runs a scripted key session through the real editor -
 //! key grammar, command layer, MLT backend, presenter and transport - with
 //! the headless frontend standing in for the window. That makes everything
@@ -209,7 +209,7 @@ fn run_tui(ws: Workspace) -> Result<()> {
 ///
 /// The config is loaded before the `App` exists because it decides what the
 /// keymap is: a user binding has to be in the table the grammar consults,
-/// not layered on afterwards by whoever remembers to (spec 9.2).
+/// not layered on afterwards by whoever remembers to.
 fn assemble(ws: Workspace) -> (App, Editor) {
     assemble_with(ws, PresentHost::Embedded)
 }
@@ -243,7 +243,7 @@ fn assemble_with(ws: Workspace, host: PresentHost) -> (App, Editor) {
 /// Build the render backend and presenter for a session.
 ///
 /// MLT is only touched here, in the binary: no frontend may reference it
-/// (spec 10.1). A missing or broken `libmlt` degrades to the mock backend
+///. A missing or broken `libmlt` degrades to the mock backend
 /// rather than refusing to start, so editing still works without a working
 /// decoder (Phase 0: recoverable errors degrade locally).
 fn engine_for(
@@ -385,7 +385,7 @@ fn print_help() {
            --version   print the version\n  \
            -h, --help  this text\n\n\
          with no -c and no -k, davimci opens the editor window. -c drives\n\
-         the spec \u{a7}12 lifecycle from the command line; -k runs a scripted\n\
+         the project lifecycle from the command line; -k runs a scripted\n\
          key session through the whole editor with the headless frontend in\n\
          the window's place.",
         env!("CARGO_PKG_VERSION")

@@ -96,7 +96,7 @@ pub enum Request {
     /// `require("davimci.media").import(path)`.
     Import { path: String },
     /// `require("davimci.media").analyze(track)` - re-run analysis after a
-    /// gain or fade change (plan.md Phase 9e).
+    /// gain or fade change.
     Analyze { track: Option<String> },
     /// `require("davimci.editor").message(text)`, for the status line.
     Message(String),
@@ -105,7 +105,7 @@ pub enum Request {
     Set { property: String, value: String },
 }
 
-/// Map an `editor.*` string from a keymap right-hand side (spec 9.2) onto
+/// Map an `editor.*` string from a keymap right-hand side onto
 /// the key grammar. Unknown strings are rejected at `map()` time so the user
 /// hears about a typo when the config loads, not when the key is pressed.
 #[must_use]

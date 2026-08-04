@@ -1,4 +1,4 @@
-//! Errors surfaced while executing a parsed action (plan.md Phase 0).
+//! Errors surfaced while executing a parsed action.
 
 use davimci_cmd::CmdError;
 use davimci_core::{Classify, ErrorClass};
@@ -22,7 +22,7 @@ pub enum KeysError {
 
     /// A dispatch arm that should be impossible was reached. A bug, but not
     /// a corrupt timeline: nothing was mutated, so the editor degrades
-    /// locally and keeps going (plan.md Phase 0, recoverable) instead of
+    /// locally and keeps going instead of
     /// panicking in a library crate.
     #[error("davimci could not carry that out: {0}")]
     Internal(&'static str),

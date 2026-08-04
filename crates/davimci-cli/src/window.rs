@@ -1,8 +1,8 @@
-//! The window (plan.md Phase 9c's shell).
+//! The window.
 //!
 //! The eframe application lives in the binary because it is the one place
 //! that holds a frontend *and* a render backend at once, and no frontend may
-//! reference MLT (spec 10.1). It does four things per frame: hand egui's
+//! reference MLT. It does four things per frame: hand egui's
 //! input to the `Gui` frontend, pump the resulting events through the `App`,
 //! run one presentation tick, and draw what `davimci-gui` computed.
 //!

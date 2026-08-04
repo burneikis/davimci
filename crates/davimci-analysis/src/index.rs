@@ -1,4 +1,4 @@
-//! The indexed store behind predicate motions (spec 3.4, 10.2).
+//! The indexed store behind predicate motions.
 //!
 //! `]a` must be instant and correct even when zoomed fully out, so it may not
 //! scan. Peaks are queried through a max segment tree, which answers "the
@@ -146,7 +146,7 @@ impl Indexed {
     }
 }
 
-/// The analysis-backed [`PredicateIndex`] (plan.md Phase 5).
+/// The analysis-backed [`PredicateIndex`].
 #[derive(Debug, Clone, Default)]
 pub struct AnalysisIndex {
     fps: Option<Fps>,
@@ -181,7 +181,7 @@ impl AnalysisIndex {
     }
 
     /// Invalidate a track: gain or fades changed, so the cached measurements
-    /// no longer describe what will be heard (spec 10.2, `:analyze`).
+    /// no longer describe what will be heard.
     pub fn invalidate(&mut self, track: TrackId) {
         if self.tracks.contains_key(&track) {
             self.tracks.insert(track, TrackAnalysis::Pending);
@@ -416,7 +416,7 @@ mod tests {
         );
     }
 
-    /// plan.md Phase 5: editing during an in-flight job must leave predicate
+    /// Editing during an in-flight job must leave predicate
     /// motions `Pending`, never stale or wrong.
     #[test]
     fn an_unfinished_or_failed_track_is_pending_not_no_match() {

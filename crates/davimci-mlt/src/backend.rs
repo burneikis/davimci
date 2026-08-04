@@ -3,7 +3,7 @@
 //! Preview is frame pull: audio goes to a realtime MLT audio consumer,
 //! which owns the master clock, while video frames are lifted out of the
 //! consumer as RGBA and handed to `davimci-present`. MLT never opens a window
-//! (plan.md Phase 6), which is what lets the GUI draw overlays on the video
+//!, which is what lets the GUI draw overlays on the video
 //! and lets the TUI reuse the same path.
 
 use std::collections::{BTreeMap, VecDeque};
@@ -39,7 +39,7 @@ struct Graph {
     /// does: dropping one while the tractor still points at it would be a
     /// use-after-free.
     _mixes: Vec<Transition>,
-    /// Clip-to-clip transitions (spec 6.2), each a nested tractor with its
+    /// Clip-to-clip transitions, each a nested tractor with its
     /// own planted transition. Kept for the same reason as `_mixes`, and
     /// keyed by the incoming clip so a patch that removes one can drop it
     /// rather than leaking a tractor per edit.
@@ -94,7 +94,7 @@ pub struct MltBackend {
     finished: Option<RenderProgress>,
     /// How many times the graph has been built from scratch, and how many
     /// times it was patched instead. Tests assert the ratio: a split must not
-    /// rebuild (spec 10.1).
+    /// rebuild.
     pub rebuilds: usize,
     pub patches: usize,
     /// Decoded stills, so a backward step is a lookup rather than a seek.
@@ -279,7 +279,7 @@ impl MltBackend {
     /// MLT composites tracks, not playlist entries, so a transition inside a
     /// playlist has to be a nested tractor: the outgoing clip's tail on track
     /// 0, the incoming clip's head on track 1, and the transition planted
-    /// across them (spec 6.2).
+    /// across them.
     fn build_transition(
         &self,
         entry: &crate::projection::TransitionEntry,
@@ -341,7 +341,7 @@ impl MltBackend {
                     .set("davimci.offline", path)
                     .map_err(BackendError::from)?;
             }
-            // One track per stream (spec 7): a track that does not name its
+            // One track per stream: a track that does not name its
             // stream decodes the container's default, so three audio tracks
             // off one file would all play the first stream.
             match entry.stream {
@@ -515,7 +515,7 @@ fn insert_entry(
 /// Recover an exact rational framerate from MLT's decimal report.
 ///
 /// NTSC rates are 1000/1001 of an integer, and a project has exactly one
-/// framerate (spec 7.1), so guessing a float here would poison every
+/// framerate, so guessing a float here would poison every
 /// conform downstream.
 fn rational_fps(rate: f64) -> Option<Fps> {
     if rate <= 0.0 {
@@ -618,7 +618,7 @@ impl RenderBackend for MltBackend {
                         });
                     }
                     // MLT reports the rate as a decimal; recover the exact
-                    // rational rather than storing a float (spec 7.1).
+                    // rational rather than storing a float.
                     let rate = props
                         .get(&format!("meta.media.{i}.stream.frame_rate"))
                         .and_then(|v| v.parse::<f64>().ok())
@@ -891,7 +891,7 @@ impl RenderBackend for MltBackend {
         if needs_own_graph && let Some(mut projection) = self.projection.clone() {
             // Subtitles that are not burned in must not reach the picture:
             // the text tracks are dropped from the exported graph and
-            // carried by the sidecar or the muxed stream instead (spec 8).
+            // carried by the sidecar or the muxed stream instead.
             let dropped = !job.settings.burn_subtitles && projection.drop_text_tracks();
             if job.settings.separate_audio_tracks {
                 layout = projection.route_audio();

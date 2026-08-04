@@ -1,4 +1,4 @@
-//! The `:` line: editing, history, and completion (plan.md Phase 9a).
+//! The `:` line: editing, history, and completion.
 //!
 //! State only - no widget, no window. A frontend forwards the keystrokes it
 //! receives while `COMMAND` is open and draws what the view state says; what
@@ -311,7 +311,7 @@ impl CommandLine {
     }
 }
 
-/// The spec 12 vocabulary, as a default for a host that has not supplied one.
+/// The default vocabulary, for a host that has not supplied one.
 #[must_use]
 pub fn default_vocabulary() -> CommandVocabulary {
     CommandVocabulary::new(

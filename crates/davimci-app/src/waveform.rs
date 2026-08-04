@@ -1,4 +1,4 @@
-//! Waveform data for audio lanes (plan.md Phase 9e, spec 6.1).
+//! Waveform data for audio lanes.
 //!
 //! The measurements come from `davimci-analysis`, which measures the
 //! *source*, so everything here is indexed by source time. Mapping a screen
@@ -83,7 +83,7 @@ impl Waveforms {
     }
 
     /// Drop a track's envelope: its audio changed, so the old one is a lie
-    /// until analysis re-runs (spec 6.1, 10.2).
+    /// until analysis re-runs.
     pub fn invalidate(&mut self, track: TrackId) {
         self.tracks.remove(&track);
     }

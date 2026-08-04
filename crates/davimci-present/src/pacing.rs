@@ -1,6 +1,6 @@
-//! Frame pacing against the backend's audio clock (plan.md Phase 9b).
+//! Frame pacing against the backend's audio clock.
 //!
-//! Audio is the master clock (spec 10.1), so video is fitted to it rather
+//! Audio is the master clock, so video is fitted to it rather
 //! than the other way round. Two policies, both counted so tests can assert
 //! them exactly:
 //!

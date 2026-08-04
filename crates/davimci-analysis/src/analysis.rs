@@ -1,4 +1,4 @@
-//! The analysis pass (spec 10.2, plan.md Phase 5).
+//! The analysis pass.
 //!
 //! Everything is precomputed on import: peak and RMS at a fixed hop, silence
 //! spans, and optional scene-change points. Nothing is analysed while
@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 /// Bump to invalidate every cached analysis on disk.
 pub const ANALYSIS_VERSION: u32 = 1;
 
-/// Analysis settings. The 10 ms hop is the spec 10.2 default.
+/// Analysis settings. The 10 ms hop is the default.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisParams {
     pub hop_ms: u32,
@@ -208,7 +208,7 @@ pub(crate) mod tests {
         assert_eq!(a.hop_start_ms(300), 3000);
     }
 
-    /// plan.md Phase 5: silence spans within one hop of ground truth.
+    /// Silence spans land within one hop of ground truth.
     #[test]
     fn silence_spans_match_the_fixture_to_within_one_hop() {
         let a = analysis();
@@ -222,7 +222,7 @@ pub(crate) mod tests {
         }
     }
 
-    /// plan.md Phase 5: peak detection finds the exact tone frames.
+    /// Peak detection finds the exact tone frames.
     #[test]
     fn the_tone_hops_peak_at_exactly_half_scale() {
         let a = analysis();

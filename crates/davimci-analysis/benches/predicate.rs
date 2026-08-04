@@ -1,4 +1,4 @@
-//! Spec 14's "predicate motions never scan", measured (plan.md 2).
+//! "Predicate motions never scan", measured.
 //!
 //! An hour of audio at a 10 ms hop is 360 000 hops. If a lookup were a scan,
 //! the two lengths benchmarked here would differ by an order of magnitude;

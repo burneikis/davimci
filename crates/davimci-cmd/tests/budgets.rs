@@ -1,4 +1,4 @@
-//! Wall-clock ceilings for spec 14's "instant on a few hundred clips".
+//! Wall-clock ceilings: edits stay instant on a few hundred clips.
 //!
 //! Criterion measures; this asserts. The budgets sit roughly an order of
 //! magnitude above the measured times in `benches/edits.rs`, so they catch an

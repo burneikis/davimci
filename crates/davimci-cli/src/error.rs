@@ -1,4 +1,4 @@
-//! Errors at the project-lifecycle layer (plan.md Phase 8).
+//! Errors at the project-lifecycle layer.
 //!
 //! Every variant carries a complete user-facing sentence, and every variant
 //! is classified, because the CLI is where Phase 0's policies are actually
@@ -64,7 +64,7 @@ pub enum CliError {
     #[error("the export could not start: {reason}")]
     ExportFailed { reason: String },
 
-    /// A `BeforeExport` handler vetoed the render (spec 9.8). A user error:
+    /// A `BeforeExport` handler vetoed the render. A user error:
     /// nothing was written and nothing was mutated.
     #[error("the export was refused: {reason}")]
     ExportRefused { reason: String },

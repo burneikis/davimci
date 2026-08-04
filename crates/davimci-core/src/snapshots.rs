@@ -1,4 +1,4 @@
-//! Snapshot tests on the compact timeline dump (plan.md Phase 1).
+//! Snapshot tests on the compact timeline dump.
 //!
 //! These exist so ripple/lift/trim diffs are readable in review: a behaviour
 //! change shows up as a one-line diff of the timeline itself.

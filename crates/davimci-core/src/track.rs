@@ -1,4 +1,4 @@
-//! Tracks: ordered, non-overlapping sequences of clips (spec 5).
+//! Tracks: ordered, non-overlapping sequences of clips.
 
 use serde::{Deserialize, Serialize};
 
@@ -8,7 +8,7 @@ use crate::id::{ClipId, TrackId};
 use crate::time::Frame;
 use crate::transition::Transition;
 
-/// Track types from spec 5.
+/// Track types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TrackKind {
     Video,
@@ -102,7 +102,7 @@ impl Track {
         &mut self.clips
     }
 
-    // -- transitions (spec 6.2) -----------------------------------------
+    // -- transitions -----------------------------------------
 
     /// Whether the clip at `index` starts on a cut, i.e. the previous clip
     /// ends exactly where it begins. A transition needs two clips to join.
@@ -119,7 +119,7 @@ impl Track {
     /// Whether a transition of this length can be built on the cut at
     /// `index`, and why not when it cannot.
     ///
-    /// The overlap is made of handle frames, so this is where spec 6.2's
+    /// The overlap is made of handle frames, so this is where the transition's
     /// "fails with a clear error rather than silently shortening" lives: the
     /// answer is computed before anything is written.
     pub fn check_transition(&self, index: usize, t: &Transition) -> Result<(), CoreError> {
@@ -177,7 +177,7 @@ impl Track {
     ///
     /// Every edit primitive ends here (via `Timeline::settle`): a ripple that
     /// removes a neighbour must resolve the transition rather than orphan it
-    /// on a cut that is gone (plan.md Phase 9f).
+    /// on a cut that is gone.
     pub(crate) fn prune_transitions(&mut self) {
         let stale: Vec<usize> = (0..self.clips.len())
             .filter(|&i| {
@@ -193,7 +193,7 @@ impl Track {
     }
 
     /// The clip range plus any transition attached to either of its cuts -
-    /// the `ac` text object (spec 4.1).
+    /// the `ac` text object.
     #[must_use]
     pub fn transition_range(&self, id: ClipId) -> Option<(Frame, Frame)> {
         let i = self.index_of(id)?;
@@ -255,7 +255,7 @@ impl Track {
         self.clips.insert(at, clip);
     }
 
-    /// Structural invariants for one track (plan.md Phase 1).
+    /// Structural invariants for one track.
     pub(crate) fn check_invariants(&self) -> Result<(), CoreError> {
         let mut prev_end = Frame::ZERO;
         for (i, c) in self.clips.iter().enumerate() {

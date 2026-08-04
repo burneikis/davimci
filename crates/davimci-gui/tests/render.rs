@@ -1,5 +1,5 @@
 //! Rendering tests driven by the Phase 9a golden view states, so a
-//! view-state regression fails in `davimci-app` *and* here (plan.md 9c).
+//! view-state regression fails in `davimci-app` *and* here.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -131,7 +131,7 @@ fn an_open_command_line_is_painted_only_when_the_view_has_one() {
 }
 
 /// The typed line, its caret and its suggestions are all painted from the
-/// view state, so the user can see what they are typing (idea.md).
+/// view state, so the user can see what they are typing.
 #[test]
 fn completions_are_painted_on_their_own_row_above_the_line() {
     let mut view = fixtures::normal();
@@ -213,7 +213,7 @@ fn the_picker_title_names_the_intent() {
     }
 }
 
-/// Spec 6.1: an analysed audio lane draws its envelope, and only that lane.
+/// An analysed audio lane draws its envelope, and only that lane.
 #[test]
 fn an_analysed_audio_lane_paints_a_waveform() {
     let view = fixtures::waveform();
@@ -243,7 +243,7 @@ fn an_analysed_audio_lane_paints_a_waveform() {
     );
 }
 
-/// Regression (idea.md): the envelope used to be painted over the clip
+/// Regression: the envelope used to be painted over the clip
 /// labels, so an analysed lane was a lane whose clips had no readable names.
 /// Labels come last.
 #[test]
@@ -286,7 +286,7 @@ fn clip_labels_are_painted_over_the_waveform() {
 
 /// Relative numbers belong to every jump point, not only to clip boundaries:
 /// the number is the count that lands there, and `3l` is as useful mid-clip
-/// as at a cut (spec 3.2).
+/// as at a cut.
 #[test]
 fn relative_numbers_are_painted_for_subdivision_ticks_too() {
     let view = fixtures::normal();
@@ -319,7 +319,7 @@ fn relative_numbers_are_painted_for_subdivision_ticks_too() {
 }
 
 /// A decoded thumbnail is repeated across the whole clip, like a filmstrip,
-/// and never spills past the clip's own edge (spec 15.2).
+/// and never spills past the clip's own edge.
 #[test]
 fn a_clip_thumbnail_tiles_across_the_clip_and_stays_inside_it() {
     let mut view = fixtures::normal();

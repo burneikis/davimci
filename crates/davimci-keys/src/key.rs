@@ -1,9 +1,8 @@
-//! Key tokens (spec 3.2.1, 11).
+//! Key tokens.
 //!
 //! A [`Key`] is one physical keypress, already stripped of platform detail -
 //! a frontend translates `winit`/terminal events into these and nothing
-//! else, per plan.md Phase 9a/9c/9d. `<Space>` is both a literal key and the
-//! spec's leader.
+//! else. `<Space>` is both a literal key and the leader.
 
 /// Named keys that are not a plain character.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -79,7 +78,7 @@ impl Key {
     }
 
     /// Render back to a token vim/config strings would use, so a macro
-    /// buffer (opaque strings, plan.md Phase 2) round-trips through the
+    /// buffer (opaque strings) round-trips through the
     /// parser exactly.
     #[must_use]
     pub fn to_token(self) -> String {

@@ -1,4 +1,4 @@
-//! Errors raised by the command layer (plan.md Phase 0 classes).
+//! Errors raised by the command layer.
 
 use davimci_core::{Classify, CoreError, ErrorClass};
 

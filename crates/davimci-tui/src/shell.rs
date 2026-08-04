@@ -105,7 +105,7 @@ impl Tui {
         self.protocol
     }
 
-    /// `:set previewheight` (spec 12.1). [`Height::Off`] turns the band off.
+    /// `:set previewheight`. [`Height::Off`] turns the band off.
     pub fn set_preview_height(&mut self, height: Height) {
         if height != self.preview_height {
             self.preview_height = height;

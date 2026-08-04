@@ -2,7 +2,7 @@
 
 use davimci_core::{Frame, Resolution};
 
-/// Preview decode scale (plan.md Phase 6).
+/// Preview decode scale.
 ///
 /// Scrubbing drops resolution rather than frames, and the TUI's small window
 /// is cheap by construction: the request goes all the way down to

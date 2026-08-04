@@ -1,5 +1,5 @@
 //! Pacing against a synthetic clock, end to end through the presenter
-//! (plan.md Phase 9b).
+//!.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 

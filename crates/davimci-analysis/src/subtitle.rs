@@ -1,4 +1,4 @@
-//! Subtitle streams (spec 7, 8).
+//! Subtitle streams.
 //!
 //! A subtitle stream becomes a `text` track whose clips carry the cue text.
 //! Parsing is pure - SRT text in, cues out - so the import path can be tested
@@ -58,7 +58,7 @@ pub fn parse_srt(text: &str) -> Vec<Cue> {
     cues
 }
 
-/// Cues as SRT text, the inverse of [`parse_srt`] (spec 8 sidecar export).
+/// Cues as SRT text, the inverse of [`parse_srt`].
 #[must_use]
 pub fn to_srt(cues: &[Cue]) -> String {
     let mut out = String::new();

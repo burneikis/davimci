@@ -1,4 +1,4 @@
-//! Project-lifecycle tests (plan.md Phase 8).
+//! Project-lifecycle tests.
 //!
 //! Everything here runs against a scratch directory under the system temp
 //! dir; no fixture media is needed, because the lifecycle layer only ever
@@ -152,7 +152,7 @@ fn saving_and_reopening_gives_a_byte_identical_timeline() {
 
 #[test]
 fn a_project_written_by_an_older_schema_still_opens() {
-    // plan.md Phase 8: format-migration test. Version 0 is pre-release: no
+    // Format migration. Version 0 is pre-release: no
     // `version` field and no log.
     let dir = Scratch::new("migrate");
     let file = dir.join("old.davimci");
@@ -260,7 +260,7 @@ fn buffers_list_and_switch_like_vim() {
 
 #[test]
 fn registers_and_marks_are_global_across_timelines() {
-    // spec 12: "registers and marks are global across timelines, so a yank
+    // Registers and marks are global across timelines, so a yank
     // in one can be pasted into another".
     let dir = Scratch::new("globals");
     let mut ws = Workspace::new(dir.path()).without_autosave();
@@ -557,7 +557,7 @@ fn a_project_file_is_recognised_by_its_content_not_its_name() {
     assert_eq!(ws.current().timeline().dump(), "V1:[a 0-60]\nA1: -\n");
 }
 
-// transitions (spec 6.2)
+// transitions
 
 #[test]
 fn transition_command_adds_replaces_and_removes_at_the_nearest_cut() {
@@ -610,7 +610,7 @@ fn a_transition_longer_than_the_handles_is_refused_intact() {
     assert_eq!(ws.current().timeline(), &before);
 }
 
-// `:set` (spec 12.1)
+// `:set`
 
 #[test]
 fn set_writes_the_property_and_one_undo_takes_it_back() {
@@ -745,7 +745,7 @@ fn a_transform_set_through_set_projects_the_same_xml_as_one_set_in_model() {
 }
 
 /// Recovery rebuilds the *tree*, not a line: a branch abandoned before the
-/// crash is still reachable with `g-`/`g+` afterwards (spec 10.4).
+/// crash is still reachable with `g-`/`g+` afterwards.
 #[test]
 fn recovery_restores_the_undo_tree_with_its_branches() {
     let dir = Scratch::new("recover-tree");

@@ -1,4 +1,4 @@
-//! Window layout and timeline painting (plan.md Phase 9c).
+//! Window layout and timeline painting.
 //!
 //! The window is one column: video pane on top, timeline below it, then the
 //! status line and (when open) the command line. Every size here is derived,
@@ -443,7 +443,7 @@ pub fn paint(view: &ViewState, layout: &Layout, chrome: &Chrome) -> DrawList {
 }
 
 /// Relative jump-point numbers on the ruler: `0` under the playhead, and the
-/// count each `l` or `h` away from it (spec 3.2), the way vim numbers lines.
+/// count each `l` or `h` away from it, the way vim numbers lines.
 ///
 /// Every jump point is numbered, subdivisions included - the number is the
 /// count that lands there, and a count is exactly as useful mid-clip as at a

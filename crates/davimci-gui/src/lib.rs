@@ -1,4 +1,4 @@
-//! The primary GUI frontend (plan.md Phase 9c).
+//! The primary GUI frontend.
 //!
 //! Everything here is a pure function of a [`davimci_app::ViewState`] plus
 //! window size: the layout, the draw list, the key translation, and the state

@@ -1,5 +1,5 @@
 //! Modal input routing: the `:` line, the media picker, and INSERT-mode
-//! subtitle editing (spec 11, 15.4).
+//! subtitle editing.
 //!
 //! A modal owns the keyboard while it is open, and the key grammar must not
 //! see the keystrokes it swallows. Deciding *which* modal owns a key is view
@@ -112,7 +112,7 @@ impl Modals {
                 self.open_picker_at(intent_of(*intent), &dir);
             }
             // `i` on a subtitle clip edits its text rather than opening a
-            // picker (spec 8, 15.4).
+            // picker.
             Response::EditText { clip, text } => {
                 self.subtitle = Some(SubtitleEdit::new(*clip, text.clone()));
             }
@@ -201,7 +201,7 @@ impl Modals {
         match event {
             SubtitleEvent::Editing => Vec::new(),
             // An edit that ends equal to the original commits nothing at all
-            // (spec 15.4), so the app is told it was abandoned.
+            //, so the app is told it was abandoned.
             SubtitleEvent::Unchanged => {
                 self.subtitle = None;
                 vec![Event::TextEditCancelled]

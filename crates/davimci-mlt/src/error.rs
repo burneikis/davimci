@@ -2,7 +2,7 @@
 //!
 //! These stay inside this crate: [`MltError`] converts into the
 //! backend-agnostic `BackendError` at the trait boundary, so no caller ever
-//! learns that MLT exists (spec 10.1).
+//! learns that MLT exists.
 
 use davimci_backend::BackendError;
 

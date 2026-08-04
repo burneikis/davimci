@@ -1,4 +1,4 @@
-//! Backend errors, classified per plan.md Phase 0.
+//! Backend errors, classified by recovery policy.
 
 use davimci_core::{Classify, ErrorClass};
 

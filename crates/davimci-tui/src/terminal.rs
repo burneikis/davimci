@@ -150,7 +150,7 @@ impl Terminal {
     ///
     /// Only ever called here, at startup: a query per frame would be both slow
     /// and, through a multiplexer, wrong, which is why
-    /// `:set previewprotocol` overrides all of this (spec 15.6).
+    /// `:set previewprotocol` overrides all of this.
     pub fn query_graphics(&mut self) -> Option<Protocol> {
         let mut out = io::stdout();
         // A 1x1 RGB image by direct transmission: kitty replies `_Gi=31;OK`,

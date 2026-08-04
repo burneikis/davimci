@@ -1,4 +1,4 @@
-//! Audio operations as command builders (plan.md Phase 9e, spec 6.1).
+//! Audio operations as command builders.
 //!
 //! Gain, fades, normalisation and ducking are clip properties, never
 //! destructive edits: everything here returns an [`EditCommand`] that the
@@ -43,7 +43,7 @@ pub fn clip_under_playhead(tl: &Timeline, what: &'static str) -> Result<(TrackId
 }
 
 /// What a clip-property command acts on: every clip in the selection, or the
-/// clip under the playhead when nothing is selected (spec 6.1).
+/// clip under the playhead when nothing is selected.
 ///
 /// A selection that covers no clip is an error rather than a silent no-op:
 /// the user asked for something the timeline cannot give.
@@ -89,7 +89,7 @@ pub fn describe(clips: &[(TrackId, Clip)]) -> String {
     }
 }
 
-/// `:gain <db>` - absolute gain, not a step (spec 6.1).
+/// `:gain <db>` - absolute gain, not a step.
 #[must_use]
 pub fn gain(track: TrackId, clip: &Clip, db: f32) -> EditCommand {
     EditCommand::SetProps {
@@ -149,7 +149,7 @@ pub fn normalize_gain(clip: &Clip, analysis: &Analysis, fps: Fps, target_db: f32
 
 /// The spans of a track that are *not* silent, in timeline frames.
 ///
-/// Ducking is defined against another track being audible (spec 6.1), so
+/// Ducking is defined against another track being audible, so
 /// this is the reference signal: source-time silence mapped back through each
 /// clip's own in-point, since analysis measures the source.
 #[must_use]

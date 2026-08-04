@@ -1,4 +1,4 @@
-//! One video path, two hosts (plan.md Phase 9b).
+//! One video path, two hosts.
 //!
 //! This crate is the anti-duplication keystone: the GUI and the TUI hand
 //! frames to the same [`Presenter`], which paces them against the backend's

@@ -78,7 +78,7 @@ pub fn media_fixture(spec: &[(u64, u64, u64, u64)]) -> Timeline {
 
 /// A video track plus `audio` audio tracks, each holding one media clip off
 /// the same container but a different stream - the shape a multi-stream file
-/// imports into (spec 7).
+/// imports into.
 #[must_use]
 pub fn multi_audio_fixture(audio: usize, channels: Option<u16>) -> Timeline {
     let mut tl = media_fixture(&[(0, 100, 0, 600)]);

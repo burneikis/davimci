@@ -7,7 +7,7 @@
 //!
 //! Everything here is `unsafe` and unowned. The refcount and lifetime rules
 //! live one layer up in `davimci-mlt`; nothing else in the workspace may depend
-//! on this crate (spec 10.1).
+//! on this crate.
 //!
 //! `mlt_position` is `int32_t` unless libmlt was built with
 //! `DOUBLE_MLT_POSITION`, which no distribution build enables. The build

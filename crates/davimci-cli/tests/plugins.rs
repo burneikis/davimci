@@ -1,7 +1,7 @@
-//! User Lua config, driven through the assembled editor (plan.md item 1).
+//! User Lua config, driven through the assembled editor.
 //!
 //! The point of these is the seam, not the runtime: `davimci-lua` is already
-//! tested against the spec's own snippets. What is asserted here is that a
+//! tested in `davimci-lua`. What is asserted here is that a
 //! config the user wrote reaches a running editor - its keymaps into the
 //! grammar, its presets into `:export`, its callbacks into the undo log.
 
@@ -130,7 +130,7 @@ fn a_mapped_key_edits_and_one_undo_takes_it_back() {
 #[test]
 fn a_lua_callback_edits_through_the_command_layer() {
     // A function right-hand side queues a request; the editor runs it through
-    // the same `Session::exec` a keystroke would (spec 9.9).
+    // the same `Session::exec` a keystroke would.
     let config = Scratch::with_config(
         "callback",
         &[(
@@ -292,7 +292,7 @@ fn an_event_handler_edit_runs_on_the_next_tick_as_one_command() {
 #[test]
 fn a_registered_motion_moves_the_playhead_and_never_writes() {
     // A motion is a pure query: it answers a frame, and the editor is what
-    // moves (spec 9.9). Analysis has not run, so a query over an audio track
+    // moves. Analysis has not run, so a query over an audio track
     // reports "not yet" rather than a wrong frame; this one asks about the
     // video track, where there is nothing to wait for.
     let config = Scratch::with_config(
@@ -323,7 +323,7 @@ fn a_registered_motion_moves_the_playhead_and_never_writes() {
     );
 }
 
-/// spec 9.4: a registered object is typeable, and the verb acts on the range
+/// A registered object is typeable, and the verb acts on the range
 /// the config returned - through the ordinary command layer, so it undoes.
 #[test]
 fn a_registered_text_object_is_typeable_and_its_range_is_what_gets_deleted() {
@@ -362,7 +362,7 @@ textobj.register("c", {
     assert_eq!(v1_end(&app), before);
 }
 
-/// spec 9.10: a transition type a config registered reaches the backend and
+/// A transition type a config registered reaches the backend and
 /// the projected graph names the service the config asked for.
 #[test]
 fn a_registered_transition_type_reaches_the_projected_graph() {

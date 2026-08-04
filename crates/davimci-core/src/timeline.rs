@@ -14,7 +14,7 @@ use crate::time::{Frame, TimelineProps};
 use crate::track::{Track, TrackKind};
 use crate::transition::Transition;
 
-/// A named point on the timeline (spec 3.2 jump-point source).
+/// A named point on the timeline.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Marker {
     pub frame: Frame,
@@ -43,7 +43,7 @@ impl Register {
     }
 }
 
-/// Playhead position: a frame plus the focused track (spec 5).
+/// Playhead position: a frame plus the focused track.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Playhead {
     pub frame: Frame,
@@ -117,7 +117,7 @@ impl Timeline {
     ///
     /// The command layer needs this so that redoing an import reproduces the
     /// same track ids, exactly as `split_at_with_id` does for clips
-    /// (plan.md Phase 2).
+    ///.
     pub fn add_track_with_id(
         &mut self,
         id: TrackId,
@@ -138,7 +138,7 @@ impl Timeline {
 
     /// Reserve `n` raw ids for a caller that must pin them before it can
     /// build its commands - an import names the track a clip goes on before
-    /// the `AddTrack` that creates it has run (plan.md Phase 5).
+    /// the `AddTrack` that creates it has run.
     ///
     /// Ids are monotonic and never reused, so ids reserved by a plan that is
     /// then rejected are simply skipped.
@@ -274,7 +274,7 @@ impl Timeline {
         Ok(())
     }
 
-    // -- grouping (spec 5) ----------------------------------------------
+    // -- grouping ----------------------------------------------
 
     /// Link clips into one group. Linkage is per-clip, not per-track.
     ///
@@ -309,7 +309,7 @@ impl Timeline {
         Ok(group)
     }
 
-    /// Remove one clip from its group (spec 5: `:unlink`).
+    /// Remove one clip from its group.
     pub fn unlink(&mut self, clip: ClipId) -> Result<(), CoreError> {
         let (track, _) = self
             .find_clip(clip)
@@ -352,7 +352,7 @@ impl Timeline {
         Ok(())
     }
 
-    /// Replace a clip's non-destructive properties (spec 6.1, 8).
+    /// Replace a clip's non-destructive properties.
     ///
     /// Validate-then-mutate: nonsense fades or transforms are rejected before
     /// anything is written.
@@ -394,7 +394,7 @@ impl Timeline {
         Ok(())
     }
 
-    /// Set a subtitle clip's text, returning what it said before (spec 8).
+    /// Set a subtitle clip's text, returning what it said before.
     ///
     /// Only a clip that already carries text: a media clip has no text
     /// payload, and inventing one would put a subtitle on a video.
@@ -424,7 +424,7 @@ impl Timeline {
         Ok(previous)
     }
 
-    /// Set a track's mute flag (spec 6.1, `<Space>m`).
+    /// Set a track's mute flag.
     ///
     /// Track state, not clip state: muting changes what the backend renders
     /// and nothing about the media or the clips.
@@ -436,7 +436,7 @@ impl Timeline {
         Ok(())
     }
 
-    /// Set a track's solo flag (spec 6.1, `<Space>s`).
+    /// Set a track's solo flag.
     ///
     /// Solo is exclusive by *effect*, not by state: any soloed track silences
     /// every non-soloed one, which the backend resolves at projection time.
@@ -449,7 +449,7 @@ impl Timeline {
         Ok(())
     }
 
-    // -- transitions (spec 6.2) -----------------------------------------
+    // -- transitions -----------------------------------------
 
     /// Attach a transition to the cut at `clip`'s start, or remove one.
     ///
@@ -481,7 +481,7 @@ impl Timeline {
 
     /// The cut nearest `frame` on `track`, as `(incoming clip, cut frame)`.
     ///
-    /// This is what `gx` and `dax` act on (spec 6.2).
+    /// This is what `gx` and `dax` act on.
     #[must_use]
     pub fn nearest_cut(&self, track: TrackId, frame: Frame) -> Option<(ClipId, Frame)> {
         let t = self.track(track)?;
@@ -523,7 +523,7 @@ impl Timeline {
         Ok(())
     }
 
-    /// Point a clip's media at a different file (`:relink`, spec 12).
+    /// Point a clip's media at a different file (`:relink`).
     ///
     /// The offline flag is set explicitly by the caller rather than inferred
     /// here: `davimci-core` does no I/O, so it cannot know whether the new
@@ -577,7 +577,7 @@ impl Timeline {
 
     // -- invariants ------------------------------------------------------
 
-    /// Full structural check (plan.md Phase 1 invariant list).
+    /// Full structural check.
     pub fn check_invariants(&self) -> Result<(), CoreError> {
         for t in &self.tracks {
             t.check_invariants()?;
@@ -638,7 +638,7 @@ impl Timeline {
     }
 
     /// Panicking form, for use at the end of every mutation in tests and
-    /// debug builds. The only sanctioned panic path (plan.md Phase 0).
+    /// debug builds. The only sanctioned panic path.
     #[allow(clippy::panic)]
     pub fn assert_invariants(&self) {
         if let Err(e) = self.check_invariants() {
@@ -649,7 +649,7 @@ impl Timeline {
     /// Drop transitions a mutation has invalidated, then check invariants.
     ///
     /// Every mutating primitive ends here. A transition lives on a cut, and
-    /// an edit can take that cut away (spec 6.2, plan.md Phase 9f): the
+    /// an edit can take that cut away: the
     /// transition goes with it rather than being left pointing at nothing.
     pub(crate) fn settle(&mut self) {
         for t in &mut self.tracks {
@@ -906,7 +906,7 @@ mod tests {
         assert_ne!(tl, before);
     }
 
-    /// Spec 6.2: the overlap is built from handle frames, so a cut between
+    /// The overlap is built from handle frames, so a cut between
     /// two clips that have none is refused outright rather than shortened.
     #[test]
     fn a_transition_needs_handles_on_both_sides() {
@@ -956,7 +956,7 @@ mod tests {
         );
     }
 
-    /// Regression (plan.md Phase 9f): rippling away a neighbour used to leave
+    /// Regression: rippling away a neighbour used to leave
     /// a transition attached to a cut that no longer existed.
     #[test]
     fn removing_a_neighbour_takes_its_transition_with_it() {
@@ -1017,7 +1017,7 @@ mod tests {
         );
     }
 
-    /// Spec 4.1: `ac` is the clip plus its adjoining transitions, and equals
+    /// `ac` is the clip plus its adjoining transitions, and equals
     /// `ic` until one is attached.
     #[test]
     fn ac_widens_to_cover_adjoining_transitions() {

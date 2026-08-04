@@ -101,7 +101,7 @@ pub enum Height {
 }
 
 /// Percentage of the screen the preview band may never exceed, so the
-/// timeline always keeps rows of its own (spec 12.1).
+/// timeline always keeps rows of its own.
 pub const MAX_SCREEN_PERCENT: u16 = 75;
 
 impl Height {

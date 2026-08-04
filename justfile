@@ -22,7 +22,7 @@ test-slow: fixtures
 # Everything, including sanitizers.
 test-all: test test-slow sanitize
 
-# Leak/UB detection, aimed at the MLT refcount wrapper (plan.md Phase 6).
+# Leak/UB detection, aimed at the MLT refcount wrapper.
 # Suppressions filter MLT's own one-time module-init state, not davimci's -
 # see crates/davimci-mlt/lsan-suppressions.txt for what and why.
 sanitize:
@@ -58,7 +58,7 @@ fix:
 run *ARGS:
     cargo run -p davimci-cli -- {{ARGS}}
 
-# Optional terminal frontend (plan.md Phase 9d).
+# Optional terminal frontend.
 run-tui *ARGS:
     cargo run -p davimci-cli --features tui -- {{ARGS}}
 

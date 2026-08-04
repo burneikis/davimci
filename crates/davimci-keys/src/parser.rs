@@ -1,4 +1,4 @@
-//! The input grammar (spec 3.2.1): `[count] [register] operator [count]
+//! The input grammar: `[count] [register] operator [count]
 //! motion|textobject`, plus standalone commands, `g`-prefixed sequences, and
 //! `<Space>` leader sequences.
 //!
@@ -6,7 +6,7 @@
 //! It never touches a [`davimci_core::Timeline`] - that is
 //! [`crate::engine::Engine`]'s job, once a [`Action`] exists to act on. This
 //! is what makes `"3dw"`-style golden tests possible without a fixture
-//! timeline (plan.md Phase 4 testing).
+//! timeline.
 
 use crate::action::{Action, ArgKind, LeafAction, Operator, Target};
 use crate::key::Key;
@@ -74,7 +74,7 @@ enum St {
 
 /// The key-sequence parser. Mode-aware only for the one place the grammar
 /// genuinely branches on it: an operator in a `VISUAL*` mode applies to the
-/// live selection immediately rather than waiting for a motion (spec 6).
+/// live selection immediately rather than waiting for a motion.
 #[derive(Debug, Clone)]
 pub struct Parser {
     state: St,
@@ -107,8 +107,7 @@ impl Parser {
     }
 
     /// Resolve whatever `PendingWithFallback` is currently buffered, as a
-    /// caller does on an ambiguity timeout (spec 3.2.1's "pending-input
-    /// state with timeout for ambiguous prefixes").
+    /// caller does on an ambiguity timeout for an ambiguous prefix.
     pub fn timeout(&mut self) -> Step {
         match std::mem::replace(&mut self.state, St::Idle) {
             St::Buffering {
@@ -171,7 +170,7 @@ impl Parser {
         }
     }
 
-    /// The object typed after `i`/`a` while a selection is live (spec 6).
+    /// The object typed after `i`/`a` while a selection is live.
     /// Only the track objects mean anything here: they narrow the scope of
     /// what is already selected rather than resolving a new range.
     fn visual_object(&mut self, key: Key, around: bool) -> Step {
@@ -193,7 +192,7 @@ impl Parser {
     ) -> Step {
         let (count1, register) = pre.map_or((None, None), |(c, r)| (c, Some(r)));
         // In a VISUAL mode `i`/`a` start a text object, not a media insert:
-        // typing `it` narrows the live selection to a track (spec 6).
+        // typing `it` narrows the live selection to a track.
         if mode.is_visual()
             && let Some(around) = match key {
                 Key::Char('i') => Some(false),
@@ -271,7 +270,7 @@ impl Parser {
                 Step::Pending
             }
             // In a VISUAL mode an operator always acts on the live
-            // selection at once (spec 6): it can never be the start of a
+            // selection at once: it can never be the start of a
             // longer literal sequence like `dax`, so the ambiguity the
             // default table has in NORMAL mode does not apply here.
             Lookup::PendingWithFallback(leaf @ LeafAction::Operator(_)) if mode.is_visual() => {
@@ -488,7 +487,7 @@ impl Parser {
         wide: bool,
     ) -> Step {
         self.reset();
-        // A config-registered name (spec 9.4) is looked up first, so config
+        // A config-registered name is looked up first, so config
         // wins over defaults here exactly as it does for keymaps.
         if let Key::Char(c) = key
             && keymap.has_object(c)
@@ -520,7 +519,7 @@ impl Parser {
     }
 }
 
-/// Largest accepted count (spec 3.1). Vim clamps rather than rejecting a
+/// Largest accepted count. Vim clamps rather than rejecting a
 /// long digit run, and so do we: no count a user can type may overflow.
 pub const MAX_COUNT: u32 = 1_000_000;
 

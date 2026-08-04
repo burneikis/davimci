@@ -1,4 +1,4 @@
-//! Motion errors (plan.md Phase 0 error classes).
+//! Motion errors.
 //!
 //! Every failure here is a *user* error: a motion that cannot land anywhere
 //! is rejected with a status-line sentence and mutates nothing.

@@ -1,4 +1,4 @@
-//! The draw list a GUI shell rasterises (plan.md Phase 9c).
+//! The draw list a GUI shell rasterises.
 //!
 //! Painting is split from windowing on purpose: turning a [`ViewState`] into
 //! rectangles is deterministic, testable with no window and no GPU, and is
@@ -40,7 +40,7 @@ pub enum Fill {
     ClipOffline,
     ClipLinked,
     Selection,
-    /// One column of an audio lane's envelope (spec 6.1).
+    /// One column of an audio lane's envelope.
     Waveform,
     Playhead,
     TickMajor,
@@ -67,7 +67,7 @@ pub enum TextRole {
     Completion,
     Message(Severity),
     Timecode,
-    /// A jump point's distance from the playhead, on the ruler (spec 11).
+    /// A jump point's distance from the playhead, on the ruler.
     RulerNumber,
     /// The picker's title, e.g. "insert media".
     ModalTitle,
@@ -254,7 +254,7 @@ pub struct VideoQuad {
 }
 
 /// A timecode string is carried, never rasterised here: the shell draws it
-/// with its own font (plan.md Phase 9b's rule about text stacks).
+/// with its own font.
 pub type TimecodeText = &'static str;
 
 /// Debug helper: a one-line summary of a draw list, used by the layout tests

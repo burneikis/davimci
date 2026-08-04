@@ -1,4 +1,4 @@
-//! Export against real media, through real MLT (plan.md Phase 8b).
+//! Export against real media, through real MLT.
 //!
 //! This is the test that says M3's "export a multi-audio MKV" is true rather
 //! than plausible: it renders a generated fixture and asserts on the file
@@ -199,7 +199,7 @@ fn a_preset_decides_the_container_and_codec_of_the_file() {
             "csv=p=0",
         ],
     );
-    // The preset said `h264`; the file must actually be h264 (spec 10.3).
+    // The preset said `h264`; the file must actually be h264.
     assert_eq!(codec, "h264", "the preset's codec did not reach the file");
     let _ = std::fs::remove_file(&out);
 }
@@ -260,7 +260,7 @@ fn cancelling_a_real_export_stops_it_and_keeps_the_partial_file() {
     let _ = std::fs::remove_file(&out);
 }
 
-/// Each subtitle mode produces the file it promises (spec 8).
+/// Each subtitle mode produces the file it promises.
 #[test]
 fn subtitle_modes_burn_write_or_mux_and_are_told_apart_by_ffprobe() {
     use davimci_backend::{AudioCodec, Container, Preset, SubtitleMode, VideoCodec};

@@ -1,4 +1,4 @@
-//! Property tests for the timeline model (plan.md Phase 1).
+//! Property tests for the timeline model.
 //!
 //! The contract under test: whatever sequence of primitives runs, the
 //! invariants hold, durations account exactly, and any rejected operation

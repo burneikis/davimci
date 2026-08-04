@@ -1,4 +1,4 @@
-//! The Lua runtime, wired to the editor (spec 9).
+//! The Lua runtime, wired to the editor.
 //!
 //! `davimci-lua` deliberately knows nothing about backends, files or
 //! frontends: it registers what a config asked for and queues requests. This
@@ -77,7 +77,7 @@ impl Plugins {
     pub fn keymap(&self) -> Keymap {
         let mut keymap = Keymap::new().with_overrides(self.runtime.keymap_overrides());
         // A registered object has to be typeable, or `dic` for a config's
-        // `c` would be an unbound sequence (spec 9.4).
+        // `c` would be an unbound sequence.
         for name in self.runtime.object_names() {
             keymap.register_object(&name);
         }
@@ -100,7 +100,7 @@ impl Plugins {
     }
 
     /// Every transition type the config registered, in backend terms
-    /// (spec 9.10).
+    ///.
     #[must_use]
     pub fn transitions(&self) -> Vec<davimci_backend::TransitionDef> {
         self.runtime
@@ -114,7 +114,7 @@ impl Plugins {
             .collect()
     }
 
-    /// Resolve a registered text object against one clip (spec 9.4).
+    /// Resolve a registered text object against one clip.
     pub fn run_object(
         &self,
         name: &str,
@@ -127,7 +127,7 @@ impl Plugins {
     /// Every Lua-defined preset, translated for the export registry. A
     /// preset that cannot be translated comes back as a notice instead, so
     /// the user hears about it at load time rather than after a long render
-    /// (spec 9.5).
+    ///.
     #[must_use]
     pub fn presets(&self) -> (Vec<Preset>, Vec<Message>) {
         let mut presets = Vec::new();
@@ -153,12 +153,12 @@ impl Plugins {
         (self.runtime.take_requests(), self.drain_notices())
     }
 
-    /// Fire an editor event at its handlers (spec 9.8).
+    /// Fire an editor event at its handlers.
     pub fn dispatch(&mut self, event: &Event) -> Dispatch {
         self.runtime.dispatch(event)
     }
 
-    /// Resolve a registered motion against a snapshot (spec 9.3).
+    /// Resolve a registered motion against a snapshot.
     pub fn run_motion(
         &mut self,
         name: &str,
@@ -223,13 +223,13 @@ fn convert_preset(p: &davimci_lua::ExportPreset) -> Result<Preset, LuaError> {
         davimci_lua::SubtitleSelection::Embedded => SubtitleMode::Embedded,
         davimci_lua::SubtitleSelection::None => SubtitleMode::None,
         // Named subtitle tracks are a selection, not a mode; burning them is
-        // what naming one has always meant in a preset (spec 9.5).
+        // what naming one has always meant in a preset.
         davimci_lua::SubtitleSelection::Named(_) => SubtitleMode::Burned,
     };
     Ok(preset)
 }
 
-/// Asks on the terminal, and refuses when there is nobody to ask (spec 9.7).
+/// Asks on the terminal, and refuses when there is nobody to ask.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct AskOnTerminal;
 

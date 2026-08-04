@@ -1,4 +1,4 @@
-//! Motions, jump points, and text objects (plan.md Phase 3).
+//! Motions, jump points, and text objects.
 //!
 //! Everything here is a *query*: a motion or object reads the timeline and
 //! reports where the playhead should go or which range and tracks a verb

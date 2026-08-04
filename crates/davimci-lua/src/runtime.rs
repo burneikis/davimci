@@ -30,7 +30,7 @@ pub enum Sandbox {
     Restricted,
 }
 
-/// A clip handed to a user text object (spec 9.4).
+/// A clip handed to a user text object.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClipInfo {
     pub start: u64,
@@ -210,7 +210,7 @@ impl Runtime {
         self.state.borrow().motions.keys().cloned().collect()
     }
 
-    /// Every transition type user config registered (spec 9.10).
+    /// Every transition type user config registered.
     #[must_use]
     pub fn transitions(&self) -> Vec<crate::registry::TransitionDef> {
         self.state.borrow().transitions.values().cloned().collect()
@@ -253,7 +253,7 @@ impl Runtime {
         }
     }
 
-    /// Fire an event at every enabled handler bound to it (spec 9.8).
+    /// Fire an event at every enabled handler bound to it.
     ///
     /// A handler refuses a cancellable event either by returning `false`
     /// (optionally with a message) or by raising an error. Raising also
@@ -327,7 +327,7 @@ impl Runtime {
         self.disabled.borrow_mut().insert(id);
     }
 
-    /// Run a registered motion (spec 9.3) against a snapshot.
+    /// Run a registered motion against a snapshot.
     ///
     /// The snapshot is the whole contract: a motion sees frames and samples,
     /// never a live timeline, so it cannot mutate anything and needs no
@@ -375,7 +375,7 @@ impl Runtime {
         }
     }
 
-    /// Resolve a user text object (spec 9.4) to a frame range.
+    /// Resolve a user text object to a frame range.
     pub fn run_object(
         &self,
         name: &str,

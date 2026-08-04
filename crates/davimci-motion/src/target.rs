@@ -38,7 +38,7 @@ impl TimeRange {
     }
 }
 
-/// Which tracks an operation touches (spec 4.1).
+/// Which tracks an operation touches.
 ///
 /// Track objects produce this: `it` yields the focused track alone, `at`
 /// yields the focused track plus every track its link group reaches.

@@ -1,5 +1,4 @@
-//! Key sequence parser and mode state machine (plan.md Phase 4, spec 3,
-//! spec 4, 6, 11).
+//! Key sequence parser and mode state machine.
 //!
 //! Three layers, kept deliberately separate:
 //!
@@ -12,7 +11,7 @@
 //! - [`engine`] - gives the parsed [`action::Action`] meaning against a live
 //!   [`davimci_cmd::Session`], using [`davimci_motion`] to resolve targets and
 //!   [`davimci_cmd`] to apply them. Transport is dispatched separately from
-//!   the undo log, per spec 3.2.1.
+//!   the undo log.
 //!
 //! Two known gaps: `<`/`>` jump-point edge trims parse but have no command
 //! yet, and typing `it`/`at` while a visual selection is live does not narrow

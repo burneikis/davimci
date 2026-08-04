@@ -1,4 +1,4 @@
-//! Property tests for the command layer (plan.md Phase 2).
+//! Property tests for the command layer.
 //!
 //! The contract under test: applying then inverting a random command sequence
 //! restores byte-identical serialized state, rejected commands never enter the

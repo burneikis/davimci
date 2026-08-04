@@ -1,4 +1,4 @@
-//! Import + analysis, wired together (spec 10.2, plan.md Phase 5).
+//! Import + analysis, wired together.
 //!
 //! The order matters and is the whole point of the phase: probe, conform,
 //! import, then *return*. Analysis and proxy generation are queued behind the
@@ -33,7 +33,7 @@ pub struct AnalysisReady {
     pub analysis: Analysis,
 }
 
-/// Analyse one stream, using the cache when it is valid (spec 10.2).
+/// Analyse one stream, using the cache when it is valid.
 ///
 /// The cache entry belongs to a stream, not a file: several streams of one
 /// container hash alike, so a file-wide key would hand every audio track the
@@ -225,7 +225,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// plan.md Phase 5: predicate motions stay `Pending` while a job is in
+    /// Predicate motions stay `Pending` while a job is in
     /// flight, and only become answerable when its result is published.
     #[test]
     fn a_queued_analysis_publishes_and_only_then_answers() {

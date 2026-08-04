@@ -1,4 +1,4 @@
-//! Viewport arithmetic (plan.md Phase 9a).
+//! Viewport arithmetic.
 //!
 //! The viewport is the only thing that converts between timeline frames and
 //! screen columns, and it is deliberately frontend-agnostic: a "column" is a
@@ -8,7 +8,7 @@
 
 use davimci_core::Frame;
 // Frames-per-column lives in `davimci-motion` beside `Zoom`, because the
-// jump-point set is defined in on-screen density (spec 3.2); the viewport
+// jump-point set is defined in on-screen density; the viewport
 // re-exports it as the frontends' entry point.
 use davimci_motion::Zoom;
 pub use davimci_motion::{BASE_FRAMES_PER_COLUMN, frames_per_column};
@@ -188,7 +188,7 @@ impl Viewport {
     }
 
     /// Zoom anchored on the playhead: the playhead keeps its column, so
-    /// zooming never moves the thing the user is looking at (plan.md 9a).
+    /// zooming never moves the thing the user is looking at.
     pub fn zoom_in(&mut self, playhead: Frame, duration: Frame) {
         self.set_zoom(self.zoom.zoom_in(), playhead, duration);
     }

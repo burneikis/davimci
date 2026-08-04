@@ -1,4 +1,4 @@
-//! Text objects (spec 4.1).
+//! Text objects.
 //!
 //! An object resolves to a range *and* a track scope, and the scope is the
 //! whole point: it is the object, not the verb, that decides whether an edit
@@ -7,7 +7,7 @@
 //! - `ic` inner clip - the clip's own content, no transition, focused track.
 //! - `ac` a clip - the clip plus its adjoining transitions. It equals `ic`
 //!   until a transition is attached to one of the clip's cuts, and widens to
-//!   cover the overlap once one is (spec 6.2).
+//!   cover the overlap once one is.
 //! - `it` inner track - the clip's extent, focused track only, link groups
 //!   deliberately ignored.
 //! - `at` a track group - the clip's extent across every track its link
@@ -29,7 +29,7 @@ pub enum TextObject {
     ATrack,
     /// Carries the visual selection; `None` outside VISUAL mode.
     InnerSegment(Option<TimeRange>),
-    /// A user object registered from Lua (spec 9.4), typed as `i<name>` or
+    /// A user object registered from Lua, typed as `i<name>` or
     /// `a<name>`. The grammar only carries the name: resolving it needs the
     /// Lua runtime, which lives above this crate, so the host answers it.
     Named {

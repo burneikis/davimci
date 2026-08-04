@@ -1,4 +1,4 @@
-//! Predicate motions never scan (spec 14).
+//! Predicate motions never scan.
 //!
 //! The claim is structural, so the test is a ratio rather than a budget:
 //! sixty times the analysis must not cost anything like sixty times the

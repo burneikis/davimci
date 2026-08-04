@@ -1,4 +1,4 @@
-//! Key translation (plan.md Phase 9c): window events in, `davimci-keys`
+//! Key translation: window events in, `davimci-keys`
 //! tokens out, and nothing else.
 //!
 //! The raw key model here is deliberately not `winit`'s. It is the small

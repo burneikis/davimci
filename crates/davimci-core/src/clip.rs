@@ -1,9 +1,9 @@
-//! Clips and their non-destructive properties (spec 6.1, 8).
+//! Clips and their non-destructive properties.
 //!
 //! A clip is a window onto a conformed source: a timeline position, a
 //! duration, and an in-point into the source. Gain, fades, and transform are
 //! *properties* - they are applied as render-time filters and never mutate
-//! media (spec 6.1).
+//! media.
 
 use serde::{Deserialize, Serialize};
 
@@ -20,13 +20,13 @@ pub struct MediaRef {
     pub path: String,
     /// The source's native rate, kept for re-conform and for export relink.
     pub source_fps: Fps,
-    /// Source length in timeline frames after conform (spec 7.1).
+    /// Source length in timeline frames after conform.
     pub length: Frame,
     /// Phase 0 offline-media policy: still editable, blocks export.
     pub offline: bool,
     /// Which stream of the container this clip plays, as the demuxer numbers
     /// them. `None` means "the file's default", which is all a single-stream
-    /// file ever needs. spec 7 puts every stream on its own track, so a
+    /// file ever needs. Import puts every stream on its own track, so a
     /// track that does not name its stream would silently play stream zero.
     #[serde(default)]
     pub stream: Option<u32>,
@@ -59,7 +59,7 @@ impl MediaRef {
     }
 }
 
-/// Position/scale/opacity for video and overlay clips (spec 8).
+/// Position/scale/opacity for video and overlay clips.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Transform {
     pub x: f32,
@@ -107,7 +107,7 @@ pub struct Clip {
     pub label: String,
     /// `None` for generated clips (text/subtitle entries, colour cards).
     pub media: Option<MediaRef>,
-    /// Payload for `text` track clips (spec 8).
+    /// Payload for `text` track clips.
     pub text: Option<String>,
     /// Position on the timeline, in timeline frames.
     pub start: Frame,
@@ -115,10 +115,10 @@ pub struct Clip {
     pub duration: Frame,
     /// In-point into the conformed source, in timeline frames.
     pub source_in: Frame,
-    /// Per-clip linkage group (spec 5). `None` means unlinked.
+    /// Per-clip linkage group. `None` means unlinked.
     pub group: Option<GroupId>,
     pub props: ClipProps,
-    /// Transition on the cut at this clip's start (spec 6.2). It belongs to
+    /// Transition on the cut at this clip's start. It belongs to
     /// the incoming clip so that deleting that clip deletes the transition
     /// with it, rather than leaving one attached to a cut that is gone.
     #[serde(default)]

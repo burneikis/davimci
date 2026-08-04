@@ -1,4 +1,4 @@
-//! Soak fuzz: random key sequences against a fixture project (plan.md 2).
+//! Soak fuzz: random key sequences against a fixture project.
 //!
 //! The properties are the three that must hold no matter what is typed: the
 //! app never panics, the timeline's invariants never break, and undoing every

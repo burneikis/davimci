@@ -1,4 +1,4 @@
-//! The v1 event list (spec 9.8) and what dispatching one produces.
+//! The v1 event list and what dispatching one produces.
 
 use mlua::{Lua, Table};
 
@@ -37,7 +37,7 @@ impl Event {
     }
 
     /// Whether a handler may abort what is about to happen. Only
-    /// `BeforeExport` is cancellable in v1 (plan.md Phase 7, Phase 8b).
+    /// `BeforeExport` is cancellable in v1.
     #[must_use]
     pub fn is_cancellable(&self) -> bool {
         matches!(self, Self::BeforeExport { .. })

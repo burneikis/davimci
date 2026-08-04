@@ -1,4 +1,4 @@
-//! Background job progress shown in the status line (plan.md Phase 9a).
+//! Background job progress shown in the status line.
 //!
 //! The app does not run jobs; analysis (Phase 5) and export (Phase 8b) do.
 //! This is the view of them, so every frontend reports progress the same way.

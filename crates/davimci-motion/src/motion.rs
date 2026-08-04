@@ -1,4 +1,4 @@
-//! Motions (spec 3).
+//! Motions.
 //!
 //! A motion answers "where does the playhead go", and nothing else: it never
 //! mutates, so `d` + motion can resolve the target first and only then build
@@ -27,7 +27,7 @@ pub struct MotionCtx<'a> {
     /// Where the motion starts from, when that is not the playhead. In a
     /// `VISUAL*` mode the moving end is the selection's active end, so a
     /// motion resolved from the playhead would snap the selection back to
-    /// where it was anchored instead of extending it (spec 6).
+    /// where it was anchored instead of extending it.
     pub origin: Option<Position>,
 }
 
@@ -99,12 +99,12 @@ pub trait Motion {
     fn resolve(&self, ctx: &MotionCtx<'_>, count: u32) -> Result<Resolved, MotionError>;
 }
 
-/// The built-in motion set (spec 3.1, 3.3, 3.4).
+/// The built-in motion set.
 #[derive(Debug, Clone, PartialEq)]
 pub enum BuiltinMotion {
     /// Arrow keys: exactly one frame, whatever the zoom.
     Frame(Direction),
-    /// `h` / `l`: N jump points (spec 3.2).
+    /// `h` / `l`: N jump points.
     JumpPoint(Direction),
     /// `j` / `k`: move track focus, clamped at the ends of the stack.
     TrackStep(Direction),

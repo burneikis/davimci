@@ -1,4 +1,4 @@
-//! Spec 14's editing targets, measured (plan.md 2).
+//! Editing latency targets, measured.
 //!
 //! The claim under test is "instant on a few hundred clips": a ripple delete,
 //! an undo of a long log, and a project load all have to stay well inside a

@@ -1,11 +1,11 @@
 //! The keymap table: literal key sequences to [`LeafAction`]s, with user
-//! overrides resolved over the defaults (plan.md Phase 4).
+//! overrides resolved over the defaults.
 //!
 //! Counts, registers, operator targets, and text objects are *not* entries
 //! here - they compose, so [`crate::parser::Parser`] handles them. What
 //! lives in the table is everything that is a fixed sequence: bare motions,
 //! operator triggers, and standalone commands, including the ambiguous
-//! `g`-prefixed and `<Space>`-leader families (spec 3.2.1, 11).
+//! `g`-prefixed and `<Space>`-leader families.
 
 use std::collections::HashMap;
 
@@ -31,11 +31,11 @@ pub enum Lookup {
 }
 
 /// Key-sequence to [`LeafAction`] bindings, defaults with overrides layered
-/// on top (config over defaults, spec 9).
+/// on top (config over defaults).
 #[derive(Debug, Clone)]
 pub struct Keymap {
     bindings: HashMap<Vec<Key>, LeafAction>,
-    /// Names user config registered as text objects (spec 9.4). The grammar
+    /// Names user config registered as text objects. The grammar
     /// needs them to know that `dic` is a verb over an object rather than a
     /// mistyped sequence; resolving them is the host's job.
     objects: std::collections::BTreeSet<char>,
@@ -48,7 +48,7 @@ impl Default for Keymap {
 }
 
 impl Keymap {
-    /// The built-in bindings, spec 11.
+    /// The built-in bindings.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -74,7 +74,7 @@ impl Keymap {
         self.bindings.insert(keys, action);
     }
 
-    /// Make a config-registered text object typeable (spec 9.4). Only its
+    /// Make a config-registered text object typeable. Only its
     /// first character is a key, since an object is typed as `i<name>`.
     pub fn register_object(&mut self, name: &str) {
         if let Some(c) = name.chars().next() {
@@ -120,23 +120,23 @@ fn standalone(a: Action) -> LeafAction {
     LeafAction::Standalone(a)
 }
 
-/// The default keymap, spec 11 plus the tables in 3-6.1.
+/// The default keymap.
 #[must_use]
 pub fn default_bindings() -> Vec<(Vec<Key>, LeafAction)> {
     use Direction::{Backward, Forward};
     vec![
-        // -- frame-accurate movement (spec 3.1) --
+        // -- frame-accurate movement --
         (k("<Left>"), motion(BuiltinMotion::Frame(Backward))),
         (k("<Right>"), motion(BuiltinMotion::Frame(Forward))),
-        // -- jump points (spec 3.2) --
+        // -- jump points --
         (k("h"), motion(BuiltinMotion::JumpPoint(Backward))),
         (k("l"), motion(BuiltinMotion::JumpPoint(Forward))),
-        // -- track focus (spec 3.1) --
+        // -- track focus --
         (k("j"), motion(BuiltinMotion::TrackStep(Forward))),
         (k("k"), motion(BuiltinMotion::TrackStep(Backward))),
         (k("]t"), motion(BuiltinMotion::TrackCycle(Forward))),
         (k("[t"), motion(BuiltinMotion::TrackCycle(Backward))),
-        // -- clip/edit-point motions (spec 3.3) --
+        // -- clip/edit-point motions --
         (k("w"), motion(BuiltinMotion::ClipBoundary(Forward))),
         (k("b"), motion(BuiltinMotion::ClipBoundary(Backward))),
         (k("e"), motion(BuiltinMotion::ClipEnd)),
@@ -147,7 +147,7 @@ pub fn default_bindings() -> Vec<(Vec<Key>, LeafAction)> {
         (k("{"), motion(BuiltinMotion::Marker(Backward))),
         (k("}"), motion(BuiltinMotion::Marker(Forward))),
         (k("%"), motion(BuiltinMotion::MatchingEdit)),
-        // -- editing verbs (spec 4) --
+        // -- editing verbs --
         (k("s"), standalone(Action::SplitCurrent)),
         (k("gs"), standalone(Action::SplitAll)),
         (k("x"), standalone(Action::RippleDeleteClip)),
@@ -195,7 +195,7 @@ pub fn default_bindings() -> Vec<(Vec<Key>, LeafAction)> {
         (k("."), standalone(Action::Repeat)),
         (k("q"), LeafAction::NeedsArg(ArgKind::MacroStart)),
         (k("@"), LeafAction::NeedsArg(ArgKind::MacroReplay)),
-        // -- trim family (spec 4.0.1) --
+        // -- trim family --
         (k("t"), op(Operator::RippleTrim)),
         (k("gt"), op(Operator::Roll)),
         (k("T"), op(Operator::Slip)),
@@ -214,7 +214,7 @@ pub fn default_bindings() -> Vec<(Vec<Key>, LeafAction)> {
                 count: 1,
             }),
         ),
-        // -- visual mode (spec 6) --
+        // -- visual mode --
         (k("v"), standalone(Action::EnterVisual(Mode::Visual))),
         (k("V"), standalone(Action::EnterVisual(Mode::VisualLine))),
         (
@@ -222,28 +222,28 @@ pub fn default_bindings() -> Vec<(Vec<Key>, LeafAction)> {
             standalone(Action::EnterVisual(Mode::VisualBlock)),
         ),
         (k("o"), standalone(Action::SwapVisualEnds)),
-        // -- marks (spec 3.3) --
+        // -- marks --
         (k("m"), LeafAction::NeedsArg(ArgKind::SetMark)),
         (k("`"), LeafAction::NeedsArg(ArgKind::JumpMark)),
-        // -- audio (spec 6.1) --
+        // -- audio --
         (k("f"), op(Operator::Fade)),
         (k("+"), standalone(Action::GainAdjust(1))),
         (k("-"), standalone(Action::GainAdjust(-1))),
         (k("<Space>m"), standalone(Action::ToggleMute)),
         (k("<Space>s"), standalone(Action::ToggleSolo)),
-        // -- transitions (spec 6.2) --
+        // -- transitions --
         (k("gx"), standalone(Action::CreateTransition)),
         (k("dax"), standalone(Action::DeleteTransition)),
-        // -- transport (spec 3.2.1) --
+        // -- transport --
         (k("<Space><Space>"), standalone(Action::PlayPause)),
         (k("H"), standalone(Action::Shuttle { forward: false })),
         (k("L"), standalone(Action::Shuttle { forward: true })),
         // No default stop binding: shuttling the opposite way decelerates
         // through zero, and `<Space><Space>` stops outright. `ShuttleStop`
-        // stays available for users who want a dedicated key (spec 3.2.1).
+        // stays available for users who want a dedicated key.
         (k("<Space>p"), standalone(Action::PreviewAndReturn)),
         (k("<Space>l"), standalone(Action::LoopSelection)),
-        // -- zoom (spec 11, 15.2) --
+        // -- zoom --
         (k("zi"), standalone(Action::Zoom(ZoomIntent::In))),
         (k("zo"), standalone(Action::Zoom(ZoomIntent::Out))),
         (k("z0"), standalone(Action::Zoom(ZoomIntent::Reset))),

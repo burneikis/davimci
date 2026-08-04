@@ -1,4 +1,4 @@
-//! Transitions: the overlap between two abutting clips (spec 6.2).
+//! Transitions: the overlap between two abutting clips.
 //!
 //! The timeline model has no overlapping clips - that invariant is what every
 //! motion, ripple, and projection rests on - so a transition is not a third
@@ -16,17 +16,17 @@ use serde::{Deserialize, Serialize};
 
 use crate::time::Frame;
 
-/// The transition `gx` creates when the user names nothing (spec 6.2).
+/// The transition `gx` creates when the user names nothing.
 pub const DEFAULT_TRANSITION: &str = "dissolve";
 
-/// The default transition length in frames (spec 6.2).
+/// The default transition length in frames.
 pub const DEFAULT_TRANSITION_FRAMES: u64 = 12;
 
 /// A transition attached to the head of a clip.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Transition {
     /// Registry name, e.g. `dissolve`. Types are extensible from Lua
-    /// (spec 6.2), so the model stores the name rather than an enum.
+    ///, so the model stores the name rather than an enum.
     pub kind: String,
     /// Length of the overlap in timeline frames. Always non-zero.
     pub duration: Frame,

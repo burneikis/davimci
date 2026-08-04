@@ -1,4 +1,4 @@
-//! Serializable edit commands (plan.md Phase 2, spec 10.4).
+//! Serializable edit commands.
 //!
 //! Every mutation of a [`Timeline`] outside `davimci-core`'s own tests goes
 //! through one of these. A command applies, and reports the command that
@@ -49,7 +49,7 @@ pub trait Command {
 /// Every edit davimci can perform.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum EditCommand {
-    /// Cut the clip under `frame` in two (spec 4, `s`).
+    /// Cut the clip under `frame` in two.
     Split {
         track: TrackId,
         frame: Frame,
@@ -58,33 +58,33 @@ pub enum EditCommand {
     },
     /// Merge the two halves of a split back together.
     Join { track: TrackId, frame: Frame },
-    /// Remove a range, leaving a gap (spec 4, `gd`).
+    /// Remove a range, leaving a gap.
     Lift {
         track: TrackId,
         start: Frame,
         end: Frame,
     },
-    /// Remove a range and close the gap (spec 4, `x`/`d`).
+    /// Remove a range and close the gap.
     RippleDelete {
         track: TrackId,
         start: Frame,
         end: Frame,
     },
-    /// Insert a clip, rippling later clips right (spec 4, `i`).
+    /// Insert a clip, rippling later clips right.
     Insert {
         track: TrackId,
         at: Frame,
         clip: Clip,
         new_id: Option<ClipId>,
     },
-    /// Place a clip over whatever is there (spec 4, `gp`).
+    /// Place a clip over whatever is there.
     Overwrite {
         track: TrackId,
         at: Frame,
         clip: Clip,
         new_id: Option<ClipId>,
     },
-    /// Paste register contents, minting fresh clips (spec 4, `p`).
+    /// Paste register contents, minting fresh clips.
     Paste {
         track: TrackId,
         at: Frame,
@@ -106,32 +106,32 @@ pub enum EditCommand {
         clip: ClipId,
         to: Frame,
     },
-    /// Ripple trim one edge (spec 4.0.1, `t`).
+    /// Ripple trim one edge.
     Trim {
         track: TrackId,
         clip: ClipId,
         edge: Edge,
         delta: i64,
     },
-    /// Roll a cut point (spec 4.0.1, `gt`).
+    /// Roll a cut point.
     Roll {
         track: TrackId,
         cut: Frame,
         delta: i64,
     },
-    /// Slip a clip's source window (spec 4.0.1, `T`).
+    /// Slip a clip's source window.
     Slip {
         track: TrackId,
         clip: ClipId,
         delta: i64,
     },
-    /// Slide a clip between its neighbours (spec 4.0.1, `gT`).
+    /// Slide a clip between its neighbours.
     Slide {
         track: TrackId,
         clip: ClipId,
         delta: i64,
     },
-    /// Link clips into one group (spec 5).
+    /// Link clips into one group.
     Link {
         clips: Vec<ClipId>,
         group: Option<GroupId>,
@@ -141,7 +141,7 @@ pub enum EditCommand {
         clip: ClipId,
         group: Option<GroupId>,
     },
-    /// Add a track (spec 7 import: one track per stream).
+    /// Add a track: import makes one per stream.
     AddTrack {
         kind: TrackKind,
         /// `None` takes the next name in the `V1`/`A2` sequence.
@@ -152,25 +152,25 @@ pub enum EditCommand {
     /// Remove an empty track.
     RemoveTrack { track: TrackId },
     /// Change the timeline's framerate/resolution, retiming every clip
-    /// (spec 7.1). One undoable command, however many clips it moves.
+    ///. One undoable command, however many clips it moves.
     Reconform { props: TimelineProps },
     /// Put back a geometry captured by a re-conform. This, not another
     /// `Reconform`, is a re-conform's inverse: rounding is not reversible,
     /// so undo replays the exact prior state instead of recomputing it.
     RestoreConform { state: Box<ConformState> },
-    /// Replace a clip's non-destructive properties (spec 6.1, 8).
+    /// Replace a clip's non-destructive properties.
     SetProps {
         track: TrackId,
         clip: ClipId,
         props: ClipProps,
     },
-    /// Edit a subtitle clip's text (spec 8, 15.4).
+    /// Edit a subtitle clip's text.
     SetClipText {
         track: TrackId,
         clip: ClipId,
         text: String,
     },
-    /// Mute/solo a track (`<Space>m`, `<Space>s`, spec 6.1).
+    /// Mute/solo a track (`<Space>m`, `<Space>s`).
     ///
     /// Track state rather than a clip edit, but still a command: it is
     /// undoable, repeatable and scriptable for exactly the same reason every
@@ -181,13 +181,13 @@ pub enum EditCommand {
         solo: bool,
     },
     /// Attach or remove the transition on the cut at a clip's start
-    /// (`gx`, `:transition`, `dax`, spec 6.2). `None` deletes.
+    /// (`gx`, `:transition`, `dax`). `None` deletes.
     SetTransition {
         track: TrackId,
         clip: ClipId,
         transition: Option<Transition>,
     },
-    /// Point a clip's media at another file (`:relink`, spec 12). The
+    /// Point a clip's media at another file (`:relink`). The
     /// `offline` flag is decided by the caller, which is the only layer that
     /// may touch the filesystem.
     Relink {
@@ -1230,7 +1230,7 @@ mod tests {
         );
     }
 
-    /// Spec 6.2: creating and deleting a transition is a command like any
+    /// Creating and deleting a transition is a command like any
     /// other, so `u` puts the cut back exactly as it was.
     #[test]
     fn transitions_round_trip_as_commands() {
@@ -1286,7 +1286,7 @@ mod tests {
 
     #[test]
     fn mute_and_solo_round_trip_as_commands() {
-        // spec 6.1: track state, but undoable like any other mutation.
+        // Track state, but undoable like any other mutation.
         let mut tl = fixture(&[("A1", &[(0, 10, "a")]), ("A2", &[(0, 10, "b")])]);
         let a1 = track_id(&tl, "A1");
         roundtrip(
@@ -1631,7 +1631,7 @@ mod tests {
 
     #[test]
     fn reconform_is_one_undoable_command_that_restores_exactly() {
-        // plan.md Phase 5: "change timeline.fps with clips present, assert it
+        // Change timeline.fps with clips present, assert it
         // is a single undoable command that restores exactly on undo".
         let mut tl = fixture(&[
             ("V1", &[(0, 100, "a"), (100, 3, "b")]),

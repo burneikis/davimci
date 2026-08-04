@@ -1,4 +1,4 @@
-//! Errors from the Lua layer (plan.md Phase 0, Phase 7).
+//! Errors from the Lua layer.
 //!
 //! Everything here is either a *user* error (a config file says something
 //! impossible - an unknown export container, an unbindable command) or a

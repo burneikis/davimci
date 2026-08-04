@@ -1,5 +1,4 @@
-//! The grammar's output: what a fully-parsed key sequence means (spec 3,
-//! spec 4, 4.0.1, 6, 11).
+//! The grammar's output: what a fully-parsed key sequence means.
 //!
 //! [`Action`] is deliberately inert - it names an intent, nothing more, so
 //! [`crate::parser::Parser`] stays free of `Timeline`/`Session` access and
@@ -9,7 +8,7 @@
 use crate::mode::Mode;
 use davimci_motion::{BuiltinMotion, TextObject};
 
-/// A verb that takes a target (spec 4, 4.0.1, 6.1).
+/// A verb that takes a target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Operator {
     /// `d` / `dw` / `dd`: ripple delete.
@@ -55,13 +54,13 @@ pub enum Target {
     /// Applied while in a VISUAL mode: use the live selection.
     Visual,
     /// An already-resolved range on the focused track. The host builds this
-    /// after answering a config-registered text object (spec 9.4); nothing
+    /// after answering a config-registered text object; nothing
     /// in the grammar produces it.
     Range(davimci_motion::TimeRange),
 }
 
 impl Action {
-    /// Re-target a verb at a range the host resolved (spec 9.4). Anything
+    /// Re-target a verb at a range the host resolved. Anything
     /// else is returned unchanged.
     #[must_use]
     pub fn with_range(self, range: davimci_motion::TimeRange) -> Self {
@@ -91,7 +90,7 @@ pub enum ArgKind {
     MacroReplay,
 }
 
-/// A zoom step (spec 11, 15.2). Zoom is view state, not an edit, so this
+/// A zoom step. Zoom is view state, not an edit, so this
 /// never reaches the undo log; the engine hands it back to the host, which
 /// owns the viewport.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -104,7 +103,7 @@ pub enum ZoomIntent {
     Reset,
 }
 
-/// What an action does to a running preview (spec 3.2.1).
+/// What an action does to a running preview.
 ///
 /// Playback owns the playhead while it runs, so an action that reads or
 /// writes the playhead cannot share the clock with it: the pacer would
@@ -189,7 +188,7 @@ pub enum Action {
     /// Toggle a track in/out of a `VISUAL-BLOCK` selection.
     ToggleVisualTrack,
     /// `it` / `at` typed while a selection is live: narrow the selection to
-    /// the focused track, or to its link group (spec 6).
+    /// the focused track, or to its link group.
     NarrowSelection {
         group: bool,
     },
@@ -200,9 +199,9 @@ pub enum Action {
     },
     /// `+` / `-`: adjust gain in dB.
     GainAdjust(i32),
-    /// `<Space>m`: toggle mute on the current track (spec 6.1).
+    /// `<Space>m`: toggle mute on the current track.
     ToggleMute,
-    /// `<Space>s`: toggle solo on the current track (spec 6.1).
+    /// `<Space>s`: toggle solo on the current track.
     ToggleSolo,
     /// `gx`: create a transition at the nearest cut.
     CreateTransition,
@@ -220,10 +219,10 @@ pub enum Action {
     PreviewAndReturn,
     /// `<Space>l`.
     LoopSelection,
-    /// `zi` / `zo` / `z0`: change the zoom level (spec 11).
+    /// `zi` / `zo` / `z0`: change the zoom level.
     Zoom(ZoomIntent),
     /// A host-owned callback, bound by a Lua `map(mode, lhs, function)`
-    /// (spec 9.2). The id is opaque here on purpose: `davimci-keys` must not
+    ///. The id is opaque here on purpose: `davimci-keys` must not
     /// depend on `davimci-lua`, so the engine reports it back and the host
     /// invokes it.
     ///
@@ -233,7 +232,7 @@ pub enum Action {
         id: u32,
         interrupt: bool,
     },
-    /// Stop playback and commit the playhead (spec 3.2.1). Unbound by
+    /// Stop playback and commit the playhead. Unbound by
     /// default; exists for user binds and `editor.interrupt_transport`.
     InterruptTransport,
     /// `:`.
@@ -243,7 +242,7 @@ pub enum Action {
 }
 
 impl Action {
-    /// What this action does to a running preview (spec 3.2.1).
+    /// What this action does to a running preview.
     #[must_use]
     pub fn transport_policy(&self) -> TransportPolicy {
         use TransportPolicy::{Interrupt, Keep};

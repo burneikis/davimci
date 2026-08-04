@@ -1,4 +1,4 @@
-//! Spec 14's navigation targets, measured (plan.md 2).
+//! Navigation latency targets, measured.
 //!
 //! Jump-point computation runs on every zoom change, and a predicate motion
 //! runs on every `]p`; neither may scale with timeline length in a way the

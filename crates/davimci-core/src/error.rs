@@ -1,4 +1,4 @@
-//! Error model for davimci (plan.md Phase 0).
+//! Error model for davimci.
 //!
 //! Four error classes, each with a fixed recovery policy. Every error must be
 //! classifiable, and every error must carry text fit for the status line -
@@ -8,7 +8,7 @@ use std::fmt;
 
 /// How the application must respond to an error.
 ///
-/// This is the contract from plan.md Phase 0. Frontends switch on this to
+/// Frontends switch on this to
 /// decide between "show a message", "keep going degraded", and "save and die".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorClass {
@@ -149,7 +149,7 @@ impl Classify for CoreError {
 
 /// Assert a timeline invariant.
 ///
-/// The single sanctioned panic path in library code, per plan.md Phase 0 rule
+/// The single sanctioned panic path in library code (rule
 /// 2. Prefer returning [`CoreError::InvariantViolation`] where a caller can
 /// meaningfully handle it; use this only for conditions that indicate a bug.
 #[macro_export]

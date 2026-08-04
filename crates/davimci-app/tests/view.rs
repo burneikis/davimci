@@ -1,4 +1,4 @@
-//! Snapshot tests on the textual view dump (plan.md Phase 9a).
+//! Snapshot tests on the textual view dump.
 //!
 //! The dumps are literal rather than stored in a snapshot file, so a
 //! behavioural change to the view state shows up as a readable diff in the

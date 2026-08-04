@@ -1,4 +1,4 @@
-//! Frontend-agnostic view state and event loop (plan.md Phase 9a).
+//! Frontend-agnostic view state and event loop.
 //!
 //! Built before any frontend so no frontend can invent its own. The rule this
 //! crate exists to enforce: no frontend contains view logic. Zoom,

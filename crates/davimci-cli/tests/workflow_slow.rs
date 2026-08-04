@@ -1,4 +1,4 @@
-//! Spec 1's workflow, start to finish, through the real editor (plan.md 2).
+//! The whole editing workflow, start to finish, through the real editor.
 //!
 //! Import a multi-track MKV, cut sections out, quieten and trim an audio
 //! track, layer an overlay, add a subtitle, export. Every step goes through

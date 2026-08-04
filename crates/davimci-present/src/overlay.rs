@@ -1,4 +1,4 @@
-//! The overlay model (plan.md Phase 9b).
+//! The overlay model.
 //!
 //! The presenter describes overlays; it does not rasterise text. Text belongs
 //! to the host's own text stack (`egui` glyphs, terminal cells), and forcing a
@@ -93,7 +93,7 @@ fn inset(quad: Quad, percent: u32) -> Quad {
 }
 
 /// `HH:MM:SS:FF`, non-drop-frame: davimci's model is whole frames at one rate
-/// (spec 7.1), so there is no drop-frame case to represent.
+///, so there is no drop-frame case to represent.
 #[must_use]
 pub fn timecode(position: Frame, fps: Fps) -> String {
     let rate = fps.as_f64().round().max(1.0) as u64;

@@ -19,9 +19,6 @@
   undecorated, non-focusable `winit` window in `davimci-cli` showing the same
   texture the GUI uploads, off by default, terminal keeps keyboard focus, and
   closing it falls back to inline preview instead of ending the session
-- doc comments across the crates still cite `plan.md` phases and `spec.md`
-  section numbers, which no longer exist; rewrite them to state the reason
-  directly (~106 files)
 - ask for `.davimci.lua` trust in the window rather than on the terminal, once the app has a modal path
 - `:set proxy on|off` is not in the `:set` registry; proxies have no runtime
   switch yet

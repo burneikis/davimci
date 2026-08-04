@@ -1,4 +1,4 @@
-//! Scriptable headless frontend (plan.md Phase 9a, parity harness).
+//! Scriptable headless frontend.
 //!
 //! It is a [`Frontend`] like any other: it polls events, reports a size, and
 //! draws a [`ViewState`] - except that "draws" means appending the view's

@@ -1,4 +1,4 @@
-//! One editable timeline plus its history (plan.md Phase 2 exit criteria).
+//! One editable timeline plus its history.
 //!
 //! The timeline is not exposed mutably: every write goes through
 //! [`Session::exec`], so undo, `.`-repeat, macros, and the project format all
@@ -32,7 +32,7 @@ impl Session {
         }
     }
 
-    /// Reopen a session with the history it was saved with (spec 10.4).
+    /// Reopen a session with the history it was saved with.
     ///
     /// Undo does not stop at the save point: reopening a project and pressing
     /// `u` steps back through what was done before it was saved, the same way
@@ -69,7 +69,7 @@ impl Session {
     }
 
     /// Move the playhead / change track focus. Not a `Command`: motions are
-    /// navigation, not edits, and are never undoable (plan.md Phase 3/4).
+    /// navigation, not edits, and are never undoable.
     pub fn set_playhead(&mut self, frame: Frame, track: TrackId) -> Result<(), CmdError> {
         self.timeline.set_playhead_frame(frame);
         self.timeline.focus_track(track)?;
@@ -84,7 +84,7 @@ impl Session {
     }
 
     /// Put content in a named register. Like marks, registers are
-    /// bookkeeping rather than timeline content, and spec 12 makes them
+    /// bookkeeping rather than timeline content, and they are
     /// global across open timelines - so the workspace, not a command,
     /// decides what they hold.
     pub fn set_register(&mut self, name: char, register: Register) {
@@ -109,7 +109,7 @@ impl Session {
     }
 
     /// Run a command and record it. A rejected command mutates nothing and
-    /// never enters the log (plan.md Phase 0 rule 1).
+    /// never enters the log.
     pub fn exec(&mut self, command: &EditCommand) -> Result<String, CmdError> {
         let effect = command.apply(&mut self.timeline)?;
         let label = effect.applied.describe();
@@ -167,7 +167,7 @@ impl Session {
         self.history.undolist()
     }
 
-    /// Snapshot the current state, as `:w` does (spec 10.4).
+    /// Snapshot the current state, as `:w` does.
     pub fn mark_saved(&mut self) {
         self.history.snapshot_now(&self.timeline);
     }
@@ -306,7 +306,7 @@ mod tests {
         assert_eq!(s.timeline().dump(), "V1:[a 0-100][a 100-300]\nA1: -\n");
     }
 
-    /// plan.md Phase 2: a deliberately corrupt inverse must cost at most the
+    /// A deliberately corrupt inverse must cost at most the
     /// commands since the last snapshot, never the project.
     #[test]
     fn a_snapshot_bounds_the_damage_from_a_bad_inverse() {

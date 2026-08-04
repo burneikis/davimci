@@ -1,6 +1,6 @@
 //! The assembled editor: keys in, commands run, backend projected, frames
 //! presented - driven through the headless frontend so none of it needs a
-//! window (plan.md Phase 9a/9b wiring).
+//! window.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -357,7 +357,7 @@ fn render_with_an_unknown_preset_names_the_real_ones() {
     assert!(msg.text.contains("mkv"), "{msg:?}");
 }
 
-// the media picker (spec 3.2, `i`/`a`/`r`)
+// the media picker
 
 /// A prober that invents a 100-frame video file, so the picker path is
 /// testable with no ffprobe and no media on disk.
@@ -501,7 +501,7 @@ fn a_cancelled_picker_changes_nothing() {
     assert_eq!(app.session().timeline(), &before, "a stray file imported");
 }
 
-/// Spec 3.2.1: a motion typed during playback pauses first, then lands, and
+/// A motion typed during playback pauses first, then lands, and
 /// the frame it lands on is the one shown. Regression: before the transport
 /// policy existed the motion applied and the next tick overwrote it, so `h`
 /// looked like it did nothing.
@@ -515,7 +515,7 @@ fn a_motion_during_playback_pauses_and_then_lands() {
     let during = app.session().timeline().playhead().frame;
     assert!(during > davimci_core::Frame::ZERO);
 
-    // `<Left>` is the fixed one-frame motion (spec 11); `h` is a jump point.
+    // `<Left>` is the fixed one-frame motion; `h` is a jump point.
     feed(&mut app, &mut editor, "<Left>");
     assert_eq!(editor.transport_state(), TransportState::Stopped);
     let landed = app.session().timeline().playhead().frame;
@@ -529,7 +529,7 @@ fn a_motion_during_playback_pauses_and_then_lands() {
 }
 
 /// Zoom is view state, so watching a playing timeline while zooming is
-/// allowed (spec 3.2.1).
+/// allowed.
 #[test]
 fn zooming_during_playback_keeps_playing() {
     let (mut app, mut editor) = editor();
@@ -540,7 +540,7 @@ fn zooming_during_playback_keeps_playing() {
 }
 
 /// An edit during playback stops the clock before the graph is re-projected
-/// under a live consumer (spec 3.2.1).
+/// under a live consumer.
 #[test]
 fn an_edit_during_playback_pauses_before_reprojecting() {
     let (mut app, mut editor) = editor();
@@ -558,7 +558,7 @@ fn an_edit_during_playback_pauses_before_reprojecting() {
 
 /// Thumbnails come from the host, one per tick, and only while the transport
 /// is stopped - the preview needs the decoder more than the timeline does
-/// (spec 15.2).
+///.
 #[test]
 fn a_tick_decodes_one_thumbnail_and_leaves_the_playhead_where_it_was() {
     let (mut app, mut editor) = editor();
@@ -587,7 +587,7 @@ fn a_tick_decodes_one_thumbnail_and_leaves_the_playhead_where_it_was() {
     );
 }
 
-// audio operations (spec 6.1, plan.md Phase 9e)
+// audio operations
 
 /// `:gain` sets an absolute level on the clip under the playhead, and it is
 /// an ordinary undoable edit.
@@ -609,7 +609,7 @@ fn gain_is_a_command_like_any_other() {
 }
 
 /// A `:` command typed in VISUAL acts on every clip in the selection, and the
-/// whole set is one undoable command (spec 6.1).
+/// whole set is one undoable command.
 #[test]
 fn gain_applies_to_the_whole_visual_selection_as_one_command() {
     let (mut app, mut editor) = editor();
@@ -711,7 +711,7 @@ fn ducking_without_analysis_leaves_the_timeline_alone() {
     assert_eq!(app.session().timeline(), &before);
 }
 
-// `<Space>l` (spec 3.2.1)
+// `<Space>l`
 
 #[test]
 fn looping_wraps_at_the_loop_end_instead_of_stopping() {

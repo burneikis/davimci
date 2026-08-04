@@ -1,4 +1,4 @@
-//! Transition types, mapped onto MLT services (spec 6.2).
+//! Transition types, mapped onto MLT services.
 //!
 //! The model stores a transition as a *name*, because types are extensible
 //! and `davimci-core` may not know what MLT is. This is the one place that
@@ -58,7 +58,7 @@ const VIDEO: &[Builtin] = &[
     ("iris", "luma", &[("resource", "%luma05.pgm")]),
 ];
 
-/// Types registered at runtime (spec 9.10), on top of the built-ins.
+/// Types registered at runtime, on top of the built-ins.
 ///
 /// Process-global because [`spec`] is a pure lookup called from the
 /// projection, which has no backend to ask; registering is the backend's job
@@ -148,7 +148,7 @@ mod tests {
         );
     }
 
-    /// A registered type (spec 9.10) is rendered by the service it named,
+    /// A registered type is rendered by the service it named,
     /// and shows up as a known type.
     #[test]
     fn a_registered_type_names_its_own_service() {

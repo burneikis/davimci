@@ -1,4 +1,4 @@
-//! `davimci.timeline.configure` (spec 9.6): the jump-point and frame-step
+//! `davimci.timeline.configure`: the jump-point and frame-step
 //! settings a config may change.
 //!
 //! The output is a [`JumpConfig`] - the same type `davimci-motion` already
@@ -14,7 +14,7 @@ use crate::error::LuaError;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TimelineConfig {
     pub jump: JumpConfig,
-    /// Keys bound to a one-frame step (spec 9.6 keeps these remappable but
+    /// Keys bound to a one-frame step (remappable but
     /// always frame-accurate).
     pub frame_step_keys: Vec<Vec<Key>>,
 }

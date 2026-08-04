@@ -1,4 +1,4 @@
-//! Status-line messages and notifications (plan.md Phase 9a).
+//! Status-line messages and notifications.
 //!
 //! Phase 0's rule that every error carries a complete user-facing sentence is
 //! enforced here by construction: a [`Message`] holds a `String` that came

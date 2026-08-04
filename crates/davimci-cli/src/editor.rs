@@ -1,9 +1,9 @@
 //! The glue: workspace + backend + presenter + transport behind one
-//! [`Host`] (plan.md Phase 9a/9b wiring).
+//! [`Host`].
 //!
 //! This is the only place that is allowed to know about all of them at once.
 //! It lives in the binary crate on purpose: no frontend may reference MLT
-//! (spec 10.1), so the thing that owns a `RenderBackend` *and* a frontend
+//!, so the thing that owns a `RenderBackend` *and* a frontend
 //! cannot be `davimci-gui`.
 //!
 //! Session ownership: `App` owns the live session, the workspace owns the
@@ -83,13 +83,13 @@ pub struct Editor {
     /// The preset and output of the running export, for `AfterExport`.
     last_export: Option<(String, String)>,
     /// Which clips existed at the last notification, so an edit can be
-    /// reported as `ClipInserted`/`ClipDeleted` (spec 9.8) without every
+    /// reported as `ClipInserted`/`ClipDeleted` without every
     /// command having to describe itself twice.
     known_clips: std::collections::BTreeSet<(TrackId, ClipId)>,
-    /// `:set preview off` (spec 15.5): no frame is pulled or composed, which
+    /// `:set preview off`: no frame is pulled or composed, which
     /// is what makes a no-display session possible.
     preview: bool,
-    /// `:set previewheight` and `:set previewprotocol` (spec 15.6). Held here
+    /// `:set previewheight` and `:set previewprotocol`. Held here
     /// with the other view settings and read by the terminal session; inert
     /// for the window, which has a texture instead of a band.
     preview_height: PreviewHeight,
@@ -147,7 +147,7 @@ impl Editor {
     ///
     /// Presets are installed rather than consulted lazily so `:presets` and
     /// Tab completion list what the config defined, and a preset the backend
-    /// cannot build is reported now rather than at render time (spec 9.5).
+    /// cannot build is reported now rather than at render time.
     #[must_use]
     pub fn with_plugins(mut self, mut plugins: Plugins) -> Self {
         let (presets, problems) = plugins.presets();
@@ -155,7 +155,7 @@ impl Editor {
             self.exporter.presets_mut().define(preset);
         }
         // Transition types go to the backend, which is the only layer that
-        // knows what a service is (spec 9.10). A backend without a registry
+        // knows what a service is. A backend without a registry
         // says so once, and those types keep degrading to a dissolve.
         for def in plugins.transitions() {
             let name = def.name.clone();
@@ -241,7 +241,7 @@ impl Editor {
                     Err(e) => return Some(Err(e.into())),
                 };
                 // `:render` names the file after the project, so the common
-                // case needs no path at all (spec 12).
+                // case needs no path at all.
                 let out = crate::export::default_output(
                     self.workspace.current().path().map(std::path::Path::new),
                     container,
@@ -277,7 +277,7 @@ impl Editor {
         }
     }
 
-    /// `:set preview on|off` (spec 12.1, 15.5).
+    /// `:set preview on|off`.
     ///
     /// Turning the preview off stops the transport and drops the last
     /// composed frame, so a no-display session neither decodes nor paints;
@@ -312,7 +312,7 @@ impl Editor {
         self.preview_protocol
     }
 
-    /// `:normalize` and `:duck` (spec 6.1).
+    /// `:normalize` and `:duck`.
     ///
     /// They live here rather than in the workspace for the same reason the
     /// export commands do: they need something the workspace has no business
@@ -330,7 +330,7 @@ impl Editor {
             }
             ExCommand::Duck { track, db } => Some(self.duck(track, *db, session, selection)),
             // Every envelope is dropped and re-measured, reported like any
-            // other background job (spec 12).
+            // other background job.
             ExCommand::Analyze => {
                 let n = self.analyser.reanalyse();
                 Some(Ok(if n == 0 {
@@ -423,7 +423,7 @@ impl Editor {
         ))
     }
 
-    /// Import a picked file at the position the intent implies (spec 3.2).
+    /// Import a picked file at the position the intent implies.
     ///
     /// All three intents are one command, so one `u` undoes the whole import
     /// including the delete that `r` needs.
@@ -685,7 +685,7 @@ impl Editor {
         dispatch.cancelled
     }
 
-    /// The `BeforeExport` veto (spec 9.8): the only event in v1 that can
+    /// The `BeforeExport` veto: the only event in v1 that can
     /// stop what it is reporting.
     fn before_export(&mut self, preset: &str, output: &str) -> Option<String> {
         self.last_export = Some((preset.to_string(), output.to_string()));
@@ -710,7 +710,7 @@ impl Editor {
     /// Everything that needs the backend, the prober or the analysis is done
     /// here; everything that is an *edit* is handed back as an action, so it
     /// goes through the key engine and lands in the undo log as one step,
-    /// exactly as the same action typed by hand would (spec 9.9).
+    /// exactly as the same action typed by hand would.
     fn run_requests(&mut self, requests: Vec<Request>, session: &mut Session) -> PluginEffects {
         let mut effects = PluginEffects::default();
         effects.messages.append(&mut self.plugin_messages);
@@ -777,7 +777,7 @@ impl Editor {
                     match self.plugins.run_motion(&name, &opts, &env) {
                         // A motion is a pure query: it answers a frame and
                         // the editor moves, so a plugin never touches the
-                        // playhead itself (spec 9.9).
+                        // playhead itself.
                         Ok(MotionAnswer::Found(frame)) => {
                             let track = session.timeline().playhead().track;
                             if let Err(e) = session.set_playhead(Frame(frame), track) {
@@ -798,7 +798,7 @@ impl Editor {
         effects
     }
 
-    /// The snapshot a registered motion runs against (spec 9.3).
+    /// The snapshot a registered motion runs against.
     ///
     /// A track with no analysis to wait for is reported as analysed: only an
     /// audio track whose measurement has not landed answers "not yet".
@@ -846,7 +846,7 @@ impl Editor {
         env
     }
 
-    /// Report what an edit did, as the v1 events (spec 9.8).
+    /// Report what an edit did, as the v1 events.
     ///
     /// Insertions and deletions are diffed rather than read off the command,
     /// so undo, a macro replay and a plugin edit all report the same thing;
@@ -1160,7 +1160,7 @@ impl Host for Editor {
         self.project(session);
         // Analysis follows the timeline: a new audio track is queued, and a
         // gain or fade change invalidates what was measured before it
-        // (spec 6.1, 10.2).
+        //.
         self.analyser.sync(session.timeline());
     }
 
@@ -1188,7 +1188,7 @@ impl Host for Editor {
 }
 
 /// What `<Space>l` loops: the selection's span, or the clip under the
-/// playhead in `NORMAL` (spec 3.2.1).
+/// playhead in `NORMAL`.
 fn loop_range(session: &Session, selection: Option<&Selection>) -> Option<(Frame, Frame)> {
     let tl = session.timeline();
     if let Some(sel) = selection {

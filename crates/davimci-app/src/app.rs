@@ -1,4 +1,4 @@
-//! The frontend-agnostic event loop (plan.md Phase 9a).
+//! The frontend-agnostic event loop.
 //!
 //! Everything a frontend would otherwise reimplement lives here: feeding keys
 //! to `davimci-keys`, turning an [`Outcome`] into a status-line message,
@@ -32,7 +32,7 @@ pub trait Host {
     /// to say".
     ///
     /// `selection` is what the user had selected when the line was submitted
-    /// (spec 6.1), or `None` in `NORMAL` - the visual selection lives in
+    ///, or `None` in `NORMAL` - the visual selection lives in
     /// the key engine, and this is the seam that carries it to a host that
     /// has the vocabulary but not the modes. Commands that act on "the clip"
     /// fall back to the playhead when it is `None`.
@@ -47,7 +47,7 @@ pub trait Host {
     }
 
     /// Dispatch a transport action to the backend clock. Never an edit, so it
-    /// never reaches the undo log (spec 3.2.1).
+    /// never reaches the undo log.
     ///
     /// `selection` carries what is selected, because `<Space>l` loops it and
     /// the visual selection lives in the key engine, not in the host.
@@ -55,13 +55,13 @@ pub trait Host {
         let _ = (cmd, selection);
     }
 
-    /// The visual selection changed or was cleared (spec 6). Only the loop
+    /// The visual selection changed or was cleared. Only the loop
     /// cares: a loop that follows a selection ends when the selection does.
     fn selection_changed(&mut self, selection: Option<&Selection>) {
         let _ = selection;
     }
 
-    /// Resolve a config-registered text object (spec 9.4) against the clip
+    /// Resolve a config-registered text object against the clip
     /// under the playhead. Only the host has the Lua runtime, so the grammar
     /// hands the name here and applies the verb to whatever range comes
     /// back. `Ok(None)` means the object matched nothing.
@@ -77,7 +77,7 @@ pub trait Host {
         )))
     }
 
-    /// Stop playback and commit the playhead where it reached (spec 3.2.1).
+    /// Stop playback and commit the playhead where it reached.
     ///
     /// Called before an action whose [`davimci_keys::TransportPolicy`] is
     /// `Interrupt` reports its effects, so the host has already let go of the
@@ -92,7 +92,7 @@ pub trait Host {
     /// The host runs the requests only it can answer - an export, an import,
     /// a registered motion - and hands back the ones that are edits. The app
     /// runs those through the key engine, so a plugin edit takes the same
-    /// write path a keystroke does and there is no second one (spec 9.9).
+    /// write path a keystroke does and there is no second one.
     fn plugin(&mut self, id: u32, session: &mut Session) -> Result<PluginEffects, AppError> {
         let _ = (id, session);
         Ok(PluginEffects::default())
@@ -106,7 +106,7 @@ pub trait Host {
         PluginEffects::default()
     }
 
-    /// The mode changed, for the `ModeChanged` event (spec 9.8). The app owns
+    /// The mode changed, for the `ModeChanged` event. The app owns
     /// the mode FSM, so this is the only place a host can learn of it.
     fn mode_changed(&mut self, from: Mode, to: Mode) {
         let _ = (from, to);
@@ -159,7 +159,7 @@ pub trait Host {
         Vec::new()
     }
 
-    /// Audio analysed since the last call, per track (spec 6.1).
+    /// Audio analysed since the last call, per track.
     ///
     /// Analysis runs in the background and finishes whenever it finishes, so
     /// it arrives the same way job progress does rather than as a return
@@ -169,7 +169,7 @@ pub trait Host {
     }
 
     /// Tracks whose audio changed, so any published envelope is now stale
-    /// (spec 6.1: gain and fades invalidate the analysis).
+    ///.
     fn stale_waveforms(&mut self) -> Vec<TrackId> {
         Vec::new()
     }
@@ -233,7 +233,7 @@ pub struct App {
     waveforms: Waveforms,
     thumbnails: Thumbnails,
     /// How wide the frontend draws one thumbnail, in columns; zero means it
-    /// draws none (spec 15.2).
+    /// draws none.
     thumbnail_columns: u32,
     /// The `:` line's buffer, history and completion vocabulary. Owned here
     /// rather than in a frontend so every host shows the same line, with the
@@ -245,7 +245,7 @@ pub struct App {
     /// The subtitle clip a frontend is editing the text of, if any.
     editing_text: Option<ClipId>,
     /// The selection at the moment `:` was pressed, for the `:` line that
-    /// follows (spec 6.1).
+    /// follows.
     pending_selection: Option<Selection>,
     /// Set while a batch of events is being drained: the expensive host
     /// notifications are recorded here and issued once at the end.
@@ -310,7 +310,7 @@ impl App {
         self.follow();
     }
 
-    /// The live visual selection, if any (spec 6.1). `None` in `NORMAL`.
+    /// The live visual selection, if any. `None` in `NORMAL`.
     #[must_use]
     pub fn selection(&self) -> Option<Selection> {
         self.engine.selection()
@@ -350,7 +350,7 @@ impl App {
     }
 
     /// Zoom lives here rather than in the key engine because the viewport is
-    /// app state: `zi`/`zo`/`z0` (spec 11) come back as [`Outcome::Zoom`]
+    /// app state: `zi`/`zo`/`z0` come back as [`Outcome::Zoom`]
     /// and land here, as does a wheel or a menu, so the anchoring rule has
     /// exactly one implementation.
     pub fn zoom_in(&mut self) {
@@ -472,7 +472,7 @@ impl App {
         // Playback owns the playhead while it runs, so an interrupting bind
         // takes it back before anything is reported: otherwise the pacer
         // overwrites the motion on the next tick and the preview never moves
-        // (spec 3.2.1).
+        //.
         if fed.transport.interrupts() {
             host.interrupt_transport(&self.session);
         }
@@ -486,7 +486,7 @@ impl App {
     /// of input. A held `h`/`l` delivers a burst of key repeats; seeking and
     /// decoding once per repeat is what made holding a key stall and then
     /// freeze, so the burst moves the playhead as many times as it says and
-    /// costs one picture (spec 14).
+    /// costs one picture.
     ///
     /// Returns one [`Response`] per event handled, in order, so a frontend
     /// can still open a picker or a `:` line.
@@ -526,7 +526,7 @@ impl App {
                 // A `:` line may edit or swap the timeline, neither of which
                 // is survivable mid-playback, and the ex vocabulary lives in
                 // the host - so the clock is dropped unconditionally rather
-                // than parsed for (spec 3.2.1).
+                // than parsed for.
                 host.interrupt_transport(&self.session);
                 // Read before the command runs: `:` mode has already left
                 // visual mode behind, so the selection is the one the user
@@ -621,7 +621,7 @@ impl App {
                     return Response::Continue;
                 };
                 // Editing text is an ordinary edit: one command, one undo
-                // step (spec 15.4).
+                // step.
                 match self.session.exec(&davimci_cmd::EditCommand::SetClipText {
                     track,
                     clip,
@@ -743,7 +743,7 @@ impl App {
             },
             // A registered object is resolved by the host and the verb then
             // runs through the engine, so a plugin object edits by the same
-            // write path a built-in one does (spec 9.9).
+            // write path a built-in one does.
             Outcome::ResolveObject { name, around, verb } => {
                 match host.resolve_object(name, around, &self.session) {
                     Ok(Some(range)) => {
@@ -775,7 +775,7 @@ impl App {
 
     /// Run what a plugin asked for. Each action goes through the key engine,
     /// so it is validated, undoable and `.`-repeatable exactly as the same
-    /// action typed by hand would be (spec 9.9).
+    /// action typed by hand would be.
     fn apply_plugin(&mut self, effects: PluginEffects, host: &mut dyn Host) {
         for message in effects.messages {
             self.messages.push(message);
@@ -954,7 +954,7 @@ impl App {
             // repeats in a single poll; reprojecting and decoding once per
             // repeat is what made holding a key stall and then freeze, so
             // the batch moves the playhead as many times as it was told and
-            // the host is asked for a picture once, at the end (spec 14).
+            // the host is asked for a picture once, at the end.
             let events = frontend.poll();
             if self.drain(events, host).contains(&Response::Quit) {
                 return Ok(());

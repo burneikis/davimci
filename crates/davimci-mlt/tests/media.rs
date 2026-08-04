@@ -1,4 +1,4 @@
-//! Backend tests that decode or encode real media (plan.md standing rule 3).
+//! Backend tests that decode or encode real media.
 //!
 //!     just fixtures && just test-slow
 //!

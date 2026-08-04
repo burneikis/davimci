@@ -1,5 +1,5 @@
 //! Project lifecycle: open timelines, saving, autosave, crash recovery
-//! (spec 12, plan.md Phase 8).
+//!.
 //!
 //! This is the binary's library half, and it is the first crate in the
 //! workspace allowed to do I/O. Everything below it stays pure: a
@@ -10,7 +10,7 @@
 //! It is also where the editor is *assembled*: [`editor::Editor`] is the
 //! only type that holds a workspace, a render backend, a presenter and the
 //! transport at once. That has to live here rather than in a frontend,
-//! because no frontend may reference MLT (spec 10.1).
+//! because no frontend may reference MLT.
 
 pub mod analyse;
 pub mod audio;

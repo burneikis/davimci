@@ -1,5 +1,5 @@
 //! Golden view states, shared with every frontend's rendering tests
-//! (plan.md Phase 9a/9c).
+//!.
 //!
 //! A frontend renders these and diffs the result, so a view-state regression
 //! fails here *and* in the frontend, and a frontend cannot quietly render
@@ -99,7 +99,7 @@ pub fn zoomed_out() -> ViewState {
 }
 
 /// An analysed audio lane: `A1` has a waveform, the video lanes do not
-/// (spec 6.1). Frontends render this to prove the envelope reaches the
+///. Frontends render this to prove the envelope reaches the
 /// screen.
 #[must_use]
 pub fn waveform() -> ViewState {

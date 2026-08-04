@@ -1,4 +1,4 @@
-//! 1080p60 stays inside the frame budget (spec 14, plan.md 2).
+//! 1080p60 stays inside the frame budget.
 //!
 //! This measures the presenter's own cost - pull, compose, letterbox - over a
 //! synthetic source, so a regression here is davimci's and not the decoder's.

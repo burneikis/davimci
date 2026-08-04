@@ -1,5 +1,5 @@
-//! Spec 9 is the acceptance suite: every snippet in the spec appears here
-//! verbatim and must load and behave as documented (plan.md Phase 7).
+//! Acceptance suite for the Lua API: every documented config snippet
+//! appears here verbatim and must load and behave as documented.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -20,10 +20,10 @@ fn exec(rt: &Runtime, src: &str) {
         .unwrap_or_else(|e| panic!("chunk failed: {e}"));
 }
 
-// spec 9.2
+// keymaps
 
-/// Spec 9.2, verbatim.
-const SPEC_9_2: &str = r#"
+/// A documented keymaps config, verbatim.
+const KEYMAP_CFG: &str = r#"
 local map = require("davimci.keymap").map
 
 -- mode, lhs, rhs (rhs can be a string command or a Lua function)
@@ -41,8 +41,8 @@ map("normal", "<Right>", "editor.step_frame(1)")
 #[test]
 fn spec_9_2_keymaps_load_and_produce_bindings() {
     let rt = rt();
-    exec(&rt, SPEC_9_5); // the leader mapping references this preset
-    exec(&rt, SPEC_9_2);
+    exec(&rt, PRESET_CFG); // the leader mapping references this preset
+    exec(&rt, KEYMAP_CFG);
 
     let maps = rt.keymaps();
     assert_eq!(maps.len(), 5);
@@ -116,10 +116,10 @@ fn a_later_map_of_the_same_key_replaces_the_earlier_one() {
     );
 }
 
-// spec 9.3
+// motions
 
-/// Spec 9.3, verbatim apart from the `map` local the snippet assumes.
-const SPEC_9_3: &str = r#"
+/// A documented motions config, verbatim apart from the `map` local the snippet assumes.
+const MOTION_CFG: &str = r#"
 local motions = require("davimci.motions")
 local map = require("davimci.keymap").map
 
@@ -167,7 +167,7 @@ fn env_with_audio(analysed: bool) -> MotionEnv {
 #[test]
 fn spec_9_3_custom_motion_finds_the_first_sample_above_the_threshold() {
     let rt = rt();
-    exec(&rt, SPEC_9_3);
+    exec(&rt, MOTION_CFG);
     assert_eq!(rt.motion_names(), ["next_loud_audio"]);
 
     let mut opts = Opts::new();
@@ -191,7 +191,7 @@ fn spec_9_3_custom_motion_finds_the_first_sample_above_the_threshold() {
 #[test]
 fn a_motion_over_an_unanalysed_track_is_pending_not_wrong() {
     let rt = rt();
-    exec(&rt, SPEC_9_3);
+    exec(&rt, MOTION_CFG);
     let mut opts = Opts::new();
     opts.insert("track", OptValue::Str("A2".into()));
     opts.insert("threshold_db", OptValue::Num(-2.0));
@@ -205,7 +205,7 @@ fn a_motion_over_an_unanalysed_track_is_pending_not_wrong() {
 #[test]
 fn the_keymap_from_spec_9_3_queues_the_motion_it_names() {
     let rt = rt();
-    exec(&rt, SPEC_9_3);
+    exec(&rt, MOTION_CFG);
     let overrides = rt.keymap_overrides();
     let (_, leaf) = overrides
         .iter()
@@ -232,10 +232,10 @@ fn running_an_unregistered_motion_is_a_user_error() {
     assert_eq!(e.class(), ErrorClass::User);
 }
 
-// spec 9.4
+// text objects
 
-/// Spec 9.4, verbatim.
-const SPEC_9_4: &str = r#"
+/// A documented text objects config, verbatim.
+const TEXTOBJECT_CFG: &str = r#"
 local textobj = require("davimci.textobject")
 
 textobj.register("c", { -- clip
@@ -247,7 +247,7 @@ textobj.register("c", { -- clip
 #[test]
 fn spec_9_4_text_object_resolves_both_forms() {
     let rt = rt();
-    exec(&rt, SPEC_9_4);
+    exec(&rt, TEXTOBJECT_CFG);
     assert_eq!(rt.object_names(), ["c"]);
     let clip = ClipInfo {
         start: 100,
@@ -278,10 +278,10 @@ fn an_object_with_neither_form_is_rejected() {
     );
 }
 
-// spec 9.5
+// export presets
 
-/// Spec 9.5, verbatim.
-const SPEC_9_5: &str = r#"
+/// A documented export presets config, verbatim.
+const PRESET_CFG: &str = r#"
 require("davimci.export").preset("youtube_1080p", {
   container = "mp4",
   video_codec = "h264",
@@ -294,7 +294,7 @@ require("davimci.export").preset("youtube_1080p", {
 #[test]
 fn spec_9_5_preset_loads_and_validates() {
     let rt = rt();
-    exec(&rt, SPEC_9_5);
+    exec(&rt, PRESET_CFG);
     assert_eq!(rt.preset_names(), ["youtube_1080p"]);
     let p = rt.preset("youtube_1080p").unwrap();
     assert_eq!(p.container, "mp4");
@@ -342,10 +342,10 @@ fn an_impossible_codec_pairing_is_refused_at_definition() {
     assert!(rt.preset_names().is_empty());
 }
 
-// spec 9.6
+// timeline settings
 
-/// Spec 9.6, verbatim.
-const SPEC_9_6: &str = r#"
+/// A documented timeline settings config, verbatim.
+const TIMELINE_CFG: &str = r#"
 require("davimci.timeline").configure({
   jump_points = { "clip_bounds", "markers", "silence" },
   jump_point_density_per_zoom = {
@@ -360,7 +360,7 @@ require("davimci.timeline").configure({
 #[test]
 fn spec_9_6_timeline_configuration_reaches_the_jump_engine() {
     let rt = rt();
-    exec(&rt, SPEC_9_6);
+    exec(&rt, TIMELINE_CFG);
     let cfg = rt.timeline_config();
     assert!(cfg.jump.sources.clip_bounds);
     assert!(cfg.jump.sources.markers);
@@ -376,7 +376,7 @@ fn spec_9_6_timeline_configuration_reaches_the_jump_engine() {
 #[test]
 fn a_rejected_configure_leaves_the_previous_settings_intact() {
     let rt = rt();
-    exec(&rt, SPEC_9_6);
+    exec(&rt, TIMELINE_CFG);
     let before = rt.timeline_config();
     assert!(
         rt.exec(
@@ -389,10 +389,10 @@ fn a_rejected_configure_leaves_the_previous_settings_intact() {
     assert_eq!(rt.timeline_config(), before);
 }
 
-// spec 9.8
+// autocmds
 
-/// Spec 9.8, verbatim.
-const SPEC_9_8: &str = r#"
+/// A documented autocmds config, verbatim.
+const AUTOCMD_CFG: &str = r#"
 require("davimci.autocmd").on("SplitPerformed", function(event)
   -- e.g. auto-tag both resulting clips
 end)
@@ -405,7 +405,7 @@ end)
 #[test]
 fn spec_9_8_handlers_load_and_fire_for_their_own_event_only() {
     let rt = rt();
-    exec(&rt, SPEC_9_8);
+    exec(&rt, AUTOCMD_CFG);
     exec(
         &rt,
         r#"
@@ -831,12 +831,12 @@ fn an_autocmd_may_ask_for_an_edit_and_the_host_gets_it_back() {
 #[test]
 fn the_runtime_is_debug_printable_for_diagnostics() {
     let rt = rt();
-    exec(&rt, SPEC_9_5);
+    exec(&rt, PRESET_CFG);
     let s = format!("{rt:?}");
     assert!(s.contains("youtube_1080p"), "{s}");
 }
 
-/// Spec 9.2: a callback binding opts into interrupting playback; without
+/// A callback binding opts into interrupting playback; without
 /// the option it keeps the clock, because the grammar cannot know whether
 /// the Lua function edits.
 #[test]
@@ -865,7 +865,7 @@ fn spec_section_9_2_a_keymap_opts_into_interrupting_playback() {
     assert!(!policy("gk").interrupts());
 }
 
-/// Spec 9.9: plugins and string bindings can pause playback explicitly.
+/// Plugins and string bindings can pause playback explicitly.
 #[test]
 fn spec_section_9_9_interrupt_transport_is_callable_and_bindable() {
     assert_eq!(
@@ -889,7 +889,7 @@ fn spec_section_9_9_interrupt_transport_is_callable_and_bindable() {
         && *l == LeafAction::Standalone(Action::InterruptTransport)));
 }
 
-/// Spec 9.9: `editor.set` is the `:set` registry, so it queues a request like
+/// `editor.set` is the `:set` registry, so it queues a request like
 /// every other change rather than writing anything itself. The property name
 /// is deliberately not validated here - this crate does not own the registry,
 /// and inventing a second list of names is how the two drift apart.

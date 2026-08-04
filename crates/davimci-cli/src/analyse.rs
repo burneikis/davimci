@@ -1,11 +1,11 @@
-//! Background analysis, wired to a live session (plan.md Phase 5 + 9e).
+//! Background analysis, wired to a live session.
 //!
 //! `davimci-analysis` could already measure a file; nothing called it, because
 //! until Phase 9e there was no editor to measure *for*. This is that caller:
 //! it watches the timeline, queues one job per audio source, publishes the
 //! resulting envelopes to the view state, and drops them again when a gain or
 //! fade changes, since a measurement of the pre-gain signal is no longer a
-//! description of what will be heard (spec 6.1, 10.2).
+//! description of what will be heard.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -101,7 +101,7 @@ impl Analyser {
                 continue;
             }
             if changed && known {
-                // The old measurement described the pre-gain signal (spec 10.2).
+                // The old measurement described the pre-gain signal.
                 self.analyses.remove(&track.id);
                 self.stale.push(track.id);
             }
@@ -110,7 +110,7 @@ impl Analyser {
         }
     }
 
-    /// Re-run analysis for every known track (`:analyze`, spec 12).
+    /// Re-run analysis for every known track (`:analyze`).
     pub fn reanalyse(&mut self) -> usize {
         let sources: Vec<(TrackId, Source)> = self
             .requested
@@ -297,7 +297,7 @@ mod tests {
 
     #[test]
     fn changing_gain_marks_the_envelope_stale() {
-        // spec 6.1: gain invalidates the analysis for that clip.
+        // Gain invalidates the analysis for that clip.
         let dir = tmpdir("stale");
         let mut a = Analyser::new(&dir);
         let mut tl = multi_audio_fixture(1, Some(2));
@@ -326,7 +326,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// `:analyze` (spec 12): every envelope is dropped and re-queued, so a
+    /// `:analyze`: every envelope is dropped and re-queued, so a
     /// predicate motion answers `Pending` again until the work lands.
     #[test]
     fn analyze_drops_every_envelope_and_requeues_the_work() {

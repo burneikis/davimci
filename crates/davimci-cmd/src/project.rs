@@ -1,7 +1,6 @@
-//! The project format: last snapshot + the command log since it (spec 10.4).
+//! The project format: last snapshot + the command log since it.
 //!
-//! No I/O lives here - `davimci-cmd` stays a pure library (plan.md cross-cutting
-//! rule 1). `davimci-cli` reads and writes the bytes; this module only turns a
+//! No I/O lives here - `davimci-cmd` stays a pure library. `davimci-cli` reads and writes the bytes; this module only turns a
 //! session into JSON and back, and migrates older schema versions on the way
 //! in.
 
@@ -18,7 +17,7 @@ use crate::session::Session;
 /// previous version.
 ///
 /// Version 2 added the undo tree: a reopened project keeps its history
-/// (spec 10.4).
+///.
 pub const FORMAT_VERSION: u32 = 2;
 
 /// A saved project.
@@ -58,7 +57,7 @@ impl Classify for ProjectError {
     fn class(&self) -> ErrorClass {
         match self {
             // A file we cannot parse or replay is not something to keep
-            // editing on top of (plan.md Phase 0, corruption policy).
+            // editing on top of.
             Self::Malformed(_) | Self::Unreplayable(_) => ErrorClass::Corruption,
             Self::TooNew(_) => ErrorClass::User,
         }
@@ -209,7 +208,7 @@ mod tests {
 
     #[test]
     fn opening_a_project_keeps_the_history_it_was_saved_with() {
-        // spec 10.4: undo does not stop at the save point.
+        // Undo does not stop at the save point.
         let s = saved_session();
         let text = ProjectFile::from_session(&s).to_json().unwrap();
         let mut opened = ProjectFile::from_json(&text)
@@ -319,7 +318,7 @@ mod tests {
     }
 
     /// Cheap deterministic fuzz of the deserializer: no input may panic, and
-    /// every rejection must carry a message (plan.md Phase 2).
+    /// every rejection must carry a message.
     #[test]
     fn the_deserializer_never_panics_on_junk() {
         let good = ProjectFile::from_session(&saved_session())

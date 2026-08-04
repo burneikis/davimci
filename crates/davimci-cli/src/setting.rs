@@ -1,4 +1,4 @@
-//! The `:set` property registry (spec 12.1).
+//! The `:set` property registry.
 //!
 //! One command, one typed registry: parsing a property name and its value is
 //! a pure function here, so every setter is proved without a filesystem, a
@@ -10,7 +10,7 @@ use davimci_core::{Fps, Resolution};
 use crate::audio::FadeEnd;
 use crate::error::CliError;
 
-/// Which number of a clip's transform is being set (spec 8).
+/// Which number of a clip's transform is being set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransformField {
     X,
@@ -52,8 +52,7 @@ pub enum Setting {
     /// `preview on|off` - a view setting, never an edit.
     Preview(bool),
     /// `previewheight auto|<rows>|<percent>%` - the terminal's inline preview
-    /// band; `0` is off. Inert outside the terminal frontend (spec 12.1,
-    /// 15.6).
+    /// band; `0` is off. Inert outside the terminal frontend.
     PreviewHeight(PreviewHeight),
     /// `previewprotocol auto|kitty|sixel|blocks` - as above.
     PreviewProtocol(PreviewProtocol),

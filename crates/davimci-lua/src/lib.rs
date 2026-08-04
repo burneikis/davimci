@@ -1,4 +1,4 @@
-//! Lua configuration and plugin API (plan.md Phase 7, spec 9).
+//! Lua configuration and plugin API.
 //!
 //! Lua may ask, never write. Every `davimci.*` call either registers
 //! something (a keymap, a motion, a text object, an export preset, an event

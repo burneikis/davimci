@@ -9,16 +9,16 @@ use davimci_core::{Fps, Frame, Resolution};
 pub struct RenderSettings {
     pub resolution: Resolution,
     pub fps: Fps,
-    /// An ffmpeg *encoder* name, never a marketing name (spec 10.3).
+    /// An ffmpeg *encoder* name, never a marketing name.
     pub video_codec: String,
     pub audio_codec: String,
     /// Container extension, e.g. `mkv`, `mp4`.
     pub container: String,
-    /// Whether each audio track gets its own stream in the file (spec 7).
+    /// Whether each audio track gets its own stream in the file.
     /// Only some containers can carry that, and only some sources can be
     /// routed, so this is decided before the render rather than during it.
     pub separate_audio_tracks: bool,
-    /// Whether text tracks are composited into the picture (spec 8). False
+    /// Whether text tracks are composited into the picture. False
     /// for the sidecar and embedded modes, where the subtitles travel as
     /// their own file or stream instead of being painted on.
     pub burn_subtitles: bool,
@@ -139,7 +139,7 @@ mod tests {
     }
 }
 
-/// A transition type a config registered (spec 9.10).
+/// A transition type a config registered.
 ///
 /// Named in backend terms and nothing more: `service` is whatever the render
 /// engine calls the effect, and `props` are passed to it verbatim. The layer

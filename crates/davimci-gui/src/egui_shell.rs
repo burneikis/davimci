@@ -1,4 +1,4 @@
-//! The `egui` rasteriser (plan.md Phase 9c's shell).
+//! The `egui` rasteriser.
 //!
 //! This module is the *only* place in davimci that knows what a colour is or
 //! what a font is. It places pixels for decisions made elsewhere: the
@@ -80,7 +80,7 @@ fn to_egui(rect: Rect) -> EguiRect {
 /// A draw list is rebuilt every frame, so uploading its thumbnails every
 /// frame would spend the GPU on pictures that did not change. The cache is
 /// keyed by clip *and* source frame, because a clip's filmstrip is several
-/// different pictures of it (spec 15.2).
+/// different pictures of it.
 #[derive(Default)]
 pub struct ThumbnailTextures {
     textures:

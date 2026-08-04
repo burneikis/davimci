@@ -1,5 +1,5 @@
 //! The [`Frontend`] trait and the event loop that is generic over it
-//! (plan.md Phase 9a).
+//!.
 //!
 //! A frontend does three things: report events, report its size, and draw a
 //! [`ViewState`]. It contains no view logic, so anything a GUI and a TUI would
@@ -20,7 +20,7 @@ pub struct Surface {
     pub columns: u32,
     pub rows: usize,
     /// How many columns wide one thumbnail is drawn, which decides how often
-    /// a clip is sampled for its filmstrip (spec 15.2).
+    /// a clip is sampled for its filmstrip.
     ///
     /// The frontend knows this and the app does not - it depends on lane
     /// height and the picture's aspect - but *which* frames get sampled is a
@@ -59,7 +59,7 @@ pub enum Event {
     ///
     /// A frontend reports *where*, never *what it means*: seeking is
     /// navigation and the app owns navigation, exactly as it owns what a key
-    /// means (spec 15.2).
+    /// means.
     Click {
         column: u32,
         row: Option<usize>,
@@ -71,7 +71,7 @@ pub enum Event {
     PickerCancelled,
     /// A subtitle edit was committed. The frontend owns the text buffer (it
     /// has the widget); the app owns turning the result into a command
-    /// (spec 15.4).
+    ///.
     TextEdited {
         clip: ClipId,
         text: String,
@@ -97,7 +97,7 @@ pub enum Response {
     OpenPicker(MediaIntent),
     /// `i` on a subtitle clip: the frontend should open a text buffer holding
     /// `text` and answer with [`Event::TextEdited`] or
-    /// [`Event::TextEditCancelled`] (spec 15.4).
+    /// [`Event::TextEditCancelled`].
     EditText {
         clip: ClipId,
         text: String,
