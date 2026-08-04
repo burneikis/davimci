@@ -1,13 +1,5 @@
 # AGENTS.md - davimci
 
-## Source of truth
-
-The code is the behaviour; there is no separate spec. `docs/keymap.md` is
-generated from the code and describes the default keymap. `todo.md` holds
-outstanding work: a `# Human` section, an `# AI` section, and deferred items
-not targeted for v1. Delete an item from `todo.md` when it lands; do not keep
-history there.
-
 ## Architectural rules
 
 These are load-bearing; breaking one is a design defect rather than a style
