@@ -218,7 +218,7 @@ fn switching_buffers_hands_the_app_a_different_timeline() {
 #[test]
 fn set_numbers_reaches_the_editor_without_an_undoable_edit() {
     let (mut app, mut editor) = editor();
-    assert_eq!(editor.numbers(), davimci_cli::Numbers::None);
+    assert_eq!(editor.numbers(), davimci_cli::Numbers::Off);
     let undos = app.session().undolist().len();
     app.event(Event::Command("set numbers relative".into()), &mut editor);
     assert_eq!(editor.numbers(), davimci_cli::Numbers::Relative);

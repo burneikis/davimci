@@ -27,7 +27,7 @@ fn main() -> Result<()> {
     #[allow(unused_mut, unused_assignments)]
     let mut no_window = false;
     let mut tui = false;
-    let mut numbers = davimci_cli::Numbers::None;
+    let mut numbers = davimci_cli::Numbers::Off;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -134,7 +134,7 @@ fn main() -> Result<()> {
     // for: open the window.
     #[cfg(feature = "window")]
     if commands.is_empty() && !no_window {
-        return run_window(ws);
+        return run_window(ws, numbers);
     }
 
     for line in ws.list() {
@@ -196,8 +196,9 @@ fn run_commands_with_editor(ws: Workspace, commands: &[String]) -> Result<()> {
 
 /// Open the editor window.
 #[cfg(feature = "window")]
-fn run_window(ws: Workspace) -> Result<()> {
-    let (app, editor) = assemble(ws);
+fn run_window(ws: Workspace, numbers: davimci_cli::Numbers) -> Result<()> {
+    let (app, mut editor) = assemble(ws);
+    editor.set_numbers(numbers);
     davimci_cli::Window::new(app, editor)
         .run()
         .map_err(|e| anyhow::anyhow!("the window could not open: {e}"))
@@ -390,7 +391,7 @@ fn print_help() {
            --ticks <n> presentation ticks to run after the keys\n  \
            --no-window stay on the command line instead of opening a window\n  \
            --tui       run in the terminal instead of a window\n  \
-           --numbers <mode> ruler jump-point numbers in --tui:\n              \
+           --numbers <mode> ruler jump-point numbers, window or terminal:\n              \
                             none (default), absolute or relative\n  \
            --version   print the version\n  \
            -h, --help  this text\n\n\

@@ -9,15 +9,15 @@
 //! the rows it produced, which is what lets every test here run with no tty.
 
 use davimci_app::{
-    AppError, Event, Frontend, MediaPicker, ModalKey, Modals, PickerIntent, Response, SubtitleEdit,
-    Surface, ViewState,
+    AppError, Event, Frontend, MediaPicker, ModalKey, Modals, Numbers, PickerIntent, Response,
+    SubtitleEdit, Surface, ViewState,
 };
 use davimci_core::Resolution;
 use ratatui::prelude::Line;
 
 use crate::input::{Modifiers, TermKey, translate};
 use crate::preview::{Band, Cell, Encoder, Height, Layout, Protocol, natural_rows};
-use crate::render::{self, Numbers, Overlay};
+use crate::render::{self, Overlay};
 
 /// Something the terminal observed.
 #[derive(Debug, Clone, PartialEq, Eq)]

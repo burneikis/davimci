@@ -182,6 +182,8 @@ impl eframe::App for Window {
             command_cursor: 0,
             // The shell owns the picker and folds it in when it paints.
             picker: None,
+            // Read every frame, so `:set numbers` lands on the next one.
+            numbers: self.editor.numbers(),
         });
 
         let view = self.app.view();

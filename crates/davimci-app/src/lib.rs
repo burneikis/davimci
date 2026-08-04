@@ -19,6 +19,7 @@ pub mod message;
 pub mod modal;
 pub mod picker;
 pub mod plugin;
+pub mod ruler;
 pub mod subtitle;
 pub mod thumbnail;
 pub mod view;
@@ -40,6 +41,7 @@ pub use message::{Message, MessageQueue, Severity};
 pub use modal::{ModalKey, Modals};
 pub use picker::{Entry, MediaPicker, PickerEvent, PickerIntent};
 pub use plugin::PluginEffects;
+pub use ruler::{Label, LabelMetrics, Numbers, labels};
 pub use subtitle::{SubtitleEdit, SubtitleEvent};
 pub use thumbnail::{Thumbnail, ThumbnailRequest, Thumbnails};
 pub use view::{

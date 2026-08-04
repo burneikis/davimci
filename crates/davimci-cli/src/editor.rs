@@ -140,7 +140,7 @@ impl Editor {
             preview: true,
             preview_height: PreviewHeight::Off,
             preview_protocol: PreviewProtocol::Auto,
-            numbers: Numbers::None,
+            numbers: Numbers::Off,
             quit: false,
         }
     }

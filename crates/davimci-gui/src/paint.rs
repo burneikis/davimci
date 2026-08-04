@@ -222,6 +222,8 @@ pub struct Chrome {
     /// paint is a modal that silently eats every key, so this is not
     /// optional decoration - it is how `i`/`a`/`r` are usable at all.
     pub picker: Option<PickerView>,
+    /// `:set numbers`: what the ruler labels its jump points with.
+    pub numbers: davimci_app::Numbers,
 }
 
 /// Everything the painter needs to draw the media picker. Built by the

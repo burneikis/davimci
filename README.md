@@ -67,7 +67,7 @@ cargo build -p davimci-cli --features tui    # optional terminal frontend
 cargo run -p davimci-cli --features tui -- --tui path/to/video.mkv
 ```
 
-In the terminal the ruler can number its jump points, the way vim numbers
+In both frontends the ruler can number its jump points, the way vim numbers
 lines: `--numbers relative` (the count `3l` needs), `--numbers absolute` (the
 frame) or `--numbers none`, the default. Changeable live with
 `:set numbers relative`.

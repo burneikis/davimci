@@ -5,6 +5,7 @@
 //! backend or a window. Execution lives in `excmd`/`editor`, which are the
 //! only layers that own a session or a preview.
 
+pub use davimci_app::Numbers;
 use davimci_core::{Fps, Resolution};
 
 use crate::audio::FadeEnd;
@@ -59,48 +60,6 @@ pub enum Setting {
     /// `numbers none|absolute|relative` - how the terminal ruler labels its
     /// jump points. Inert outside the terminal frontend.
     Numbers(Numbers),
-}
-
-/// What `:set numbers` accepts: vim's `nonumber`, `number` and
-/// `relativenumber`, applied to jump points instead of lines.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Numbers {
-    #[default]
-    None,
-    Absolute,
-    Relative,
-}
-
-impl Numbers {
-    #[must_use]
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::Absolute => "absolute",
-            Self::Relative => "relative",
-        }
-    }
-
-    /// How the setting reads back, for the status line.
-    #[must_use]
-    pub fn describe(self) -> &'static str {
-        match self {
-            Self::None => "no ruler numbers",
-            Self::Absolute => "absolute ruler numbers",
-            Self::Relative => "relative ruler numbers",
-        }
-    }
-
-    /// Parse a `--numbers` argument or a `:set numbers` value.
-    #[must_use]
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "none" | "off" | "no" => Some(Self::None),
-            "absolute" | "abs" | "on" => Some(Self::Absolute),
-            "relative" | "rel" => Some(Self::Relative),
-            _ => None,
-        }
-    }
 }
 
 /// What `:set previewheight` accepts.
@@ -435,7 +394,7 @@ mod tests {
                 "sixel",
                 Setting::PreviewProtocol(PreviewProtocol::Sixel),
             ),
-            ("numbers", "none", Setting::Numbers(Numbers::None)),
+            ("numbers", "none", Setting::Numbers(Numbers::Off)),
             ("numbers", "absolute", Setting::Numbers(Numbers::Absolute)),
             ("numbers", "relative", Setting::Numbers(Numbers::Relative)),
         ];

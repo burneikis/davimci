@@ -6,10 +6,18 @@
 use davimci_app::Frontend;
 use davimci_app::fixtures;
 use davimci_gui::paint::{Fill, Paint, TextRole, summarise};
-use davimci_gui::{Chrome, Gui, Layout, Metrics, PickerIntent, VideoQuad, paint_view};
+use davimci_gui::{Chrome, Gui, Layout, Metrics, Numbers, PickerIntent, VideoQuad, paint_view};
 
 fn layout(width: u32, height: u32) -> Layout {
     Layout::compute(width, height, Metrics::default(), false, false)
+}
+
+/// Chrome asking the ruler for numbers, which are off by default.
+fn numbered(numbers: Numbers) -> Chrome {
+    Chrome {
+        numbers,
+        ..Chrome::default()
+    }
 }
 
 #[test]
@@ -18,7 +26,7 @@ fn the_normal_view_paints_a_stable_draw_list() {
     let list = paint_view(&view, &layout(800, 600), &Chrome::default());
     assert_eq!(
         summarise(&list),
-        "Background=2 Clip=5 ClipLabel=5 Playhead=1 Ruler=1 RulerNumber=2 Status=1 StatusLine=1 \
+        "Background=2 Clip=5 ClipLabel=5 Playhead=1 Ruler=1 Status=1 StatusLine=1 \
 TickMajor=5 TickMinor=3 TrackHeader=3 TrackLane=2 TrackLaneFocused=1 TrackName=3"
     );
 }
@@ -59,7 +67,6 @@ fn the_video_quad_is_placed_inside_the_video_pane() {
     let view = fixtures::normal();
     let l = layout(800, 600);
     let chrome = Chrome {
-        picker: None,
         video: Some(VideoQuad {
             x: 10,
             y: 4,
@@ -67,7 +74,7 @@ fn the_video_quad_is_placed_inside_the_video_pane() {
             height: 50,
             timecode: Some("00:00:00:00"),
         }),
-        command_cursor: 0,
+        ..Chrome::default()
     };
     let list = paint_view(&view, &l, &chrome);
     let video = list.rects(Fill::Video);
@@ -291,7 +298,7 @@ fn clip_labels_are_painted_over_the_waveform() {
 fn relative_numbers_are_painted_for_subdivision_ticks_too() {
     let view = fixtures::normal();
     let l = layout(800, 600);
-    let list = paint_view(&view, &l, &Chrome::default());
+    let list = paint_view(&view, &l, &numbered(Numbers::Relative));
     let numbered: Vec<i32> = list
         .ops()
         .iter()
@@ -315,6 +322,46 @@ fn relative_numbers_are_painted_for_subdivision_ticks_too() {
             .iter()
             .any(|x| minor.iter().any(|c| (*x - c).abs() <= 2)),
         "only clip boundaries were numbered: numbers at {numbered:?}, subdivisions at {minor:?}"
+    );
+}
+
+/// The three number modes, through the one decision `davimci-app` makes for
+/// both frontends: nothing at all, the frame, or the count a motion needs.
+#[test]
+fn the_ruler_numbers_what_the_setting_asks_for_and_nothing_otherwise() {
+    let view = fixtures::normal();
+    let l = layout(800, 600);
+    let numbers = |chrome: &Chrome| -> Vec<String> {
+        paint_view(&view, &l, chrome)
+            .ops()
+            .iter()
+            .filter_map(|op| match op {
+                Paint::Text {
+                    text,
+                    role: TextRole::RulerNumber,
+                    ..
+                } => Some(text.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    assert!(numbers(&numbered(Numbers::Off)).is_empty());
+
+    let relative = numbers(&numbered(Numbers::Relative));
+    assert!(!relative.is_empty());
+    // A count, so the playhead's own jump point reads zero.
+    assert!(relative.contains(&"0".to_string()), "{relative:?}");
+
+    let absolute = numbers(&numbered(Numbers::Absolute));
+    let frames: Vec<String> = view
+        .ticks
+        .iter()
+        .map(|t| t.frame.get().to_string())
+        .collect();
+    assert!(!absolute.is_empty());
+    assert!(
+        absolute.iter().all(|n| frames.contains(n)),
+        "{absolute:?} are not frames of {frames:?}"
     );
 }
 

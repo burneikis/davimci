@@ -16,8 +16,9 @@ pub mod render;
 pub mod shell;
 pub mod terminal;
 
+pub use davimci_app::Numbers;
 pub use input::{Modifiers, TermKey, translate};
 pub use preview::{Band, Cell, Encoder, Height, Layout, Protocol, detect, natural_rows};
-pub use render::{GUTTER, Numbers, Overlay, lines, plain, surface};
+pub use render::{GUTTER, Overlay, lines, plain, surface};
 pub use shell::{TermEvent, Tui};
 pub use terminal::Terminal;

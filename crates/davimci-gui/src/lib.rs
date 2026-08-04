@@ -22,5 +22,7 @@ pub use input::{Modifiers, RawKey, translate};
 pub use layout::{Layout, Metrics, paint as paint_view};
 pub use paint::{Chrome, DrawList, Fill, Paint, Rect, TextRole, VideoQuad};
 // The modals are app state, not GUI state: the TUI opens the same ones.
-pub use davimci_app::{Entry, MediaPicker, PickerEvent, PickerIntent, SubtitleEdit, SubtitleEvent};
+pub use davimci_app::{
+    Entry, MediaPicker, Numbers, PickerEvent, PickerIntent, SubtitleEdit, SubtitleEvent,
+};
 pub use shell::{Gui, GuiEvent};

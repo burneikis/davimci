@@ -5,7 +5,7 @@
 //! never stored, so an extreme window size produces a small layout rather
 //! than an inconsistent one.
 
-use davimci_app::{Surface, ViewState};
+use davimci_app::{LabelMetrics, Surface, ViewState};
 
 use crate::paint::{Chrome, DrawList, Fill, PickerView, Rect, TextRole, status_text};
 
@@ -228,7 +228,7 @@ pub fn paint(view: &ViewState, layout: &Layout, chrome: &Chrome) -> DrawList {
 
     // Ruler. Numbers first so a tick is never hidden behind one.
     d.rect(layout.ruler, Fill::Ruler);
-    paint_relative_numbers(&mut d, layout, view);
+    paint_numbers(&mut d, layout, view, chrome);
     for tick in &view.ticks {
         let height = if tick.major {
             layout.ruler.height
@@ -442,39 +442,34 @@ pub fn paint(view: &ViewState, layout: &Layout, chrome: &Chrome) -> DrawList {
     d
 }
 
-/// Relative jump-point numbers on the ruler: `0` under the playhead, and the
-/// count each `l` or `h` away from it, the way vim numbers lines.
+/// Jump-point numbers on the ruler, as `:set numbers` asked for.
 ///
-/// Every jump point is numbered, subdivisions included - the number is the
-/// count that lands there, and a count is exactly as useful mid-clip as at a
-/// boundary. Numbers are dropped only where two would overlap, so a dense
-/// ruler thins out rather than turning into a smear of digits.
-fn paint_relative_numbers(d: &mut DrawList, layout: &Layout, view: &ViewState) {
-    let cw = layout.metrics.number_char_width.max(1);
-    let mut last_end: i64 = i64::MIN;
-    for tick in &view.ticks {
-        let text = tick.relative.unsigned_abs().to_string();
-        // Room for the digits themselves plus the padding a shell puts
-        // inside a text box: a number drawn into a box its own width is a
-        // number with its last digit clipped off.
-        let width = text.len() as u32 * cw + TEXT_PADDING;
-        let x = i64::from(layout.ruler.x) + i64::from(tick.column) + 2;
-        if x < last_end {
-            continue;
-        }
-        if x + i64::from(width) > i64::from(layout.ruler.x) + i64::from(layout.ruler.width) {
-            continue;
-        }
-        last_end = x + i64::from(width) + i64::from(cw);
+/// Which tick is numbered and what it reads is decided in `davimci-app`, the
+/// same call the terminal ruler makes; the window only says how wide a digit
+/// is. The padding is part of that measurement, because a number drawn into a
+/// box its own glyphs wide loses its last digit.
+fn paint_numbers(d: &mut DrawList, layout: &Layout, view: &ViewState, chrome: &Chrome) {
+    let digit = layout.metrics.number_char_width.max(1);
+    let metrics = LabelMetrics {
+        width: layout.ruler.width,
+        gap: 2,
+        digit,
+        padding: TEXT_PADDING,
+        separation: digit,
+        // The ticks are painted after the numbers, so a long number crossing
+        // one is still a legible number over a visible tick.
+        cross_ticks: true,
+    };
+    for label in davimci_app::labels(view, chrome.numbers, metrics) {
         d.text(
             Rect {
-                x: x as i32,
+                x: layout.ruler.x.saturating_add(label.offset as i32),
                 y: layout.ruler.y,
-                width,
+                width: label.width,
                 height: layout.ruler.height,
             },
             TextRole::RulerNumber,
-            text,
+            label.text,
         );
     }
 }

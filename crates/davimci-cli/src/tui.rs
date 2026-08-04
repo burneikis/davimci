@@ -15,10 +15,10 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use davimci_app::{App, Event, Frontend, Host};
-use davimci_tui::{Height, Numbers as RulerNumbers, Protocol, Terminal, Tui};
+use davimci_tui::{Height, Protocol, Terminal, Tui};
 
 use crate::editor::Editor;
-use crate::setting::{Numbers, PreviewHeight, PreviewProtocol};
+use crate::setting::{PreviewHeight, PreviewProtocol};
 
 /// How long a quiet loop waits for input before ticking. Playback and shuttle
 /// advance off the clock, so the loop cannot simply block on the keyboard.
@@ -42,15 +42,6 @@ fn band_height(setting: PreviewHeight) -> Height {
         PreviewHeight::Rows(rows) => Height::Rows(rows),
         PreviewHeight::Percent(pc) => Height::Percent(pc),
         PreviewHeight::Auto => Height::Auto,
-    }
-}
-
-/// `:set numbers`, as the ruler draws it.
-fn ruler_numbers(setting: Numbers) -> RulerNumbers {
-    match setting {
-        Numbers::None => RulerNumbers::Off,
-        Numbers::Absolute => RulerNumbers::Absolute,
-        Numbers::Relative => RulerNumbers::Relative,
     }
 }
 
@@ -101,7 +92,7 @@ pub fn run(mut app: App, mut editor: Editor) -> Result<()> {
         // View settings, read every loop: `:set previewheight` must take
         // effect on the next frame, and the surface shrinks with the band.
         tui.set_protocol(resolve(editor.preview_protocol(), detected), cell);
-        tui.set_numbers(ruler_numbers(editor.numbers()));
+        tui.set_numbers(editor.numbers());
         let before = tui.surface();
         tui.set_preview_height(band_height(editor.preview_height()));
         if tui.surface() != before {
