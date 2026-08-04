@@ -991,3 +991,13 @@ the `:` line it stands for, so there is exactly one registry, one set of
 messages, and one set of undo rules - a config-set property that happens to be
 an edit is still one undo step. It deliberately does not check the property
 name: a second list of names in `davimci-lua` is how the two lists drift apart.
+
+### One key per stream, not per file
+
+Every audio lane drew the same envelope whenever the tracks came from one
+container. The analysis cache was keyed by content hash alone, and a
+multi-stream import gives every stream the same content hash, so the first
+stream analysed wrote the entry and the rest hit it - a real measurement, of
+somebody else's audio, which is exactly the failure `source_of` refuses to
+commit at the timeline level. The key now names the stream and its kind as
+well; entries written under the old key are simply never looked up.

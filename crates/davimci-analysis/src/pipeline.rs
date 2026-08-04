@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use davimci_core::TrackId;
 
 use crate::analysis::{Analysis, AnalysisParams, analyze_samples};
-use crate::cache::{AnalysisCache, content_hash};
+use crate::cache::{AnalysisCache, content_hash, entry_key};
 use crate::decode;
 use crate::error::AnalysisError;
 use crate::jobs::{JobContext, JobId, JobRunner};
@@ -35,6 +35,10 @@ pub struct AnalysisReady {
 
 /// Analyse one stream, using the cache when it is valid (spec 10.2).
 ///
+/// The cache entry belongs to a stream, not a file: several streams of one
+/// container hash alike, so a file-wide key would hand every audio track the
+/// first stream's envelope.
+///
 /// A cache hit skips decoding entirely. A miss, a version bump, or a corrupt
 /// entry all recompute; a cache that cannot be *written* is a warning, not a
 /// failure, because the analysis itself is still good.
@@ -47,7 +51,7 @@ pub fn analyse(
 ) -> Result<Analysis, AnalysisError> {
     let check = |ctx: Option<&JobContext>| ctx.map_or(Ok(()), JobContext::check);
     check(ctx)?;
-    let hash = content_hash(&request.path)?;
+    let hash = entry_key(&content_hash(&request.path)?, request.stream, request.kind);
     if let Some(hit) = cache.load(&hash)
         && hit.params == params
     {
@@ -174,6 +178,31 @@ mod tests {
         };
         let third = analyse(&request(&media), other, &cache, 48_000, None).unwrap();
         assert_eq!(third.params.hop_ms, 20);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn two_streams_of_one_file_do_not_share_a_cache_entry() {
+        // Regression: the key was the file's content hash, so every audio
+        // track imported from one container drew stream 0's envelope.
+        let dir = tmpdir("streams");
+        let media = dir.join("m.srt");
+        std::fs::write(&media, b"1\n00:00:01,000 --> 00:00:02,000\nhi\n").unwrap();
+        let cache = AnalysisCache::for_project(&dir);
+        let params = AnalysisParams::default();
+
+        // Kept on the no-decode path: the key is what is under test, not the
+        // decoder.
+        let r0 = request(&media);
+        let mut r1 = r0.clone();
+        r1.stream = 1;
+
+        let a0 = analyse(&r0, params, &cache, 48_000, None).unwrap();
+        let a1 = analyse(&r1, params, &cache, 48_000, None).unwrap();
+        assert_ne!(
+            a0.source_hash, a1.source_hash,
+            "both streams were filed under one key"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

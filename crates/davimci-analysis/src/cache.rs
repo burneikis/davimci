@@ -16,6 +16,22 @@ use std::path::{Path, PathBuf};
 
 use crate::analysis::{ANALYSIS_VERSION, Analysis};
 use crate::error::AnalysisError;
+use crate::probe::StreamKind;
+
+/// The cache key for one *stream*, not one file.
+///
+/// A container holds several streams that hash the same, so keying on content
+/// alone makes every audio track imported from one file share the first
+/// stream's measurement - identical envelopes under different audio.
+#[must_use]
+pub fn entry_key(content_hash: &str, stream: u32, kind: StreamKind) -> String {
+    let kind = match kind {
+        StreamKind::Video => 'v',
+        StreamKind::Audio => 'a',
+        StreamKind::Subtitle => 's',
+    };
+    format!("{content_hash}-{kind}{stream}")
+}
 
 /// FNV-1a over the file's contents plus its length.
 ///
@@ -135,6 +151,19 @@ mod tests {
         assert_eq!(back.source_hash, "abc123");
         assert_eq!(back.version, ANALYSIS_VERSION);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn each_stream_of_one_file_gets_its_own_entry() {
+        // Regression: keying on content alone gave every audio track imported
+        // from one container the first stream's envelope.
+        let h = "abc123";
+        let a0 = entry_key(h, 0, StreamKind::Audio);
+        let a1 = entry_key(h, 1, StreamKind::Audio);
+        let v0 = entry_key(h, 0, StreamKind::Video);
+        assert_ne!(a0, a1);
+        assert_ne!(a0, v0);
+        assert_eq!(a1, entry_key(h, 1, StreamKind::Audio), "keys are stable");
     }
 
     #[test]

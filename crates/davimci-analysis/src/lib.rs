@@ -27,7 +27,7 @@ pub mod proxy;
 pub mod subtitle;
 
 pub use analysis::{ANALYSIS_VERSION, Analysis, AnalysisParams, Hop, Span};
-pub use cache::{AnalysisCache, content_hash};
+pub use cache::{AnalysisCache, content_hash, entry_key};
 pub use conform::{ConformOptions, Conformed, FitPolicy, FitRect};
 pub use error::AnalysisError;
 pub use import::{
