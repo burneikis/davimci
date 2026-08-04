@@ -34,8 +34,10 @@
 - GPU/hardware acceleration (decode, planar upload, zero-copy import, hardware
   encode) is planned in `docs/gpu_plan.md`
 - a custom subtitle layout engine in place of MLT's text producers
-- beat detection as a jump-point source
+- plugin distribution and package management
+
+# Plugins
 - advanced audio: EQ, compression, noise reduction beyond `:duck`
 - video effects beyond transform and transitions
 - ML-based scene detection hook
-- plugin distribution and package management
+- beat detection as a jump-point source
