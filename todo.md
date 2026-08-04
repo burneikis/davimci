@@ -12,6 +12,7 @@
 - write docs, guide for the codebase and how to learn it
 - plugin support for gui windows
 - use clippy on pedantic / nursery
+- command to center the playhead, moving the timeline scroll to center the playhead in the timeline view (user may want to have this on all the time, or bind it, or hook pause/playing states/transitions)
 - strip down to core features, everything else should be built as a plugin, include default plugins for common features
 
 # AI

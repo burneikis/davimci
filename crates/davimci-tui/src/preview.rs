@@ -100,15 +100,18 @@ pub enum Height {
     Auto,
 }
 
+/// Percentage of the screen the preview band may never exceed, so the
+/// timeline always keeps rows of its own (spec 12.1).
+pub const MAX_SCREEN_PERCENT: u16 = 75;
+
 impl Height {
     /// Rows the band gets on a screen of `screen` rows, where `natural` is
     /// what the picture could fill at the current width.
     ///
-    /// Half the screen is the ceiling for all of them, so the timeline is
-    /// always the larger half (spec 12.1).
+    /// `MAX_SCREEN_PERCENT` of the screen is the ceiling for all of them.
     #[must_use]
     pub fn rows(self, screen: u16, natural: u16) -> u16 {
-        let cap = screen / 2;
+        let cap = (u32::from(screen) * u32::from(MAX_SCREEN_PERCENT) / 100) as u16;
         match self {
             Self::Off => 0,
             Self::Rows(rows) => rows.min(cap),

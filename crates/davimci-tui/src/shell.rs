@@ -489,10 +489,10 @@ mod tests {
     }
 
     #[test]
-    fn a_band_taller_than_half_the_screen_is_capped() {
+    fn a_band_taller_than_the_screen_cap_is_capped() {
         let mut t = Tui::new(80, 12);
         t.set_preview_height(Height::Rows(30));
-        assert_eq!(t.preview_rows(), 6);
+        assert_eq!(t.preview_rows(), 9);
     }
 
     /// A percentage follows the screen, and `auto` follows the width: both
@@ -512,12 +512,12 @@ mod tests {
 
         // Half-blocks are one column by two pixel rows, so a 16:9 picture
         // across 80 columns is 45 pixel rows, which is 23 character rows -
-        // capped to half of a 40-row screen.
+        // under the 30-row cap on a 40-row screen.
         t.set_preview_height(Height::Auto);
         assert_eq!(t.natural_rows(), 23);
-        assert_eq!(t.preview_rows(), 20);
+        assert_eq!(t.preview_rows(), 23);
         // Half the width is half the picture: 40 columns of 16:9 is 22 pixel
-        // rows, so 11 character rows, and the cap no longer bites.
+        // rows, so 11 character rows.
         t.push(TermEvent::Resize {
             width: 40,
             height: 40,

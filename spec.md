@@ -889,7 +889,7 @@ naming the property.
 | `timeline.fps` | `25`, `29.97` or `30000/1001` | The timeline (re-conform, spec 7.1) |
 | `timeline.resolution` | `1920x1080` | as above |
 | `preview` | `on`/`off` | The session's preview (spec 15.5) |
-| `previewheight` | `auto`, rows, or a percentage of the screen, up to half of it | The terminal's inline preview band (spec 15.6); `0` is off |
+| `previewheight` | `auto`, rows, or a percentage of the screen, up to 75% of it | The terminal's inline preview band (spec 15.6); `0` is off |
 | `previewprotocol` | `auto`, `kitty`, `sixel`, `blocks` | How the terminal draws it (spec 15.6) |
 
 - Every setter but `preview`, `previewheight` and `previewprotocol` is one command, so a change across a selection is
@@ -908,8 +908,8 @@ naming the property.
   (`50%`), or `auto`, which is as many rows as the picture can fill at the
   current width - a wider terminal gives a taller band, and asking for more
   rows than that only adds letterboxing. A percentage and `auto` are
-  recomputed on resize; a row count is not. All three are capped at half the
-  screen, so the timeline is always the larger half.
+  recomputed on resize; a row count is not. All three are capped at 75% of the
+  screen, so the timeline always keeps some rows.
 - `:set preview off` stops the transport and stops pulling frames, so a
   session with no display still edits, saves and exports.
 
