@@ -5,6 +5,13 @@
 //! textual dump. That is what makes the cross-frontend parity test possible:
 //! the same script through headless, GUI, and TUI must produce the same view
 //! states, and any difference is a frontend bug by construction.
+//!
+//! [`script`] adds the file format on top: keystrokes and assertions in one
+//! artefact, so a bug report and a test are the same thing.
+
+pub mod script;
+
+pub use script::{Failure, ParseError, Report, Script};
 
 use std::collections::VecDeque;
 

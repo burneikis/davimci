@@ -30,6 +30,23 @@ sanitize:
     RUSTFLAGS="-Zsanitizer=address" cargo +nightly test -p davimci-mlt \
         --target x86_64-unknown-linux-gnu
 
+# Regenerate the generated documentation (docs/keymap.md).
+docs:
+    DAVIMCI_UPDATE_DOCS=1 cargo test -p davimci-keys --test keymap_docs
+
+# Timing budgets and scaling checks, in release. Ignored by the fast suite.
+perf:
+    cargo test --workspace --release -- --ignored
+
+# Run a scripted-session file (keys plus assertions) through the editor.
+script FILE:
+    cargo run -p davimci-cli --no-default-features -- --script {{FILE}}
+
+# A long editing session under ASan: the soak fuzz, sanitized.
+soak-asan:
+    RUSTFLAGS="-Zsanitizer=address" cargo +nightly test -p davimci-headless \
+        --target x86_64-unknown-linux-gnu --test soak
+
 lint:
     cargo clippy --workspace --all-targets -- -D warnings
     cargo fmt --check

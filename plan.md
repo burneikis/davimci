@@ -55,7 +55,7 @@ The architectural rules these rest on are in `AGENTS.md`.
 
 ---
 
-## 1. TUI frontend (`davimci-tui`, `--features tui`)
+## TUI frontend (`davimci-tui`, `--features tui`)
 
 Explicitly a nice-to-have. Ships only if it stays thin; cut without regret
 otherwise.
@@ -76,30 +76,6 @@ Testing:
   and identical view state. A divergence is a frontend bug, never a core one.
 - Degradation test: with preview disabled and no display, the TUI still starts
   and every edit works.
-
----
-
-## 2. Integration and hardening
-
-Deliverables:
-- A scripted-session file format - keystrokes plus assertions - usable as both
-  a test format and a debugging tool.
-- Performance validation against spec 14: 1080p60 playback and editing smooth,
-  split/ripple/undo instant on a few hundred clips, predicate motions never
-  scanning. Coarse targets, measured before any optimisation.
-- A documented default keymap generated from the keymap table, so it cannot
-  drift from the code.
-
-Testing:
-- Full-workflow integration test mirroring spec 1: import a multi-track MKV,
-  ripple-delete sections, mute and trim an audio track, add an overlay, add
-  subtitles, export; assert `ffprobe` output and a golden timeline snapshot.
-- Soak fuzz: random key sequences against a fixture project, asserting no
-  panic, invariants hold, and undo returns to the initial state exactly.
-- `criterion` benchmarks with regression thresholds for jump-point
-  computation, ripple delete on a large timeline, predicate lookup, undo of a
-  long log, and project load.
-- A long editing session under ASan.
 
 ---
 
@@ -151,11 +127,10 @@ embedded.
 | M | Definition of done |
 |---|---|
 | M7 | Optional TUI behind `--features tui`, passing cross-frontend parity. Cut without regret if it is not thin. |
-| M8 | Hardened: soak-tested, 1080p60 validated, documented default keymap. Crash recovery already restores the undo tree. |
 
-M5 (audio operations) landed with M3. M7 is deliberately late: the TUI is a
-convenience, and shipping it early would mean maintaining two frontends
-through every core change.
+M5 (audio operations) landed with M3. M8 is met. M7 is deliberately late: the
+TUI is a convenience, and shipping it early would mean maintaining two
+frontends through every core change.
 
 ---
 

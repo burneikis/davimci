@@ -760,3 +760,101 @@ projection, which has no backend to ask.
 `transitions::spec` stayed the only seam, so the degradation rule needed no
 change: a name this build does not know is still a dissolve, and a project
 made with a plugin opens without it.
+
+---
+
+## Integration and hardening
+
+### The scripted-session format
+
+One artefact does both jobs the plan asked for. `davimci-headless::script`
+parses a file of directives - `keys`, `cmd`, `tick`, `dump`, `expect` - and
+runs it against a real `App` over any `Host`, so the same `.dvs` file is a
+test in `crates/davimci-headless/tests/sessions/` and a reproduction that
+`davimci --script` replays through the whole editor, MLT included.
+
+Two decisions the format turns on. An unknown directive is a parse error
+rather than a skipped line, because a typo that silently asserts nothing is
+worse than no test. And a run collects every failure instead of stopping at
+the first, with the script's line number on each, so one broken assertion does
+not hide the four after it.
+
+Assertions only read state. That is what lets a script mean the same thing
+whether or not the assertions are checked, which is what makes it usable as a
+debugging tool rather than only as a test.
+
+### What the soak fuzz found
+
+Random key sequences against a fixture project, asserting no panic, invariants
+after every chunk, and an exact return to the start when the log is undone.
+The generator is a seeded xorshift rather than a dependency so a failure
+reproduces from its seed, and the run asserts it made edits at all - a fuzz
+that types only motions proves nothing.
+
+It found two bugs in VISUAL mode, both of them the same shape: a verb that
+forgot the selection.
+
+- `y` on a selection yanked and left VISUAL live, while `d` and `gd` ended it.
+  The next motion then extended a selection the user believed was gone.
+- Motions in VISUAL resolved from the playhead, which stays at the anchor, so
+  the *moving* end was not the one that moved: `w` then `<Left>` collapsed the
+  selection to a single frame instead of shrinking it by one. `MotionCtx`
+  gained an `origin`, and the engine passes the selection's active end.
+
+Both ship with regression tests naming what they were.
+
+The fuzz also surfaced a gap rather than a bug: spec 6's "visual-line snaps to
+clip boundaries" is not implemented anywhere. It is in `todo.md` rather than
+fixed here, because it is a feature with a spec sentence and not a hardening
+defect.
+
+### Performance
+
+Criterion measures; separate `#[ignore]`d tests assert. Splitting the two
+matters: a benchmark that fails a threshold is noise on a busy machine, and a
+threshold that lives inside a benchmark never runs in CI. `just perf` runs the
+budgets in release, because a debug build proves nothing.
+
+Measured on the development machine: ripple delete on 500 clips 16 us, 500
+undos 0.9 ms, a 500-clip 200-edit project load 2.9 ms, jump-point rebuild
+7-10 us, a jump-point step 9 ns. Predicate lookup is 96 ns over a minute of
+analysis and 115 ns over an hour, which is the shape spec 14 asks for; the
+test asserts the *ratio*, not the time, because "never scans" is a structural
+claim and a ratio is what a scan would break.
+
+The 1080p60 budget subtracts the source's own cost rather than budgeting it.
+The mock synthesises a 1080p buffer per frame, as a decoder would, and that
+cost is not the presenter's; what is left - pull, compose, letterbox - has to
+fit in a quarter of the frame, leaving room for the decoder and the GUI.
+
+Found while writing the benchmarks: splitting at a clip boundary is a
+rejection, so the first draft of the undo benchmark measured 500 refused
+commands. Both the benchmark and the budget now pick interior frames, and the
+budgets `unwrap` every command so a silent rejection fails rather than
+flattering the number.
+
+### The generated keymap
+
+`docs/keymap.md` is generated from `default_bindings` and checked against it
+by a test, so a binding cannot change without the document changing with it.
+The description of every action is an exhaustive match, which means a new
+`LeafAction` stops compiling until it has a sentence - the drift the plan was
+worried about is a compile error rather than a review comment.
+
+### The full-workflow test
+
+Spec 1's five steps end to end through real MLT: import a multi-track MKV,
+split and ripple, mute and trim an audio track, add an overlay, add a
+subtitle, export, and assert with `ffprobe` that the stream layout survived
+and the output is exactly as long as the timeline.
+
+Two things it taught. `Timeline::duration` is the longest track, so a cut on
+the video track alone does not shorten it - the assertion had to name the
+track it cut. And the import is itself an undoable command, so "undo
+everything" lands on an empty timeline; the test records the tree node the
+import produced and returns to that instead.
+
+Found on the way: `davimci-mlt`'s render smoke test had not been updated for
+`RenderSettings::burn_subtitles` and no longer compiled under `slow-tests`.
+The fast suite could not see it, which is the argument for building the slow
+suite in CI even when it is not run.

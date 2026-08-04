@@ -1,0 +1,16 @@
+# Modes are entered and left by keys alone, and a verb ends the selection.
+expect mode normal
+keys v
+expect mode visual
+keys <Esc>
+expect mode normal
+
+# Select the first clip - `w` lands on the next boundary and the selection is
+# inclusive, so step back a frame - yank it, and paste it at the end.
+keys vw<Left>y
+expect mode normal
+expect clips V1 3
+
+keys $p
+expect clips V1 4
+expect timeline contains [a 300-400]

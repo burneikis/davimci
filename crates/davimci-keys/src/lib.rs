@@ -19,6 +19,7 @@
 //! it - operators in a `VISUAL*` mode act on the selection as a whole.
 
 pub mod action;
+pub mod docs;
 pub mod engine;
 pub mod error;
 pub mod key;

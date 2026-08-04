@@ -22,6 +22,7 @@ fn main() -> Result<()> {
     let mut open: Option<PathBuf> = None;
     let mut commands: Vec<String> = Vec::new();
     let mut keys: Option<String> = None;
+    let mut script: Option<PathBuf> = None;
     let mut ticks: u32 = 0;
     #[allow(unused_mut, unused_assignments)]
     let mut no_window = false;
@@ -38,6 +39,9 @@ fn main() -> Result<()> {
             }
             "-c" => commands.push(args.next().context("-c needs a command")?),
             "-k" => keys = Some(args.next().context("-k needs a key sequence")?),
+            "--script" => {
+                script = Some(PathBuf::from(args.next().context("--script needs a path")?));
+            }
             "--no-window" => no_window = true,
             "--ticks" => {
                 ticks = args
@@ -92,6 +96,10 @@ fn main() -> Result<()> {
         if ws.should_quit() {
             return Ok(());
         }
+    }
+
+    if let Some(path) = script {
+        return run_script(ws, &path);
     }
 
     if let Some(script) = keys {
@@ -229,6 +237,31 @@ fn engine_for(session: &davimci_cmd::Session) -> (Box<dyn RenderBackend>, Presen
     (backend, presenter)
 }
 
+/// Run a scripted-session file through the whole editor.
+///
+/// The same format the integration tests use, so a failing test and a bug
+/// report are the same artefact: the assertions are checked here too, and a
+/// failure is an error exit rather than a printed grumble.
+fn run_script(ws: Workspace, path: &std::path::Path) -> Result<()> {
+    let source = std::fs::read_to_string(path)
+        .with_context(|| format!("{} could not be read", path.display()))?;
+    let script = davimci_headless::Script::parse(&source)
+        .map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
+
+    let (mut app, mut editor) = assemble(ws);
+    let report = script.run(&mut app, &mut editor);
+    print!("{}", report.summary());
+    if report.passed() {
+        Ok(())
+    } else {
+        anyhow::bail!(
+            "{}: {} assertion(s) failed",
+            path.display(),
+            report.failures.len()
+        )
+    }
+}
+
 /// Drive a scripted session through the whole editor.
 ///
 /// This is the real thing minus the window: the same `App`, `Editor` and
@@ -312,6 +345,7 @@ fn print_help() {
          options:\n  \
            -c <cmd>    run a : command after opening (repeatable)\n  \
            -k <keys>   run a vim-style key sequence through the editor\n  \
+           --script <f> run a scripted-session file (keys plus assertions)\n  \
            --ticks <n> presentation ticks to run after the keys\n  \
            --no-window stay on the command line instead of opening a window\n  \
            --version   print the version\n  \

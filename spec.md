@@ -782,6 +782,10 @@ The project, config directory, Lua module namespace, and project-local file all 
 
 ## 11. Default Keybinding Summary
 
+This table is the summary. The complete list is `docs/keymap.md`, generated
+from the keymap table itself so it cannot drift from what the editor is bound
+to; `just docs` regenerates it.
+
 | Key | Meaning |
 |---|---|
 | `h`/`l` | move playhead by relative jump point (zoom-aware) |
@@ -926,6 +930,14 @@ Deliberately coarse; the only hard requirement:
 - Predicate motions are indexed lookups and must not scan (spec 10.2).
 
 Anything beyond this is measured before it is optimized.
+
+A session can be scripted as a file of keystrokes and assertions - the same
+format the integration tests use - and replayed with `davimci --script
+<file>`. A directive per line: `keys <keystring>`, `cmd <: line>`,
+`tick [n]`, `dump timeline|view`, and `expect` for mode, playhead, track,
+clip count, message, or a substring of the timeline or view. A failing
+assertion names the line that made it, so a bug report and a regression test
+are the same artefact.
 
 ---
 

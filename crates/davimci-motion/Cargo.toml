@@ -15,5 +15,10 @@ davimci-core.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+criterion.workspace = true
 davimci-core = { workspace = true, features = ["testing"] }
 proptest.workspace = true
+
+[[bench]]
+name = "motions"
+harness = false

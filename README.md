@@ -8,24 +8,7 @@ remappable keys, and hookable events.
 - [`spec.md`](spec.md) - what it is and how it behaves
 - [`plan.md`](plan.md) - what is left to build, and how it gets tested
 - [`changes.md`](changes.md) - what was built, and where it departed from the plan
-
-## Status
-
-davimci opens a window, edits video, and exports a multi-audio MKV. Keys drive
-the command layer, edits reproject the MLT graph, motions seek and present,
-playback and shuttle run off the audio clock, and the timeline is painted from
-shared view state with waveforms and filmstrips. User Lua config is loaded at
-startup: keymaps, callbacks, custom motions, export presets and event handlers
-all reach the running editor, and a plugin edit is an ordinary undo step.
-
-The `:set` family, `<Space>l` (loop selection), `:analyze`, `<`/`>` edge
-trims, Lua-registered text objects and transition types, and sidecar and
-embedded subtitle export all work, and crash recovery restores the undo tree
-with its branches.
-
-Not yet done: the TUI frontend, a scripted-session file format, and the
-performance validation and soak testing of the hardening pass. `plan.md` has
-the remaining work in dependency order; `todo.md` has the smaller gaps.
+- [`docs/keymap.md`](docs/keymap.md) - the default keymap, generated from the code
 
 ## Usage
 
@@ -35,6 +18,7 @@ davimci clip.mkv -k "ll<Right>s"        # same editor, scripted, no window
 davimci clip.mkv -k "  " --ticks 30     # play, pulling real frames through MLT
 davimci project.davimci -c ':w'         # project lifecycle from the command line
 davimci clip.mkv -c ':export out.mkv' --no-window   # batch export, with progress
+davimci --script session.dvs            # keystrokes plus assertions, from a file
 ```
 
 `-k` drives the whole stack - key grammar, commands, MLT backend, presenter,
@@ -95,8 +79,16 @@ just fixtures        # generate test media with ffmpeg (never committed)
 just test            # fast suite - no decode/encode, runs in seconds
 just test-slow       # real render/export tests (--features slow-tests)
 just test-all        # everything, including sanitizer and GPU snapshot tests
+just perf            # timing budgets and scaling checks, in release
+just bench           # criterion benchmarks
+just soak-asan       # the soak fuzz under AddressSanitizer
+just docs            # regenerate docs/keymap.md
 just lint            # clippy (deny warnings) + rustfmt --check
 ```
+
+A scripted session is a `.dvs` file of `keys`/`cmd`/`expect` lines; every file
+in `crates/davimci-headless/tests/sessions/` is a test, and the same file
+replays through the real editor with `just script <file>`.
 
 Test media is generated, never committed. Run `just fixtures` once after
 cloning; it writes to `target/fixtures/`.

@@ -1,0 +1,21 @@
+# Split a clip, ripple the middle out, and undo it all back.
+expect clips V1 3
+expect playhead 0
+
+# Two cuts, one on each side of clip `b`.
+keys l
+expect playhead 100
+keys s
+keys l
+keys s
+expect clips V1 3
+
+# Take the middle out and close the gap.
+keys h
+keys x
+expect clips V1 2
+expect timeline contains [c 100-200]
+
+keys u
+expect clips V1 3
+expect timeline contains [b 100-200]

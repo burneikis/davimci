@@ -388,7 +388,16 @@ impl Engine {
         let resolved = {
             let tl = session.timeline();
             let jumps = self.jump_points(tl);
-            let ctx = MotionCtx::new(tl, &jumps);
+            let mut ctx = MotionCtx::new(tl, &jumps);
+            // In a VISUAL mode the end that moves is the selection's active
+            // end, not the playhead, which stays where the selection was
+            // anchored (spec 6).
+            if let Some(v) = self.mode.visual() {
+                ctx = ctx.from(davimci_motion::Position {
+                    frame: v.active.frame,
+                    track: v.active.track,
+                });
+            }
             motion.resolve(&ctx, count)
         };
         match resolved {
@@ -531,6 +540,12 @@ impl Engine {
             .yank_range(track, range.start, range.end)
             .map_err(davimci_cmd::CmdError::from)?;
         self.registers.insert(register.unwrap_or('"'), reg);
+        if matches!(target, Target::Visual) {
+            // A verb applied to a selection ends the selection, as in vim -
+            // yank included, or the next motion silently extends a selection
+            // the user believes is gone.
+            self.mode.escape();
+        }
         Ok(Outcome::Applied(format!(
             "yanked {}-{}",
             range.start, range.end

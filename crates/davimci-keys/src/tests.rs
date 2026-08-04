@@ -129,6 +129,43 @@ fn visual_mode_delete_acts_on_the_selection_and_exits_visual() {
     assert_eq!(e.mode(), crate::mode::Mode::Normal);
 }
 
+/// Regression: motions in VISUAL resolved from the playhead, which stays at
+/// the anchor, so `<Left>` after `w` collapsed the selection back to one
+/// frame instead of shrinking it by one. The moving end is the active end.
+#[test]
+fn a_motion_in_visual_extends_from_the_active_end_not_the_anchor() {
+    let (mut e, mut s) = (
+        Engine::new(),
+        Session::new(fixture(&[("V1", &[(0, 100, "a"), (100, 100, "b")])])),
+    );
+    feed(&mut e, &mut s, "vw");
+    assert_eq!(
+        e.selection().map(|s| (s.start.get(), s.end.get())),
+        Some((0, 101))
+    );
+    feed(&mut e, &mut s, "<Left>");
+    assert_eq!(
+        e.selection().map(|s| (s.start.get(), s.end.get())),
+        Some((0, 100))
+    );
+}
+
+/// Regression: `y` on a selection yanked but left VISUAL live, so the next
+/// motion extended a selection the user thought had ended and the paste that
+/// followed landed over a range nobody had chosen. Every verb ends the
+/// selection, not only the ones that mutate.
+#[test]
+fn visual_mode_yank_also_exits_visual() {
+    let (mut e, mut s) = (
+        Engine::new(),
+        Session::new(fixture(&[("V1", &[(0, 100, "a"), (100, 100, "b")])])),
+    );
+    feed(&mut e, &mut s, "vl");
+    let out = feed(&mut e, &mut s, "y");
+    assert!(matches!(out.last(), Some(Outcome::Applied(_))), "{out:?}");
+    assert_eq!(e.mode(), crate::mode::Mode::Normal);
+}
+
 /// `+` in VISUAL adjusts every clip in the selection, as one undoable
 /// command (spec 6.1).
 #[test]

@@ -17,6 +17,11 @@ serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
+criterion.workspace = true
 proptest.workspace = true
 insta.workspace = true
 davimci-core = { workspace = true, features = ["testing"] }
+
+[[bench]]
+name = "edits"
+harness = false

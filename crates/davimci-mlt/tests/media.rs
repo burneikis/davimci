@@ -263,6 +263,7 @@ fn a_render_produces_a_file_with_the_requested_streams() {
         audio_codec: "aac".into(),
         container: "mkv".into(),
         separate_audio_tracks: false,
+        burn_subtitles: false,
         extra: vec![("preset".into(), "ultrafast".into())],
     };
     let mut job = RenderJob::new(&out, settings);

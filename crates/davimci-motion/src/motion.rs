@@ -24,6 +24,11 @@ pub struct MotionCtx<'a> {
     /// Analysis index backing predicate motions. Defaults to
     /// [`NoAnalysis`], which reports `Pending` for everything.
     pub analysis: &'a dyn PredicateIndex,
+    /// Where the motion starts from, when that is not the playhead. In a
+    /// `VISUAL*` mode the moving end is the selection's active end, so a
+    /// motion resolved from the playhead would snap the selection back to
+    /// where it was anchored instead of extending it (spec 6).
+    pub origin: Option<Position>,
 }
 
 impl<'a> MotionCtx<'a> {
@@ -33,7 +38,15 @@ impl<'a> MotionCtx<'a> {
             timeline,
             jumps,
             analysis: &NO_ANALYSIS,
+            origin: None,
         }
+    }
+
+    /// Resolve from `origin` rather than from the playhead.
+    #[must_use]
+    pub fn from(mut self, origin: Position) -> Self {
+        self.origin = Some(origin);
+        self
     }
 
     #[must_use]
@@ -43,11 +56,13 @@ impl<'a> MotionCtx<'a> {
     }
 
     fn track(&self) -> TrackId {
-        self.timeline.playhead().track
+        self.origin
+            .map_or_else(|| self.timeline.playhead().track, |p| p.track)
     }
 
     fn frame(&self) -> Frame {
-        self.timeline.playhead().frame
+        self.origin
+            .map_or_else(|| self.timeline.playhead().frame, |p| p.frame)
     }
 
     fn at(&self, frame: Frame) -> Resolved {

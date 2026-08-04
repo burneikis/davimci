@@ -17,3 +17,8 @@
 - a burned-in subtitle is not asserted by a pixel diff: MLT's text producers
   need a display, so the slow test only proves the text stayed out of the
   streams and the sidecar
+- spec 6 says `V` (visual-line) snaps the selection to whole clips; nothing
+  implements the snap, so `V` behaves like `v` until a motion extends it
+- `an_exported_file_has_the_duration_of_the_timeline` fails on a 5s timeline:
+  the file comes out 5.088s. Pre-dates the hardening pass; the export writes
+  a few frames more than the timeline holds

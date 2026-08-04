@@ -25,10 +25,6 @@ When an item in `plan.md` is finished, strike it and write what it taught into
 entries stay in the tense of the phase that wrote them and are not revised
 afterwards.
 
-The README describes the project, not its build log. Its status section is a
-short paragraph on what works plus a short list of what does not; it never
-grows into a per-feature table or a changelog.
-
 ## Architectural rules
 
 These are load-bearing; breaking one is a design defect rather than a style
