@@ -40,9 +40,6 @@ sudo pacman -S --needed mlt ffmpeg clang rust vulkan-swrast
 | `rust` | Toolchain, including `clippy` and `rustfmt`. |
 | `vulkan-swrast` | Lavapipe. Only needed to run presenter/GUI snapshot tests without a GPU. |
 
-Lua is not a system dependency: `mlua` builds a vendored Lua 5.4. Arch's system
-Lua is 5.5, which `mlua` does not support, so do not try to link it.
-
 ### Debian / Ubuntu
 
 ```sh
@@ -119,13 +116,7 @@ crates/
   davimci-cli/       binary
 ```
 
-Two hard rules:
-
-1. Nothing outside `davimci-mlt` may reference MLT types.
-2. No frontend may contain view logic - it belongs in `davimci-app` or
-   `davimci-present`. The cross-frontend parity test enforces this.
-
 ## License
 
 GPL-3.0. `libmlt` is LGPL-2.1 and is dynamically linked; `melt`/`melted`
-(GPL-2) are never linked or vendored. See spec 13.
+(GPL-2) are never linked or vendored.
