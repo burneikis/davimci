@@ -14,6 +14,10 @@
 - clip grouping, imported clip video/audio should be grouped together until un-grouped, meaning splitting the clip for example should split both the video and audio, and moving one should move the other, etc
 
 # AI
+- `:set` has no value completion: typing `:set numbers ` offers nothing.
+  Enumerated settings should complete their allowed values, and free-form
+  settings (e.g. `previewheight`) should show the current value (`14`, `50%`)
+  in the completion list
 - optional detached preview window for the TUI (`--preview-window`): a bare,
   undecorated, non-focusable `winit` window in `davimci-cli` showing the same
   texture the GUI uploads, off by default, terminal keeps keyboard focus, and
