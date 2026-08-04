@@ -1,4 +1,5 @@
 # Human
+- the audio levels are rendering the same for all tracks, even when each track has different audio/levels
 - allow plugins that render smth / a window. e.g. something like which-key
 - backwards shuttle audio?
 - different speed shuttle audio
