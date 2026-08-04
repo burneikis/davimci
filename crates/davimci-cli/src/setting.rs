@@ -56,6 +56,51 @@ pub enum Setting {
     PreviewHeight(PreviewHeight),
     /// `previewprotocol auto|kitty|sixel|blocks` - as above.
     PreviewProtocol(PreviewProtocol),
+    /// `numbers none|absolute|relative` - how the terminal ruler labels its
+    /// jump points. Inert outside the terminal frontend.
+    Numbers(Numbers),
+}
+
+/// What `:set numbers` accepts: vim's `nonumber`, `number` and
+/// `relativenumber`, applied to jump points instead of lines.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Numbers {
+    #[default]
+    None,
+    Absolute,
+    Relative,
+}
+
+impl Numbers {
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Absolute => "absolute",
+            Self::Relative => "relative",
+        }
+    }
+
+    /// How the setting reads back, for the status line.
+    #[must_use]
+    pub fn describe(self) -> &'static str {
+        match self {
+            Self::None => "no ruler numbers",
+            Self::Absolute => "absolute ruler numbers",
+            Self::Relative => "relative ruler numbers",
+        }
+    }
+
+    /// Parse a `--numbers` argument or a `:set numbers` value.
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "none" | "off" | "no" => Some(Self::None),
+            "absolute" | "abs" | "on" => Some(Self::Absolute),
+            "relative" | "rel" => Some(Self::Relative),
+            _ => None,
+        }
+    }
 }
 
 /// What `:set previewheight` accepts.
@@ -117,7 +162,7 @@ impl Setting {
     pub fn is_view_only(&self) -> bool {
         matches!(
             self,
-            Self::Preview(_) | Self::PreviewHeight(_) | Self::PreviewProtocol(_)
+            Self::Preview(_) | Self::PreviewHeight(_) | Self::PreviewProtocol(_) | Self::Numbers(_)
         )
     }
 }
@@ -139,6 +184,7 @@ pub const PROPERTIES: &[&str] = &[
     "preview",
     "previewheight",
     "previewprotocol",
+    "numbers",
 ];
 
 fn bad(prop: &str, expected: &str) -> CliError {
@@ -234,6 +280,9 @@ pub fn parse(prop: &str, value: &str) -> Result<Setting, CliError> {
             "blocks" => Ok(Setting::PreviewProtocol(PreviewProtocol::Blocks)),
             _ => Err(bad(prop, "auto, kitty, sixel or blocks")),
         },
+        "numbers" => Numbers::parse(value)
+            .map(Setting::Numbers)
+            .ok_or_else(|| bad(prop, "none, absolute or relative")),
         other => Err(CliError::UnknownProperty(other.to_string())),
     }
 }
@@ -386,6 +435,9 @@ mod tests {
                 "sixel",
                 Setting::PreviewProtocol(PreviewProtocol::Sixel),
             ),
+            ("numbers", "none", Setting::Numbers(Numbers::None)),
+            ("numbers", "absolute", Setting::Numbers(Numbers::Absolute)),
+            ("numbers", "relative", Setting::Numbers(Numbers::Relative)),
         ];
         for (prop, value, want) in cases {
             assert_eq!(
@@ -413,6 +465,7 @@ mod tests {
             ("previewheight", "half%"),
             ("previewheight", "%"),
             ("previewprotocol", "iterm"),
+            ("numbers", "hybrid"),
             ("clip.wobble", "1"),
         ] {
             let e = parse(prop, value).expect_err("must reject");
@@ -426,10 +479,11 @@ mod tests {
     }
 
     #[test]
-    fn only_preview_is_view_only() {
+    fn view_settings_never_enter_the_undo_log() {
         assert!(parse("preview", "off").unwrap().is_view_only());
         assert!(parse("previewheight", "6").unwrap().is_view_only());
         assert!(parse("previewprotocol", "kitty").unwrap().is_view_only());
+        assert!(parse("numbers", "relative").unwrap().is_view_only());
         assert!(!parse("clip.gain", "0").unwrap().is_view_only());
     }
 }

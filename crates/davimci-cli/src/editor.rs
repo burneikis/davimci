@@ -30,7 +30,7 @@ use crate::error::CliError;
 use crate::excmd::{ExCommand, ExOutcome};
 use crate::export::{ExportEvent, Exporter};
 use crate::plugins::Plugins;
-use crate::setting::{PreviewHeight, PreviewProtocol};
+use crate::setting::{Numbers, PreviewHeight, PreviewProtocol};
 use crate::transport::{Transport, TransportState};
 use crate::workspace::Workspace;
 
@@ -94,6 +94,7 @@ pub struct Editor {
     /// for the window, which has a texture instead of a band.
     preview_height: PreviewHeight,
     preview_protocol: PreviewProtocol,
+    numbers: Numbers,
     quit: bool,
 }
 
@@ -139,6 +140,7 @@ impl Editor {
             preview: true,
             preview_height: PreviewHeight::Off,
             preview_protocol: PreviewProtocol::Auto,
+            numbers: Numbers::None,
             quit: false,
         }
     }
@@ -271,6 +273,10 @@ impl Editor {
                 self.preview_protocol = *protocol;
                 Some(Ok(format!("preview protocol {}", protocol.name())))
             }
+            ExCommand::Set(crate::setting::Setting::Numbers(numbers)) => {
+                self.numbers = *numbers;
+                Some(Ok(numbers.describe().to_string()))
+            }
             ExCommand::Presets => Some(Ok(self.exporter.list_presets().join("  |  "))),
             ExCommand::CancelRender => Some(self.exporter.cancel(self.backend.as_mut())),
             _ => None,
@@ -310,6 +316,17 @@ impl Editor {
     #[must_use]
     pub fn preview_protocol(&self) -> PreviewProtocol {
         self.preview_protocol
+    }
+
+    /// What `:set numbers` (or `--numbers`) asks the ruler to label with.
+    #[must_use]
+    pub fn numbers(&self) -> Numbers {
+        self.numbers
+    }
+
+    /// The startup value of `:set numbers`, from `--numbers`.
+    pub fn set_numbers(&mut self, numbers: Numbers) {
+        self.numbers = numbers;
     }
 
     /// `:normalize` and `:duck`.

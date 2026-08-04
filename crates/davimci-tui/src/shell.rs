@@ -17,7 +17,7 @@ use ratatui::prelude::Line;
 
 use crate::input::{Modifiers, TermKey, translate};
 use crate::preview::{Band, Cell, Encoder, Height, Layout, Protocol, natural_rows};
-use crate::render::{self, Overlay};
+use crate::render::{self, Numbers, Overlay};
 
 /// Something the terminal observed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,6 +53,8 @@ pub struct Tui {
     quit: bool,
     /// `:set previewheight`, before the cap a small terminal imposes.
     preview_height: Height,
+    /// `:set numbers`: what the ruler labels its jump points with.
+    numbers: Numbers,
     protocol: Protocol,
     cell: Cell,
     /// The shape of the last picture offered, so `previewheight auto` and the
@@ -78,6 +80,7 @@ impl Tui {
             last_lines: Vec::new(),
             quit: false,
             preview_height: Height::Off,
+            numbers: Numbers::Off,
             protocol: Protocol::Blocks,
             cell: Cell::default(),
             aspect: Resolution {
@@ -111,6 +114,17 @@ impl Tui {
             self.preview_height = height;
             self.band = Band::default();
         }
+    }
+
+    /// `:set numbers`. Costs no rows: the labels are written into the rule
+    /// between the ticks, so turning them on never moves a track.
+    pub fn set_numbers(&mut self, numbers: Numbers) {
+        self.numbers = numbers;
+    }
+
+    #[must_use]
+    pub fn numbers(&self) -> Numbers {
+        self.numbers
     }
 
     /// Rows the band actually occupies at this terminal size.
@@ -251,6 +265,7 @@ impl Tui {
             self.width,
             self.height,
             &self.band(),
+            self.numbers,
         )
     }
 

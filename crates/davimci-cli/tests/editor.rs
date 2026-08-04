@@ -213,6 +213,27 @@ fn switching_buffers_hands_the_app_a_different_timeline() {
     assert_eq!(app.mode(), davimci_keys::Mode::Normal);
 }
 
+/// `:set numbers` is a view setting: the terminal reads it off the editor,
+/// and it must not cost the undo log an entry.
+#[test]
+fn set_numbers_reaches_the_editor_without_an_undoable_edit() {
+    let (mut app, mut editor) = editor();
+    assert_eq!(editor.numbers(), davimci_cli::Numbers::None);
+    let undos = app.session().undolist().len();
+    app.event(Event::Command("set numbers relative".into()), &mut editor);
+    assert_eq!(editor.numbers(), davimci_cli::Numbers::Relative);
+    app.event(Event::Command("set numbers absolute".into()), &mut editor);
+    assert_eq!(editor.numbers(), davimci_cli::Numbers::Absolute);
+    assert_eq!(app.session().undolist().len(), undos);
+
+    app.event(Event::Command("set numbers hybrid".into()), &mut editor);
+    assert_eq!(
+        app.messages().current().map(|m| m.severity),
+        Some(davimci_app::Severity::Error)
+    );
+    assert_eq!(editor.numbers(), davimci_cli::Numbers::Absolute);
+}
+
 #[test]
 fn an_unknown_command_reports_a_sentence_and_keeps_editing() {
     let (mut app, mut editor) = editor();

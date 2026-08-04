@@ -20,6 +20,22 @@ use ratatui::style::Color;
 /// Width of the track-name gutter, separator included.
 pub const GUTTER: u16 = 10;
 
+/// Which numbers the ruler labels its jump points with.
+///
+/// The terminal ruler is vim's line-number gutter turned on its side: the
+/// jump points are the lines, so `Relative` prints the count a motion needs
+/// (`3l` is the tick labelled `3`) and `Absolute` prints the frame it sits on.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum Numbers {
+    #[default]
+    Off,
+    Absolute,
+    Relative,
+}
+
+/// The fill the ruler is drawn on; a label may only cover this, never a tick.
+const RULE: char = '\u{2500}';
+
 /// Rows the chrome takes: the ruler and the status line.
 const CHROME_ROWS: u16 = 2;
 
@@ -81,6 +97,7 @@ pub fn lines(
     width: u16,
     height: u16,
     band: &Band,
+    numbers: Numbers,
 ) -> Vec<Line<'static>> {
     let columns = width.saturating_sub(GUTTER);
     let mut out: Vec<Line<'static>> = Vec::new();
@@ -90,7 +107,7 @@ pub fn lines(
             None => Line::from(Span::raw(fit("", width))),
         });
     }
-    out.push(ruler(view, columns));
+    out.push(ruler(view, columns, numbers));
 
     if overlay.is_open() {
         let rows = height
@@ -110,9 +127,10 @@ pub fn lines(
     out
 }
 
-/// The ruler: jump points as ticks, with the playhead's own column marked.
-fn ruler(view: &ViewState, columns: u16) -> Line<'static> {
-    let mut cells = vec!['\u{2500}'; usize::from(columns)];
+/// The ruler: jump points as ticks, with the playhead's own column marked,
+/// and the numbers `:set numbers` asked for written beside them.
+fn ruler(view: &ViewState, columns: u16, numbers: Numbers) -> Line<'static> {
+    let mut cells = vec![RULE; usize::from(columns)];
     for tick in &view.ticks {
         if let Some(cell) = cells.get_mut(tick.column as usize) {
             *cell = if tick.major { '\u{253c}' } else { '\u{252c}' };
@@ -123,6 +141,7 @@ fn ruler(view: &ViewState, columns: u16) -> Line<'static> {
     {
         *cell = '\u{25bc}';
     }
+    label_ticks(view, &mut cells, numbers);
     Line::from(vec![
         Span::styled(gutter_text("time"), Style::default().fg(Color::DarkGray)),
         Span::styled(
@@ -130,6 +149,34 @@ fn ruler(view: &ViewState, columns: u16) -> Line<'static> {
             Style::default().fg(Color::DarkGray),
         ),
     ])
+}
+
+/// Write each tick's number into the rule to its right.
+///
+/// A label is only ever drawn over untouched rule cells, so it can never hide
+/// a tick or the playhead: where two jump points are too close to label, the
+/// tick wins and the number is dropped.
+fn label_ticks(view: &ViewState, cells: &mut [char], numbers: Numbers) {
+    if numbers == Numbers::Off {
+        return;
+    }
+    for tick in &view.ticks {
+        let text = match numbers {
+            Numbers::Off => return,
+            Numbers::Absolute => tick.frame.get().to_string(),
+            Numbers::Relative => tick.relative.unsigned_abs().to_string(),
+        };
+        let first = tick.column as usize + 1;
+        let room = cells
+            .get(first..first + text.chars().count())
+            .is_some_and(|span| span.iter().all(|c| *c == RULE));
+        if !room {
+            continue;
+        }
+        for (i, c) in text.chars().enumerate() {
+            cells[first + i] = c;
+        }
+    }
 }
 
 /// One track: its name in the gutter, its clips in the timeline columns.
@@ -419,6 +466,83 @@ mod tests {
         // A terminal too small for a track still claims one, rather than
         // reporting a timeline with no lanes at all.
         assert_eq!(surface(4, 1, 0, 0).rows, 1);
+    }
+
+    fn ruler_row(ticks: &[(u32, bool, i32)], playhead: Option<u32>, numbers: Numbers) -> String {
+        let mut cells = vec![RULE; 40];
+        for (column, major, _) in ticks {
+            cells[*column as usize] = if *major { '\u{253c}' } else { '\u{252c}' };
+        }
+        if let Some(column) = playhead {
+            cells[column as usize] = '\u{25bc}';
+        }
+        let view = view_with(ticks, playhead);
+        label_ticks(&view, &mut cells, numbers);
+        cells.into_iter().collect()
+    }
+
+    /// A golden view with the ruler facts under test substituted in.
+    fn view_with(ticks: &[(u32, bool, i32)], playhead: Option<u32>) -> ViewState {
+        let mut view = davimci_app::fixtures::normal();
+        view.ticks = ticks
+            .iter()
+            .map(|(column, major, relative)| davimci_app::Tick {
+                frame: davimci_core::Frame(u64::from(*column)),
+                column: *column,
+                major: *major,
+                relative: *relative,
+            })
+            .collect();
+        view.playhead.column = playhead;
+        view
+    }
+
+    #[test]
+    fn numbers_off_leaves_the_ruler_bare() {
+        let row = ruler_row(&[(0, true, 0), (10, true, 1)], Some(0), Numbers::Off);
+        assert!(!row.contains('1'), "{row}");
+    }
+
+    #[test]
+    fn relative_numbers_count_jump_points_from_the_playhead_either_way() {
+        let ticks = [(0, true, -1), (10, true, 0), (20, true, 1), (30, true, 2)];
+        let row = ruler_row(&ticks, Some(10), Numbers::Relative);
+        assert_eq!(row.chars().next(), Some('\u{253c}'));
+        // The distance a motion needs is what is written, unsigned, exactly
+        // as `relativenumber` shows a line above the cursor.
+        for (column, want) in [(1, '1'), (11, '0'), (21, '1'), (31, '2')] {
+            assert_eq!(
+                row.chars().nth(column),
+                Some(want),
+                "column {column}: {row}"
+            );
+        }
+    }
+
+    #[test]
+    fn absolute_numbers_are_the_frame_the_tick_sits_on() {
+        let row: String = ruler_row(&[(0, true, 0), (10, true, 1)], Some(0), Numbers::Absolute);
+        let cells: Vec<char> = row.chars().collect();
+        assert_eq!((cells[0], cells[1]), ('\u{25bc}', '0'), "{row}");
+        assert_eq!((cells[11], cells[12]), ('1', '0'), "{row}");
+    }
+
+    /// Two jump points a cell apart cannot both be labelled; the tick is the
+    /// thing that must survive, so the number is what is dropped.
+    #[test]
+    fn a_label_never_covers_a_tick_or_the_playhead() {
+        let row = ruler_row(
+            &[(0, true, 0), (1, true, 1), (2, true, 2)],
+            None,
+            Numbers::Relative,
+        );
+        assert_eq!(
+            row.chars().take(3).collect::<String>(),
+            "\u{253c}\u{253c}\u{253c}"
+        );
+        // A tick in the last column has no room for its own number either.
+        let row = ruler_row(&[(39, true, 0)], None, Numbers::Relative);
+        assert_eq!(row.chars().filter(|c| c.is_ascii_digit()).count(), 0);
     }
 
     #[test]

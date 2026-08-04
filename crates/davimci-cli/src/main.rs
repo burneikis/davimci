@@ -27,6 +27,7 @@ fn main() -> Result<()> {
     #[allow(unused_mut, unused_assignments)]
     let mut no_window = false;
     let mut tui = false;
+    let mut numbers = davimci_cli::Numbers::None;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -51,6 +52,12 @@ fn main() -> Result<()> {
                     );
                 }
                 tui = true;
+            }
+            "--numbers" => {
+                let value = args.next().context("--numbers needs a mode")?;
+                numbers = davimci_cli::Numbers::parse(&value).with_context(|| {
+                    format!("--numbers takes none, absolute or relative, not {value}")
+                })?;
             }
             "--ticks" => {
                 ticks = args
@@ -117,11 +124,11 @@ fn main() -> Result<()> {
 
     #[cfg(feature = "tui")]
     if tui {
-        return run_tui(ws);
+        return run_tui(ws, numbers);
     }
-    // Without the feature the flag never gets this far, but the binding is
+    // Without the feature the flag never gets this far, but the bindings are
     // still read so the parser and the build agree.
-    let _ = tui;
+    let _ = (tui, numbers);
 
     // With no script and no `:` commands, the editor is what the user asked
     // for: open the window.
@@ -198,10 +205,11 @@ fn run_window(ws: Workspace) -> Result<()> {
 
 /// Run the editor in the terminal.
 #[cfg(feature = "tui")]
-fn run_tui(ws: Workspace) -> Result<()> {
+fn run_tui(ws: Workspace, numbers: davimci_cli::Numbers) -> Result<()> {
     // A terminal cannot hold the picture, so the preview is detached before
     // the editor is assembled around it.
-    let (app, editor) = assemble_with(ws, PresentHost::Detached);
+    let (app, mut editor) = assemble_with(ws, PresentHost::Detached);
+    editor.set_numbers(numbers);
     davimci_cli::tui::run(app, editor)
 }
 
@@ -382,6 +390,8 @@ fn print_help() {
            --ticks <n> presentation ticks to run after the keys\n  \
            --no-window stay on the command line instead of opening a window\n  \
            --tui       run in the terminal instead of a window\n  \
+           --numbers <mode> ruler jump-point numbers in --tui:\n              \
+                            none (default), absolute or relative\n  \
            --version   print the version\n  \
            -h, --help  this text\n\n\
          with no -c and no -k, davimci opens the editor window. -c drives\n\
