@@ -1,6 +1,6 @@
 # Human
 - add relative line numbers for tui mode (make relative line numbers/normal numbers/no numbers, settable with a flag) (this is for the jump points in timeline)
-- autocorrect should be context aware, e.g. if i do `:set` it shouldn't suggest "write" as the next word (idk if this a tui only bug)
+- autocorrect should be context aware, e.g. if i do `:set` it shouldn't suggest "write" as the next word, it should check for possible flags
 - allow plugins that render smth / a window. e.g. something like which-key
 - backwards shuttle audio?
 - different speed shuttle audio
