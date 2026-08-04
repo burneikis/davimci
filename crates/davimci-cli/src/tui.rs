@@ -5,9 +5,10 @@
 //! reference MLT (spec 10.1). It decides nothing - the rows were computed by
 //! `davimci-tui` from a view state `davimci-app` assembled.
 //!
-//! Preview is detached here: a terminal cannot hold a picture, so the
-//! presenter runs in `Detached` mode and `:set preview off` turns it off
-//! entirely for sessions with no display at all.
+//! The presenter runs in `Detached` mode, which only means overlays are
+//! refused: nothing yet puts the composited picture on screen here, and inline
+//! preview is the next step in `plan.md`. `:set preview off` stops the pulls
+//! altogether for a session with no display.
 
 use std::time::Duration;
 

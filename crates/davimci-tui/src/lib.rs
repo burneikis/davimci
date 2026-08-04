@@ -8,8 +8,7 @@
 //!
 //! What a terminal cannot do, and does not pretend to: no in-video overlays,
 //! no properties panel, no filmstrips, and a timeline resolution of one cell
-//! per column. Preview belongs to a detached `davimci-present` window, which
-//! `:set preview off` turns off for sessions with no display at all.
+//! per column.
 
 pub mod input;
 pub mod render;

@@ -882,10 +882,15 @@ naming the property.
 | `timeline.fps` | `25`, `29.97` or `30000/1001` | The timeline (re-conform, spec 7.1) |
 | `timeline.resolution` | `1920x1080` | as above |
 | `preview` | `on`/`off` | The session's preview (spec 15.5) |
+| `previewheight` | rows, `0` to a third of the screen | The terminal's inline preview band (spec 15.6); `0` is off |
+| `previewprotocol` | `auto`, `kitty`, `sixel`, `blocks` | How the terminal draws it (spec 15.6) |
 
-- Every setter but `preview` is one command, so a change across a selection is
+- Every setter but `preview`, `previewheight` and `previewprotocol` is one command, so a change across a selection is
   one `u`, and `.` repeats it. `:set preview` is a view setting and never
-  enters the undo log.
+  enters the undo log, and neither do `:set previewheight` and
+  `:set previewprotocol`. The two `preview*` settings are accepted but inert
+  outside the terminal frontend, rather than being an error the GUI reports for
+  a setting a config file legitimately sets.
 - `:set clip.gain` and `:set clip.fade_in|fade_out` mean exactly what `:gain`
   and `:fade` mean; the two spellings are the same command.
 - `:set transition.*` changes the transition that is there and fails when
@@ -1050,8 +1055,9 @@ order.
 - The image is letterboxed - never stretched, never cropped - and centred on
   integral pixel boundaries.
 - Overlays (timecode, safe areas) exist only in the embedded host. The
-  detached preview window used with a terminal frontend is bare, undecorated
-  and non-focusable, so the terminal keeps keyboard focus.
+  terminal frontend previews inline (spec 15.6); the detached window it can be
+  given instead is bare, undecorated and non-focusable, so the terminal keeps
+  keyboard focus.
 - Timecode is `HH:MM:SS:FF` at the timeline's nominal rate; there is no
   drop-frame representation, because the model is whole frames at one rate
   (spec 7.1).
@@ -1075,7 +1081,15 @@ mode, message and `:` command behaves identically; only the drawing differs.
 - Modals - the media picker and subtitle editing - take the track rows while
   they are open and give them back on close, since a terminal has no floating
   window.
-- Preview is a detached window (spec 15.5), and `:set preview off` runs a
-  session with no display at all.
+- Preview is drawn in the terminal itself, in the rows above the ruler that
+  `:set previewheight` asks for, using kitty graphics or sixel where the
+  terminal has them and truecolour half-blocks where it does not.
+  `:set previewprotocol` overrides the detection, because capability queries
+  are unreliable through multiplexers. Escape-sequence throughput guarantees no
+  pacing, so preview may stutter or drop frames; the audio clock stays master
+  and editing is never blocked by it.
+- `--preview-window` puts the picture in a detached window instead (spec 15.5),
+  for terminal sessions that do have a display. `:set preview off` turns
+  preview off altogether, for sessions that have none.
 - What a terminal does not have: in-video overlays, a properties panel, clip
   filmstrips, and any timeline resolution finer than one cell per column.
