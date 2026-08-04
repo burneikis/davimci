@@ -12,6 +12,8 @@
 - command to center the playhead, moving the timeline scroll to center the playhead in the timeline view (user may want to have this on all the time, or bind it, or hook pause/playing states/transitions)
 - strip down to core features, everything else should be built as a plugin, include default plugins for common features (first decide what features are core, and what can be plugins)
 - clip grouping, imported clip video/audio should be grouped together until un-grouped, meaning splitting the clip for example should split both the video and audio, and moving one should move the other, etc
+- :1234 to jump to frame 1234
+- :set nunber both, :set number current (show current abs, and relative for the rest)
 
 # AI
 - `:set` has no value completion: typing `:set numbers ` offers nothing.
