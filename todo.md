@@ -15,6 +15,7 @@
 - write docs, guide for the codebase and how to learn it
 - plugin support for gui windows
 - use clippy on pedantic / nursery
+- strip down to core features, everything else should be built as a plugin, include default plugins for common features
 
 # AI
 - ask for `.davimci.lua` trust in the window rather than on the terminal, once the app has a modal path
