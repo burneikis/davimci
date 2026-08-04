@@ -15,10 +15,10 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use davimci_app::{App, Event, Frontend, Host};
-use davimci_tui::{Protocol, Terminal, Tui};
+use davimci_tui::{Height, Protocol, Terminal, Tui};
 
 use crate::editor::Editor;
-use crate::setting::PreviewProtocol;
+use crate::setting::{PreviewHeight, PreviewProtocol};
 
 /// How long a quiet loop waits for input before ticking. Playback and shuttle
 /// advance off the clock, so the loop cannot simply block on the keyboard.
@@ -34,14 +34,33 @@ fn resolve(setting: PreviewProtocol, detected: Protocol) -> Protocol {
     }
 }
 
+/// `:set previewheight`. The registry validates the value; the terminal is
+/// what turns it into rows, since only it knows the screen and the picture.
+fn band_height(setting: PreviewHeight) -> Height {
+    match setting {
+        PreviewHeight::Off => Height::Off,
+        PreviewHeight::Rows(rows) => Height::Rows(rows),
+        PreviewHeight::Percent(pc) => Height::Percent(pc),
+        PreviewHeight::Auto => Height::Auto,
+    }
+}
+
 /// Run the editor in the terminal until it quits.
 pub fn run(mut app: App, mut editor: Editor) -> Result<()> {
     let mut term = Terminal::open().context("the terminal could not be put into raw mode")?;
     let (width, height) = term.size().unwrap_or((80, 24));
     let mut tui = Tui::new(width, height);
-    // Detected once, here: a capability query per frame would be both slow
-    // and unreliable through a multiplexer, which is why the override exists.
-    let detected = davimci_tui::detect();
+    // Detected once, here, before the event pump starts: the environment
+    // first, and a probe only if it settled nothing, since a patched build
+    // can have graphics its `TERM` never mentions. A query per frame would be
+    // both slow and, through a multiplexer, wrong - which is why the override
+    // exists.
+    let mut detected = davimci_tui::detect();
+    if detected == Protocol::Blocks
+        && let Some(probed) = term.query_graphics()
+    {
+        detected = probed;
+    }
     let cell = term.cell();
     tui.set_protocol(detected, cell);
     app.resize(tui.surface());
@@ -74,7 +93,7 @@ pub fn run(mut app: App, mut editor: Editor) -> Result<()> {
         // effect on the next frame, and the surface shrinks with the band.
         tui.set_protocol(resolve(editor.preview_protocol(), detected), cell);
         let before = tui.surface();
-        tui.set_preview_height(editor.preview_height());
+        tui.set_preview_height(band_height(editor.preview_height()));
         if tui.surface() != before {
             app.resize(tui.surface());
         }

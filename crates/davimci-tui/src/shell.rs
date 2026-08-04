@@ -12,10 +12,11 @@ use davimci_app::{
     AppError, Event, Frontend, MediaPicker, ModalKey, Modals, PickerIntent, Response, SubtitleEdit,
     Surface, ViewState,
 };
+use davimci_core::Resolution;
 use ratatui::prelude::Line;
 
 use crate::input::{Modifiers, TermKey, translate};
-use crate::preview::{Band, Cell, Encoder, Layout, Protocol};
+use crate::preview::{Band, Cell, Encoder, Height, Layout, Protocol, natural_rows};
 use crate::render::{self, Overlay};
 
 /// Something the terminal observed.
@@ -51,9 +52,13 @@ pub struct Tui {
     last_lines: Vec<Line<'static>>,
     quit: bool,
     /// `:set previewheight`, before the cap a small terminal imposes.
-    preview_height: u16,
+    preview_height: Height,
     protocol: Protocol,
     cell: Cell,
+    /// The shape of the last picture offered, so `previewheight auto` and the
+    /// letterbox agree on how many rows the frame can fill. A session that has
+    /// not composed anything yet assumes 16:9 rather than no band at all.
+    aspect: Resolution,
     encoder: Encoder,
     /// The last band encoded, held until a newer one is ready: preview is
     /// allowed to stutter, so a tick with nothing new redraws what is up.
@@ -72,9 +77,13 @@ impl Tui {
             command_rows: 0,
             last_lines: Vec::new(),
             quit: false,
-            preview_height: 0,
+            preview_height: Height::Off,
             protocol: Protocol::Blocks,
             cell: Cell::default(),
+            aspect: Resolution {
+                width: 1920,
+                height: 1080,
+            },
             encoder: Encoder::new(),
             band: Band::default(),
         }
@@ -96,18 +105,28 @@ impl Tui {
         self.protocol
     }
 
-    /// `:set previewheight` (spec 12.1). `0` turns the band off.
-    pub fn set_preview_height(&mut self, rows: u16) {
-        if rows != self.preview_height {
-            self.preview_height = rows;
+    /// `:set previewheight` (spec 12.1). [`Height::Off`] turns the band off.
+    pub fn set_preview_height(&mut self, height: Height) {
+        if height != self.preview_height {
+            self.preview_height = height;
             self.band = Band::default();
         }
     }
 
     /// Rows the band actually occupies at this terminal size.
+    ///
+    /// Resolved every time it is asked rather than cached, because a resize
+    /// changes it for a percentage and for `auto`, and the answer must not lag
+    /// a frame behind the screen it describes.
     #[must_use]
     pub fn preview_rows(&self) -> u16 {
-        render::preview_rows(self.preview_height, self.height)
+        self.preview_height.rows(self.height, self.natural_rows())
+    }
+
+    /// Rows the picture could fill at this width - what `auto` asks for.
+    #[must_use]
+    pub fn natural_rows(&self) -> u16 {
+        natural_rows(self.width, self.protocol, self.cell, self.aspect)
     }
 
     /// The band layout the current size and settings give.
@@ -133,6 +152,9 @@ impl Tui {
             return;
         }
         if let Some(p) = presentation {
+            if p.surface.width > 0 && p.surface.height > 0 {
+                self.aspect = p.surface;
+            }
             self.encoder.submit(p, self.preview_layout());
         }
         if let Some(band) = self.encoder.take() {
@@ -432,7 +454,7 @@ mod tests {
     fn a_preview_band_takes_rows_from_the_tracks_and_shifts_the_clicks() {
         let mut t = Tui::new(80, 12);
         let full = t.surface().rows;
-        t.set_preview_height(3);
+        t.set_preview_height(Height::Rows(3));
         assert_eq!(t.preview_rows(), 3);
         assert_eq!(t.surface().rows, full - 3);
         // Row 3 is now the ruler, so it seeks without taking a track.
@@ -467,10 +489,41 @@ mod tests {
     }
 
     #[test]
-    fn a_band_taller_than_a_third_of_the_screen_is_capped() {
+    fn a_band_taller_than_half_the_screen_is_capped() {
         let mut t = Tui::new(80, 12);
-        t.set_preview_height(30);
-        assert_eq!(t.preview_rows(), 4);
+        t.set_preview_height(Height::Rows(30));
+        assert_eq!(t.preview_rows(), 6);
+    }
+
+    /// A percentage follows the screen, and `auto` follows the width: both
+    /// have to answer for the terminal they are in now, not the one they were
+    /// set in.
+    #[test]
+    fn a_percentage_and_auto_band_follow_the_terminal() {
+        let mut t = Tui::new(80, 20);
+        t.set_preview_height(Height::Percent(25));
+        assert_eq!(t.preview_rows(), 5);
+        t.push(TermEvent::Resize {
+            width: 80,
+            height: 40,
+        });
+        let _ = t.poll();
+        assert_eq!(t.preview_rows(), 10);
+
+        // Half-blocks are one column by two pixel rows, so a 16:9 picture
+        // across 80 columns is 45 pixel rows, which is 23 character rows -
+        // capped to half of a 40-row screen.
+        t.set_preview_height(Height::Auto);
+        assert_eq!(t.natural_rows(), 23);
+        assert_eq!(t.preview_rows(), 20);
+        // Half the width is half the picture: 40 columns of 16:9 is 22 pixel
+        // rows, so 11 character rows, and the cap no longer bites.
+        t.push(TermEvent::Resize {
+            width: 40,
+            height: 40,
+        });
+        let _ = t.poll();
+        assert_eq!(t.preview_rows(), 11);
     }
 
     #[test]

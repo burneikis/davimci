@@ -71,14 +71,6 @@ pub fn command_rows(view: &ViewState) -> u16 {
     }
 }
 
-/// Rows a preview band of `requested` rows may actually have: never more
-/// than a third of the screen, whatever `:set previewheight` asked for
-/// (spec 12.1).
-#[must_use]
-pub fn preview_rows(requested: u16, height: u16) -> u16 {
-    requested.min(height / 3)
-}
-
 /// One screen, top row first. The preview band sits above the ruler; a
 /// graphics protocol leaves its rows blank here and writes over them, which
 /// is why they are still counted.
@@ -427,14 +419,6 @@ mod tests {
         // A terminal too small for a track still claims one, rather than
         // reporting a timeline with no lanes at all.
         assert_eq!(surface(4, 1, 0, 0).rows, 1);
-    }
-
-    #[test]
-    fn a_preview_band_is_capped_at_a_third_of_the_screen() {
-        assert_eq!(preview_rows(0, 30), 0);
-        assert_eq!(preview_rows(8, 30), 8);
-        assert_eq!(preview_rows(20, 30), 10);
-        assert_eq!(preview_rows(4, 6), 2);
     }
 
     #[test]

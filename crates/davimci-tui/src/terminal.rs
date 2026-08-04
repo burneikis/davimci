@@ -6,7 +6,7 @@
 //! pixels but never change what the editor did.
 
 use std::io::{self, Stdout, Write};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crossterm::cursor::MoveTo;
 use crossterm::event::{
@@ -21,8 +21,73 @@ use ratatui::prelude::Line;
 use ratatui::widgets::Paragraph;
 
 use crate::input::from_crossterm;
-use crate::preview::Cell;
+use crate::preview::{Cell, Protocol};
 use crate::shell::TermEvent;
+
+/// How long a capability probe waits. Long enough for a local terminal and a
+/// multiplexer to answer, short enough that a terminal which never will costs
+/// a blink of startup rather than a hang.
+const PROBE_TIMEOUT: Duration = Duration::from_millis(100);
+
+/// Read whatever the terminal replies to a probe, up to `timeout`.
+///
+/// Read straight from the input fd rather than through `crossterm`, which
+/// parses device-attribute replies and discards their contents, and does not
+/// recognise a kitty graphics reply at all. Safe only before the event pump
+/// starts, which is the only place this is called from.
+fn read_reply(timeout: Duration) -> Option<String> {
+    use rustix::event::{PollFd, PollFlags, Timespec, poll};
+
+    let stdin = rustix::stdio::stdin();
+    let deadline = Instant::now() + timeout;
+    let mut buf = Vec::new();
+    loop {
+        let left = deadline.checked_duration_since(Instant::now())?;
+        let spec = Timespec {
+            tv_sec: i64::try_from(left.as_secs()).unwrap_or(0),
+            tv_nsec: i64::from(left.subsec_nanos()),
+        };
+        let mut fds = [PollFd::new(&stdin, PollFlags::IN)];
+        if poll(&mut fds, Some(&spec)).ok()? == 0 {
+            return None;
+        }
+        let mut chunk = [0u8; 256];
+        let read = rustix::io::read(stdin, &mut chunk).ok()?;
+        if read == 0 {
+            return None;
+        }
+        buf.extend_from_slice(&chunk[..read]);
+        // The device-attributes reply is the terminator: it is sent last and
+        // every terminal sends it, so its final `c` means the answer is whole.
+        if let Some(start) = find(&buf, b"\x1b[?")
+            && buf[start..].contains(&b'c')
+        {
+            return Some(String::from_utf8_lossy(&buf).into_owned());
+        }
+    }
+}
+
+fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack.windows(needle.len()).position(|w| w == needle)
+}
+
+/// What a probe reply says the terminal can draw, if anything.
+///
+/// Kitty is asked first because a terminal with both should use it: it carries
+/// full colour, where sixel is a palette per frame.
+fn protocol_from_reply(reply: &str) -> Option<Protocol> {
+    if reply.contains("_Gi=31;OK") {
+        return Some(Protocol::Kitty);
+    }
+    // Device attributes list capabilities as numbers, and `4` is sixel.
+    let attributes = reply.split('\x1b').find(|s| s.starts_with("[?"))?;
+    let sixel = attributes
+        .trim_start_matches("[?")
+        .trim_end_matches('c')
+        .split(';')
+        .any(|n| n == "4");
+    sixel.then_some(Protocol::Sixel)
+}
 
 /// A terminal in raw mode on the alternate screen, restored on drop.
 pub struct Terminal {
@@ -70,6 +135,30 @@ impl Terminal {
             width: size.width / size.columns,
             height: size.height / size.rows,
         }
+    }
+
+    /// Ask the terminal what it can draw, once, before the input loop starts.
+    ///
+    /// The environment is not always enough: a patched build has whatever
+    /// `TERM` its distribution gave it, so a terminal with sixel can look like
+    /// one without. The query is a kitty graphics probe followed by a
+    /// device-attributes request, because every terminal answers the latter -
+    /// that reply is the terminator, so an unsupported probe costs a round
+    /// trip rather than a timeout. A terminal that says nothing in
+    /// `PROBE_TIMEOUT` gets [`None`], and the caller keeps whatever the
+    /// environment suggested.
+    ///
+    /// Only ever called here, at startup: a query per frame would be both slow
+    /// and, through a multiplexer, wrong, which is why
+    /// `:set previewprotocol` overrides all of this (spec 15.6).
+    pub fn query_graphics(&mut self) -> Option<Protocol> {
+        let mut out = io::stdout();
+        // A 1x1 RGB image by direct transmission: kitty replies `_Gi=31;OK`,
+        // and a terminal without the protocol ignores it.
+        out.write_all(b"\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b[c")
+            .ok()?;
+        out.flush().ok()?;
+        protocol_from_reply(&read_reply(PROBE_TIMEOUT)?)
     }
 
     /// Events waiting, oldest first, blocking at most `timeout`.
@@ -137,5 +226,30 @@ impl Terminal {
 impl Drop for Terminal {
     fn drop(&mut self) {
         self.close();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_probe_reply_names_the_protocol_it_proves() {
+        // kitty answers the graphics probe and the attributes request both.
+        assert_eq!(
+            protocol_from_reply("\x1b_Gi=31;OK\x1b\\\x1b[?62;c"),
+            Some(Protocol::Kitty)
+        );
+        // A sixel terminal ignores the probe and lists 4 in its attributes.
+        assert_eq!(
+            protocol_from_reply("\x1b[?62;4;6;9;22c"),
+            Some(Protocol::Sixel)
+        );
+        // Neither: the caller keeps what the environment suggested.
+        assert_eq!(protocol_from_reply("\x1b[?62;22c"), None);
+        // A number containing 4 is not the number 4.
+        assert_eq!(protocol_from_reply("\x1b[?64;41c"), None);
+        // Nothing recognisable at all, rather than a panic.
+        assert_eq!(protocol_from_reply(""), None);
     }
 }

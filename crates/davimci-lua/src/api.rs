@@ -493,5 +493,31 @@ fn editor_module(lua: &Lua, state: &Shared) -> mlua::Result<Table> {
             Ok(())
         })?,
     )?;
+    let st = Rc::clone(state);
+    t.set(
+        "set",
+        // Queued as a request like every other change, so a config-set
+        // property goes through the same registry, validation and undo rules
+        // as one typed at `:` (spec 9.9). The name and value are not checked
+        // here because this crate does not own the registry.
+        lua.create_function(move |_, (property, value): (String, Value)| {
+            let value = match value {
+                Value::String(s) => s.to_str()?.to_string(),
+                Value::Integer(n) => n.to_string(),
+                Value::Number(n) => n.to_string(),
+                Value::Boolean(b) => if b { "on" } else { "off" }.to_string(),
+                other => {
+                    return Err(err(LuaError::Config(format!(
+                        "editor.set('{property}', ...) needs a string, number or boolean, not a {}",
+                        other.type_name()
+                    ))));
+                }
+            };
+            st.borrow_mut()
+                .requests
+                .push(Request::Set { property, value });
+            Ok(())
+        })?,
+    )?;
     Ok(t)
 }

@@ -12,7 +12,7 @@ use davimci_cmd::Session;
 use davimci_core::testing::fixture;
 use davimci_gui::{Gui, GuiEvent, Modifiers as GuiModifiers, RawKey};
 use davimci_headless::HeadlessFrontend;
-use davimci_tui::{Modifiers, TermEvent, TermKey, Tui};
+use davimci_tui::{Height, Modifiers, TermEvent, TermKey, Tui};
 
 const SCRIPT: &str = "lljs";
 
@@ -25,11 +25,15 @@ fn session() -> Session {
 
 /// Run a script through the TUI at a surface, and report the final view.
 fn through_tui(surface: Surface, keys: &str) -> (String, Vec<String>) {
-    through_tui_with_preview(surface, keys, 0)
+    through_tui_with_preview(surface, keys, Height::Off)
 }
 
-/// As above, with an inline preview band of `preview` rows requested.
-fn through_tui_with_preview(surface: Surface, keys: &str, preview: u16) -> (String, Vec<String>) {
+/// As above, with an inline preview band requested.
+fn through_tui_with_preview(
+    surface: Surface,
+    keys: &str,
+    preview: Height,
+) -> (String, Vec<String>) {
     // The TUI's surface is derived from its size, so it is sized to match
     // whatever the other frontends reported rather than the other way round.
     let mut tui = Tui::new(80, 12);
@@ -92,7 +96,7 @@ fn preview_does_not_change_the_view() {
     let gui = Gui::new(800, 600);
     let surface: Surface = gui.surface();
     let (plain, plain_rows) = through_tui(surface, SCRIPT);
-    let (with_preview, preview_rows) = through_tui_with_preview(surface, SCRIPT, 4);
+    let (with_preview, preview_rows) = through_tui_with_preview(surface, SCRIPT, Height::Rows(4));
     assert_eq!(plain, with_preview, "the preview band changed the view");
     // The band's own rows are the only difference on screen, and they are
     // blank until a frame has been composed.

@@ -87,6 +87,55 @@ impl Default for Cell {
     }
 }
 
+/// What `:set previewheight` asked for, before the screen has its say.
+///
+/// Only this crate can turn one into rows: a percentage needs the screen, and
+/// `Auto` needs the picture's aspect and the terminal's cell as well.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Height {
+    #[default]
+    Off,
+    Rows(u16),
+    Percent(u8),
+    Auto,
+}
+
+impl Height {
+    /// Rows the band gets on a screen of `screen` rows, where `natural` is
+    /// what the picture could fill at the current width.
+    ///
+    /// Half the screen is the ceiling for all of them, so the timeline is
+    /// always the larger half (spec 12.1).
+    #[must_use]
+    pub fn rows(self, screen: u16, natural: u16) -> u16 {
+        let cap = screen / 2;
+        match self {
+            Self::Off => 0,
+            Self::Rows(rows) => rows.min(cap),
+            Self::Percent(pc) => ((u32::from(screen) * u32::from(pc) / 100) as u16).min(cap),
+            Self::Auto => natural.min(cap),
+        }
+    }
+}
+
+/// Rows a picture of `aspect` fills across `columns` cells.
+///
+/// This is the height beyond which more rows buy nothing: the picture is
+/// letterboxed into the band, so once it is as wide as the terminal, every
+/// further row is blank. `:set previewheight auto` asks for exactly this,
+/// which is why a wider terminal gives a taller band.
+#[must_use]
+pub fn natural_rows(columns: u16, protocol: Protocol, cell: Cell, aspect: Resolution) -> u16 {
+    let cell = protocol.cell(cell);
+    if aspect.width == 0 || cell.height == 0 {
+        return 0;
+    }
+    let width = u64::from(columns) * u64::from(cell.width);
+    let height = width * u64::from(aspect.height) / u64::from(aspect.width);
+    let rows = height.div_ceil(u64::from(cell.height));
+    u16::try_from(rows).unwrap_or(u16::MAX)
+}
+
 /// The band the preview is being drawn into.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Layout {

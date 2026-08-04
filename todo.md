@@ -1,8 +1,5 @@
 # Human
-- previewheight seems to be capped / doesnt get much bigger when changing the value passed in set
-- auto previewheight
-- persist previewprotocol choice / allow set in config
-- allow passing a percentage to previewheight, e.g. `:set previewheight 50%` (needs to handle terminal resize)
+- add relative line numbers for tui mode (make relative line numbers/normal numbers/no numbers, settable with a flag) (this is for the jump points in timeline)
 - the audio levels are rendering the same for all tracks, even when each track has different audio/levels
 - autocorrect should be context aware, e.g. if i do `:set` it shouldn't suggest "write" as the next word (idk if this a tui only bug)
 - allow plugins that render smth / a window. e.g. something like which-key
@@ -29,7 +26,3 @@
 - `an_exported_file_has_the_duration_of_the_timeline` fails on a 5s timeline:
   the file comes out 5.088s. Pre-dates the hardening pass; the export writes
   a few frames more than the timeline holds
-- no way to persist `:set previewprotocol`: the Lua config has no path to
-  `:set`, so a terminal whose graphics support detection cannot see (a patched
-  alacritty, say) needs the override typed each session. Terminal capability
-  detection by DA1 query would fix the detection side of it

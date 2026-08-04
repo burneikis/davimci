@@ -30,7 +30,7 @@ use crate::error::CliError;
 use crate::excmd::{ExCommand, ExOutcome};
 use crate::export::{ExportEvent, Exporter};
 use crate::plugins::Plugins;
-use crate::setting::PreviewProtocol;
+use crate::setting::{PreviewHeight, PreviewProtocol};
 use crate::transport::{Transport, TransportState};
 use crate::workspace::Workspace;
 
@@ -92,7 +92,7 @@ pub struct Editor {
     /// `:set previewheight` and `:set previewprotocol` (spec 15.6). Held here
     /// with the other view settings and read by the terminal session; inert
     /// for the window, which has a texture instead of a band.
-    preview_height: u16,
+    preview_height: PreviewHeight,
     preview_protocol: PreviewProtocol,
     quit: bool,
 }
@@ -137,7 +137,7 @@ impl Editor {
             last_export: None,
             known_clips: std::collections::BTreeSet::new(),
             preview: true,
-            preview_height: 0,
+            preview_height: PreviewHeight::Off,
             preview_protocol: PreviewProtocol::Auto,
             quit: false,
         }
@@ -263,13 +263,9 @@ impl Editor {
             }
             // Inert here by design: the terminal session reads these every
             // loop, and the window has no band to put a picture in.
-            ExCommand::Set(crate::setting::Setting::PreviewHeight(rows)) => {
-                self.preview_height = *rows;
-                Some(Ok(if *rows == 0 {
-                    "inline preview off".into()
-                } else {
-                    format!("inline preview {rows} rows")
-                }))
+            ExCommand::Set(crate::setting::Setting::PreviewHeight(height)) => {
+                self.preview_height = *height;
+                Some(Ok(height.describe()))
             }
             ExCommand::Set(crate::setting::Setting::PreviewProtocol(protocol)) => {
                 self.preview_protocol = *protocol;
@@ -304,9 +300,9 @@ impl Editor {
         self.preview
     }
 
-    /// Rows `:set previewheight` asks the terminal for, before its own cap.
+    /// What `:set previewheight` asks the terminal for, before its own cap.
     #[must_use]
-    pub fn preview_height(&self) -> u16 {
+    pub fn preview_height(&self) -> PreviewHeight {
         self.preview_height
     }
 
@@ -722,6 +718,17 @@ impl Editor {
             match request {
                 Request::Edit(action) => effects.act(action),
                 Request::Message(text) => effects.say(Message::info(text)),
+                // Routed as the `:` line it stands for, so a config-set
+                // property is validated, applied and reported by exactly the
+                // code a typed `:set` uses - including the undo rules, for the
+                // properties that are edits.
+                Request::Set { property, value } => {
+                    match self.command(&format!("set {property} {value}"), session, None) {
+                        Ok(Some(msg)) => effects.say(Message::info(msg)),
+                        Ok(None) => {}
+                        Err(e) => effects.say(Message::error(e.to_string())),
+                    }
+                }
                 Request::Export { preset } => {
                     let container = match self.exporter.presets().get(&preset) {
                         Ok(p) => p.container,

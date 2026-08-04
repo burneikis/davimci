@@ -734,7 +734,7 @@ fn describe_setting(setting: &crate::setting::Setting) -> String {
         Setting::TimelineFps(fps) => format!("{fps}"),
         Setting::TimelineResolution(r) => format!("{r}"),
         Setting::Preview(on) => format!("preview {}", if *on { "on" } else { "off" }),
-        Setting::PreviewHeight(rows) => format!("inline preview {rows} rows"),
+        Setting::PreviewHeight(height) => height.describe(),
         Setting::PreviewProtocol(p) => format!("preview protocol {}", p.name()),
     }
 }

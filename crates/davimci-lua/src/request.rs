@@ -100,6 +100,9 @@ pub enum Request {
     Analyze { track: Option<String> },
     /// `require("davimci.editor").message(text)`, for the status line.
     Message(String),
+    /// `require("davimci.editor").set(property, value)` - `:set`, so a config
+    /// can state a view setting the session would otherwise have to type.
+    Set { property: String, value: String },
 }
 
 /// Map an `editor.*` string from a keymap right-hand side (spec 9.2) onto

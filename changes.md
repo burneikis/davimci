@@ -951,3 +951,43 @@ repeat form and dropping each colour's trailing empty columns took the same
 band to 148 KB, a sixteenth, and real footage compresses further. The perf
 test asserts both the time and the byte count, because a preview that is fast
 to build and impossible to write is not fast.
+
+The band's own size was the next thing to go wrong, and the complaint - that
+`previewheight` barely responds - had two separate causes. One was the cap:
+a third of the screen is 8 rows on a 25-row terminal, which is a stamp. The
+other is geometry, and no cap change fixes it: the picture is letterboxed into
+the band, so once it is as wide as the terminal every further row is blank, and
+asking for 30 rows where 12 fit buys 18 rows of nothing. So the ceiling is now
+half the screen - the timeline keeps the larger half - and `previewheight` takes
+`auto`, which asks for exactly the rows the picture can fill at the current
+width, and a percentage, which asks for a share of the screen. Both are
+resolved on every query rather than cached, because a resize changes the answer
+and a band that lags the screen it describes is a band drawn over a track.
+
+Where that resolution lives is the interesting part. The `:set` registry
+validates the *value* - `auto`, rows, `50%`, and nothing else - and stops
+there, because the rows depend on the screen, the terminal's cell, and the
+picture's aspect, none of which the registry can see. `davimci-tui` owns the
+arithmetic and keeps the last frame's aspect for `auto` to ask about, assuming
+16:9 until a frame arrives rather than refusing a band to a session that has
+not composed anything yet.
+
+Detection got the other half of the same complaint: a patched terminal has
+whatever `TERM` its distribution gave it, so a build with sixel can look like a
+build without. The environment is still read first and is still the whole story
+for terminals that identify themselves; when it settles nothing, startup asks -
+a kitty graphics probe followed by a device-attributes request, which every
+terminal answers, so the reply that arrives *is* the terminator and an
+unsupported probe costs a round trip rather than a timeout. `crossterm` is no
+help here, since it parses the attributes reply and throws its contents away,
+so the probe reads the input fd itself; that is only safe because it happens
+once, before the event pump exists, which the function's placement and doc both
+say.
+
+Last, `editor.set(name, value)` in the Lua config, which is what makes a
+detected-wrong protocol a one-line fix rather than something retyped every
+session. It queues a request like every other Lua call and the host runs it as
+the `:` line it stands for, so there is exactly one registry, one set of
+messages, and one set of undo rules - a config-set property that happens to be
+an edit is still one undo step. It deliberately does not check the property
+name: a second list of names in `davimci-lua` is how the two lists drift apart.

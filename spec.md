@@ -662,6 +662,13 @@ The `editor.*` commands bindable from a keymap or callable from a callback:
 | `editor.play_pause` | `<Space><Space>` |
 | `editor.interrupt_transport` | stop playback, commit the playhead (spec 3.2.1) |
 | `editor.message(text)` | status-line message |
+| `editor.set(name, value)` | `:set name value`, so a config can hold what a session would otherwise have to type |
+
+`editor.set` is the `:set` registry and nothing more: it takes the same
+property names, reports the same errors, and a setting that is an edit is still
+one command in the undo log. It exists because view settings -
+`previewheight`, `previewprotocol` - are exactly what a user wants to state
+once in a config rather than retype every session.
 
 A registered motion (spec 9.3) is a pure query: it receives a snapshot - the
 playhead, the focused track, clip bounds, and analysis samples - and returns
@@ -882,7 +889,7 @@ naming the property.
 | `timeline.fps` | `25`, `29.97` or `30000/1001` | The timeline (re-conform, spec 7.1) |
 | `timeline.resolution` | `1920x1080` | as above |
 | `preview` | `on`/`off` | The session's preview (spec 15.5) |
-| `previewheight` | rows, `0` to a third of the screen | The terminal's inline preview band (spec 15.6); `0` is off |
+| `previewheight` | `auto`, rows, or a percentage of the screen, up to half of it | The terminal's inline preview band (spec 15.6); `0` is off |
 | `previewprotocol` | `auto`, `kitty`, `sixel`, `blocks` | How the terminal draws it (spec 15.6) |
 
 - Every setter but `preview`, `previewheight` and `previewprotocol` is one command, so a change across a selection is
@@ -897,6 +904,12 @@ naming the property.
   there is none, rather than creating one; `:transition` creates.
 - `:set timeline.fps` and `:set timeline.resolution` re-conform, and undo
   restores the exact prior geometry rather than recomputing it (spec 7.1).
+- `:set previewheight` takes a row count, a percentage of the screen
+  (`50%`), or `auto`, which is as many rows as the picture can fill at the
+  current width - a wider terminal gives a taller band, and asking for more
+  rows than that only adds letterboxing. A percentage and `auto` are
+  recomputed on resize; a row count is not. All three are capped at half the
+  screen, so the timeline is always the larger half.
 - `:set preview off` stops the transport and stops pulling frames, so a
   session with no display still edits, saves and exports.
 
@@ -1085,8 +1098,12 @@ mode, message and `:` command behaves identically; only the drawing differs.
   `:set previewheight` asks for, using kitty graphics or sixel where the
   terminal has them and truecolour half-blocks where it does not.
   `:set previewprotocol` overrides the detection, because capability queries
-  are unreliable through multiplexers. Escape-sequence throughput guarantees no
-  pacing, so preview may stutter or drop frames; the audio clock stays master
+  are unreliable through multiplexers. Detection reads the environment first
+  and, learning nothing, asks the terminal once at startup - a kitty query
+  terminated by a device-attributes request, which every terminal answers - and
+  falls back to half-blocks if the answer does not arrive promptly. It is asked
+  once, never per frame, and never after the input loop has started.
+  Escape-sequence throughput guarantees no pacing, so preview may stutter or drop frames; the audio clock stays master
   and editing is never blocked by it.
 - `--preview-window` puts the picture in a detached window instead (spec 15.5),
   for terminal sessions that do have a display. `:set preview off` turns

@@ -51,11 +51,42 @@ pub enum Setting {
     TimelineResolution(Resolution),
     /// `preview on|off` - a view setting, never an edit.
     Preview(bool),
-    /// `previewheight <rows>` - the terminal's inline preview band; `0` is
-    /// off. Inert outside the terminal frontend (spec 12.1, 15.6).
-    PreviewHeight(u16),
+    /// `previewheight auto|<rows>|<percent>%` - the terminal's inline preview
+    /// band; `0` is off. Inert outside the terminal frontend (spec 12.1,
+    /// 15.6).
+    PreviewHeight(PreviewHeight),
     /// `previewprotocol auto|kitty|sixel|blocks` - as above.
     PreviewProtocol(PreviewProtocol),
+}
+
+/// What `:set previewheight` accepts.
+///
+/// Only the terminal can turn any of these into rows: two of the three depend
+/// on the screen, and `Auto` depends on the picture as well. The registry's
+/// job is to reject what is not one of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreviewHeight {
+    /// `0` - no band.
+    Off,
+    /// A row count, capped by the terminal.
+    Rows(u16),
+    /// `50%` of the screen, recomputed on resize.
+    Percent(u8),
+    /// As many rows as the picture can fill at the current width.
+    Auto,
+}
+
+impl PreviewHeight {
+    /// How the setting reads back, for the status line and completion.
+    #[must_use]
+    pub fn describe(self) -> String {
+        match self {
+            Self::Off => "inline preview off".into(),
+            Self::Rows(rows) => format!("inline preview {rows} rows"),
+            Self::Percent(pc) => format!("inline preview {pc}% of the screen"),
+            Self::Auto => "inline preview auto".into(),
+        }
+    }
 }
 
 /// What `:set previewprotocol` accepts. `Auto` defers to the terminal
@@ -194,12 +225,9 @@ pub fn parse(prop: &str, value: &str) -> Result<Setting, CliError> {
             "off" | "false" | "0" => Ok(Setting::Preview(false)),
             _ => Err(bad(prop, "on or off")),
         },
-        // The upper bound is a third of the screen, which only the terminal
-        // knows; it clamps, so any row count parses here.
-        "previewheight" => value
-            .parse::<u16>()
-            .map(Setting::PreviewHeight)
-            .map_err(|_| bad(prop, "a number of rows")),
+        // The upper bound is half the screen, which only the terminal knows;
+        // it clamps, so any row count parses here.
+        "previewheight" => preview_height(prop, value).map(Setting::PreviewHeight),
         "previewprotocol" => match value {
             "auto" => Ok(Setting::PreviewProtocol(PreviewProtocol::Auto)),
             "kitty" => Ok(Setting::PreviewProtocol(PreviewProtocol::Kitty)),
@@ -208,6 +236,27 @@ pub fn parse(prop: &str, value: &str) -> Result<Setting, CliError> {
             _ => Err(bad(prop, "auto, kitty, sixel or blocks")),
         },
         other => Err(CliError::UnknownProperty(other.to_string())),
+    }
+}
+
+fn preview_height(prop: &str, value: &str) -> Result<PreviewHeight, CliError> {
+    let expected = "auto, a number of rows, or a percentage such as 50%";
+    if value == "auto" {
+        return Ok(PreviewHeight::Auto);
+    }
+    if let Some(pc) = value.strip_suffix('%') {
+        // 0% is off, and above 100 is meaningless rather than merely capped:
+        // a typo in a percentage should be heard about.
+        return match pc.parse::<u8>() {
+            Ok(0) => Ok(PreviewHeight::Off),
+            Ok(pc) if pc <= 100 => Ok(PreviewHeight::Percent(pc)),
+            _ => Err(bad(prop, expected)),
+        };
+    }
+    match value.parse::<u16>() {
+        Ok(0) => Ok(PreviewHeight::Off),
+        Ok(rows) => Ok(PreviewHeight::Rows(rows)),
+        Err(_) => Err(bad(prop, expected)),
     }
 }
 
@@ -303,8 +352,31 @@ mod tests {
             ),
             ("preview", "off", Setting::Preview(false)),
             ("preview", "on", Setting::Preview(true)),
-            ("previewheight", "0", Setting::PreviewHeight(0)),
-            ("previewheight", "8", Setting::PreviewHeight(8)),
+            (
+                "previewheight",
+                "0",
+                Setting::PreviewHeight(PreviewHeight::Off),
+            ),
+            (
+                "previewheight",
+                "8",
+                Setting::PreviewHeight(PreviewHeight::Rows(8)),
+            ),
+            (
+                "previewheight",
+                "auto",
+                Setting::PreviewHeight(PreviewHeight::Auto),
+            ),
+            (
+                "previewheight",
+                "50%",
+                Setting::PreviewHeight(PreviewHeight::Percent(50)),
+            ),
+            (
+                "previewheight",
+                "0%",
+                Setting::PreviewHeight(PreviewHeight::Off),
+            ),
             (
                 "previewprotocol",
                 "auto",
@@ -338,6 +410,9 @@ mod tests {
             ("preview", "maybe"),
             ("previewheight", "tall"),
             ("previewheight", "-1"),
+            ("previewheight", "101%"),
+            ("previewheight", "half%"),
+            ("previewheight", "%"),
             ("previewprotocol", "iterm"),
             ("clip.wobble", "1"),
         ] {

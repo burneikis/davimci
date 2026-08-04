@@ -888,3 +888,53 @@ fn spec_section_9_9_interrupt_transport_is_callable_and_bindable() {
     assert!(overrides.iter().any(|(k, l)| *k == Key::parse_str("<C-c>")
         && *l == LeafAction::Standalone(Action::InterruptTransport)));
 }
+
+/// Spec 9.9: `editor.set` is the `:set` registry, so it queues a request like
+/// every other change rather than writing anything itself. The property name
+/// is deliberately not validated here - this crate does not own the registry,
+/// and inventing a second list of names is how the two drift apart.
+#[test]
+fn editor_set_queues_the_set_the_host_will_run() {
+    let rt = rt();
+    exec(
+        &rt,
+        r#"
+        local editor = require("davimci.editor")
+        editor.set("previewprotocol", "sixel")
+        editor.set("previewheight", 12)
+        editor.set("preview", true)
+        "#,
+    );
+    let requests = rt.take_requests();
+    let names: Vec<(&str, &str)> = requests
+        .iter()
+        .map(|r| match r {
+            Request::Set { property, value } => (property.as_str(), value.as_str()),
+            other => panic!("expected a set request, got {other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        names,
+        vec![
+            ("previewprotocol", "sixel"),
+            ("previewheight", "12"),
+            ("preview", "on"),
+        ]
+    );
+}
+
+#[test]
+fn editor_set_refuses_a_value_no_setting_could_take() {
+    let rt = rt();
+    let err = rt
+        .exec(
+            r#"require("davimci.editor").set("previewheight", {})"#,
+            "test.lua",
+            Sandbox::Trusted,
+        )
+        .expect_err("a table is not a setting value");
+    assert!(
+        err.to_string().contains("previewheight"),
+        "the error names the property: {err}"
+    );
+}

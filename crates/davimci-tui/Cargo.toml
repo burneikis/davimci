@@ -17,6 +17,7 @@ davimci-keys.workspace = true
 davimci-present.workspace = true
 ratatui.workspace = true
 crossterm.workspace = true
+rustix.workspace = true
 
 [dev-dependencies]
 davimci-app = { workspace = true, features = ["testing"] }
