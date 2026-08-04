@@ -15,14 +15,30 @@
 - clip grouping, imported clip video/audio should be grouped together until un-grouped, meaning splitting the clip for example should split both the video and audio, and moving one should move the other, etc
 
 # AI
+- optional detached preview window for the TUI (`--preview-window`): a bare,
+  undecorated, non-focusable `winit` window in `davimci-cli` showing the same
+  texture the GUI uploads, off by default, terminal keeps keyboard focus, and
+  closing it falls back to inline preview instead of ending the session
+- doc comments across the crates still cite `plan.md` phases and `spec.md`
+  section numbers, which no longer exist; rewrite them to state the reason
+  directly (~106 files)
 - ask for `.davimci.lua` trust in the window rather than on the terminal, once the app has a modal path
-- `:set proxy on|off` (spec 10.3) is named in the spec but not in the `:set`
-  registry; proxies have no runtime switch yet
+- `:set proxy on|off` is not in the `:set` registry; proxies have no runtime
+  switch yet
 - a burned-in subtitle is not asserted by a pixel diff: MLT's text producers
   need a display, so the slow test only proves the text stayed out of the
   streams and the sidecar
-- spec 6 says `V` (visual-line) snaps the selection to whole clips; nothing
+- `V` (visual-line) should snap the selection to whole clips; nothing
   implements the snap, so `V` behaves like `v` until a motion extends it
 - `an_exported_file_has_the_duration_of_the_timeline` fails on a 5s timeline:
   the file comes out 5.088s. Pre-dates the hardening pass; the export writes
   a few frames more than the timeline holds
+
+# AI - deferred (not v1)
+- zero-copy hardware-decode surface import into the `wgpu` presenter
+- a custom subtitle layout engine in place of MLT's text producers
+- beat detection as a jump-point source
+- advanced audio: EQ, compression, noise reduction beyond `:duck`
+- video effects beyond transform and transitions
+- ML-based scene detection hook
+- plugin distribution and package management

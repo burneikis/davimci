@@ -5,9 +5,7 @@ cutting footage, trimming audio, compositing overlays, and adding subtitles.
 Configured like Neovim: `~/.config/davimci/init.lua`, a Lua scripting API,
 remappable keys, and hookable events.
 
-- [`spec.md`](spec.md) - what it is and how it behaves
-- [`plan.md`](plan.md) - what is left to build, and how it gets tested
-- [`changes.md`](changes.md) - what was built, and where it departed from the plan
+- [`todo.md`](todo.md) - loose ends and deferred work
 - [`docs/keymap.md`](docs/keymap.md) - the default keymap, generated from the code
 
 ## Usage
