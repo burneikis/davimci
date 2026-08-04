@@ -1055,3 +1055,27 @@ order.
 - Timecode is `HH:MM:SS:FF` at the timeline's nominal rate; there is no
   drop-frame representation, because the model is whole frames at one rate
   (spec 7.1).
+
+### 15.6 Terminal frontend
+
+Optional, and started with `davimci --tui` from a build with the `tui`
+feature. It renders the same view state the window does, so every keybinding,
+mode, message and `:` command behaves identically; only the drawing differs.
+
+- The screen is a ruler row, one row per visible track, a status line, and the
+  `:` line when it is open. Opening the `:` line takes its rows from the
+  tracks, so nothing is ever drawn over it.
+- Each track row is a name gutter of ten cells followed by one cell per
+  timeline column. Ruler ticks are `┼` at a clip boundary and `┬` at a
+  subdivision; the playhead is `▼` on the ruler and `│` on the focused track.
+  A clip is drawn as a filled band with its label, an offline clip as a
+  hatched one, and an audio clip carries its envelope as block characters.
+- A left click seeks to the column under it, and picks up the track under it
+  unless it landed on the ruler - the same rule the window follows.
+- Modals - the media picker and subtitle editing - take the track rows while
+  they are open and give them back on close, since a terminal has no floating
+  window.
+- Preview is a detached window (spec 15.5), and `:set preview off` runs a
+  session with no display at all.
+- What a terminal does not have: in-video overlays, a properties panel, clip
+  filmstrips, and any timeline resolution finer than one cell per column.

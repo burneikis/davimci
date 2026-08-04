@@ -10,15 +10,11 @@
 //! things: push [`GuiEvent`]s in, and rasterise the [`DrawList`] out.
 
 use davimci_app::{AppError, Event, Frontend, Response, Surface, ViewState};
-use davimci_keys::MediaIntent;
-
-use davimci_app::CommandKey;
+use davimci_app::{MediaPicker, ModalKey, Modals, PickerIntent, SubtitleEdit};
 
 use crate::input::{Modifiers, RawKey, translate};
 use crate::layout::{Layout, Metrics, paint};
 use crate::paint::{Chrome, DrawList, PickerRow, PickerView};
-use crate::picker::{Entry, MediaPicker, PickerEvent, PickerIntent};
-use crate::subtitle::{SubtitleEdit, SubtitleEvent};
 
 /// Something the windowing layer observed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,18 +41,12 @@ pub struct Gui {
     metrics: Metrics,
     pending: Vec<GuiEvent>,
     out: Vec<Event>,
-    /// Whether the `:` line is open. The line itself lives in the app; the
-    /// shell only needs to know that the keyboard belongs to it and that the
-    /// layout has a row for it.
-    command_open: bool,
+    /// The `:` line, the picker and subtitle editing, routed by the app so
+    /// the GUI and the TUI cannot disagree about who owns the keyboard.
+    modals: Modals,
     /// Whether the last view had suggestions, so the layout keeps a row for
     /// them. Read from the view rather than decided here.
     completions_shown: bool,
-    picker: Option<MediaPicker>,
-    /// Where the picker is looking. Remembered between opens, so a second
-    /// `i` starts where the last one left off.
-    browse_dir: std::path::PathBuf,
-    subtitle: Option<SubtitleEdit>,
     chrome: Chrome,
     last_draw: Option<DrawList>,
     quit: bool,
@@ -71,11 +61,8 @@ impl Gui {
             metrics: Metrics::default(),
             pending: Vec::new(),
             out: Vec::new(),
-            command_open: false,
+            modals: Modals::new(),
             completions_shown: false,
-            picker: None,
-            browse_dir: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
-            subtitle: None,
             chrome: Chrome::default(),
             last_draw: None,
             quit: false,
@@ -100,7 +87,7 @@ impl Gui {
             self.width,
             self.height,
             self.metrics,
-            self.command_open,
+            self.modals.command_is_open(),
             self.completions_shown,
         )
     }
@@ -112,63 +99,41 @@ impl Gui {
 
     #[must_use]
     pub fn command_is_open(&self) -> bool {
-        self.command_open
+        self.modals.command_is_open()
     }
 
     #[must_use]
     pub fn picker(&self) -> Option<&MediaPicker> {
-        self.picker.as_ref()
+        self.modals.picker()
     }
 
     pub fn open_picker(&mut self, picker: MediaPicker) {
-        self.picker = Some(picker);
+        self.modals.open_picker(picker);
     }
 
-    /// Open the picker on `dir` for `intent`. This is the production opener:
-    /// `i`/`a`/`r` reach it through [`Response::OpenPicker`].
+    /// Open the picker on `dir` for `intent`.
     pub fn open_picker_at(&mut self, intent: PickerIntent, dir: &std::path::Path) {
-        self.browse_dir = dir.to_path_buf();
-        self.picker = Some(MediaPicker::new(intent, entries_for(dir)));
-    }
-
-    /// Re-list the picker at `dir`, keeping the intent it was opened with.
-    fn browse_to(&mut self, dir: &std::path::Path) {
-        self.browse_dir = dir.to_path_buf();
-        let entries = entries_for(dir);
-        if let Some(p) = self.picker.as_mut() {
-            p.set_entries(entries);
-        }
+        self.modals.open_picker_at(intent, dir);
     }
 
     /// React to what the app decided. A frontend that ignored this would
     /// simply never show a picker.
     pub fn apply_response(&mut self, response: &Response) {
-        match response {
-            Response::OpenPicker(intent) => {
-                let dir = self.browse_dir.clone();
-                self.open_picker_at(intent_of(*intent), &dir);
-            }
-            // `i` on a subtitle clip edits its text rather than opening a
-            // picker (spec 8, 15.4).
-            Response::EditText { clip, text } => {
-                self.open_subtitle(SubtitleEdit::new(*clip, text.clone()));
-            }
-            _ => {}
-        }
+        self.modals.apply_response(response);
     }
 
     pub fn open_subtitle(&mut self, edit: SubtitleEdit) {
-        self.subtitle = Some(edit);
+        self.modals.open_subtitle(edit);
     }
 
     #[must_use]
     pub fn subtitle(&self) -> Option<&SubtitleEdit> {
-        self.subtitle.as_ref()
+        self.modals.subtitle()
     }
 
     /// The app told us it entered `COMMAND` mode.
     pub fn open_command_line(&mut self) {
-        self.command_open = true;
+        self.modals.open_command_line();
     }
 
     /// Turn one window event into app events, routing modals first.
@@ -201,89 +166,13 @@ impl Gui {
     }
 
     fn handle_key(&mut self, raw: RawKey, mods: Modifiers) {
-        if let Some(picker) = self.picker.as_mut() {
-            let ev = match &raw {
-                RawKey::Escape => picker.cancel(),
-                RawKey::Enter => picker.confirm(),
-                RawKey::Backspace => picker.backspace(),
-                RawKey::Down => picker.select_next(),
-                RawKey::Up => picker.select_prev(),
-                RawKey::Char(c) => picker.type_char(*c),
-                _ => PickerEvent::Browsing,
-            };
-            match ev {
-                PickerEvent::Browsing => {}
-                // Walking into a directory re-lists it in place; the app is
-                // not told, because nothing has been chosen yet.
-                PickerEvent::Descend(path) => {
-                    let dir = std::path::PathBuf::from(path);
-                    self.browse_to(&dir);
-                }
-                PickerEvent::Cancelled => {
-                    self.picker = None;
-                    self.out.push(Event::PickerCancelled);
-                }
-                PickerEvent::Chosen { path, .. } => {
-                    self.picker = None;
-                    self.out
-                        .push(Event::MediaChosen(std::path::PathBuf::from(path)));
-                }
-            }
-            return;
-        }
-
-        if let Some(edit) = self.subtitle.as_mut() {
-            let ev = match &raw {
-                RawKey::Escape => edit.commit(),
-                RawKey::Enter => edit.newline(),
-                RawKey::Backspace => edit.backspace(),
-                RawKey::Char(c) => edit.insert(*c),
-                RawKey::Left => {
-                    edit.left();
-                    SubtitleEvent::Editing
-                }
-                RawKey::Right => {
-                    edit.right();
-                    SubtitleEvent::Editing
-                }
-                _ => SubtitleEvent::Editing,
-            };
-            match ev {
-                SubtitleEvent::Editing => {}
-                // An edit that ends equal to the original commits nothing at
-                // all (spec 15.4), so the app is told it was abandoned.
-                SubtitleEvent::Unchanged => {
-                    self.subtitle = None;
-                    self.out.push(Event::TextEditCancelled);
-                }
-                SubtitleEvent::Commit { clip, text } => {
-                    self.subtitle = None;
-                    self.out.push(Event::TextEdited { clip, text });
-                }
-            }
-            return;
-        }
-
-        if self.command_open {
-            // The buffer lives in the app: the shell forwards the keystroke
-            // and learns whether the line closed from the next view.
-            let key = match &raw {
-                RawKey::Escape => CommandKey::Cancel,
-                RawKey::Enter => CommandKey::Submit,
-                RawKey::Backspace => CommandKey::Backspace,
-                RawKey::Tab => CommandKey::Tab,
-                RawKey::Up => CommandKey::Up,
-                RawKey::Down => CommandKey::Down,
-                RawKey::Left => CommandKey::Left,
-                RawKey::Right => CommandKey::Right,
-                RawKey::Space => CommandKey::Char(' '),
-                RawKey::Char(c) => CommandKey::Char(*c),
-                RawKey::Other => return,
-            };
-            if matches!(key, CommandKey::Cancel | CommandKey::Submit) {
-                self.command_open = false;
-            }
-            self.out.push(Event::CommandKey(key));
+        // A modal owns the keyboard while it is open, and which one owns it
+        // is the app's decision, not the shell's.
+        if self.modals.is_open()
+            && let Some(modal) = modal_key(&raw)
+            && let Some(events) = self.modals.handle(modal)
+        {
+            self.out.extend(events);
             return;
         }
 
@@ -334,7 +223,7 @@ impl Frontend for Gui {
     fn render(&mut self, view: &ViewState) -> Result<(), AppError> {
         // A view whose command line is open is the app telling us COMMAND
         // mode is live; keep the modal in step with it rather than guessing.
-        self.command_open = view.command_line.is_some();
+        self.modals.sync(view);
         self.completions_shown = view
             .command_line
             .as_ref()
@@ -343,7 +232,7 @@ impl Frontend for Gui {
         // The picker is the shell's own state, not the app's, so it is
         // folded into the chrome here rather than carried in the view.
         let mut chrome = self.chrome.clone();
-        chrome.picker = self.picker.as_ref().map(picker_view);
+        chrome.picker = self.modals.picker().map(picker_view);
         self.last_draw = Some(paint(view, &layout, &chrome));
         Ok(())
     }
@@ -371,34 +260,28 @@ fn picker_view(picker: &MediaPicker) -> PickerView {
     }
 }
 
-/// The app's intent, in the picker's vocabulary. Two enums rather than one
-/// because `davimci-keys` may not depend on a frontend.
-fn intent_of(intent: MediaIntent) -> PickerIntent {
-    match intent {
-        MediaIntent::Insert => PickerIntent::Insert,
-        MediaIntent::Append => PickerIntent::Append,
-        MediaIntent::Replace => PickerIntent::Replace,
-    }
-}
-
-/// The picker's rows for a directory, from the app's shared listing so the
-/// GUI and the TUI show the same files in the same order.
-fn entries_for(dir: &std::path::Path) -> Vec<Entry> {
-    davimci_app::list_dir(dir)
-        .into_iter()
-        .map(|e| Entry {
-            path: e.path.to_string_lossy().to_string(),
-            // Keep the browser's label: deriving it from the path would
-            // turn `..` into the parent directory's name.
-            label: e.label,
-            is_dir: e.is_dir,
-        })
-        .collect()
+/// One window key press in the modal alphabet. `None` for keys no modal can
+/// use, which then fall through to the grammar.
+fn modal_key(raw: &RawKey) -> Option<ModalKey> {
+    Some(match raw {
+        RawKey::Char(c) => ModalKey::Char(*c),
+        RawKey::Space => ModalKey::Char(' '),
+        RawKey::Escape => ModalKey::Escape,
+        RawKey::Enter => ModalKey::Enter,
+        RawKey::Backspace => ModalKey::Backspace,
+        RawKey::Tab => ModalKey::Tab,
+        RawKey::Left => ModalKey::Left,
+        RawKey::Right => ModalKey::Right,
+        RawKey::Up => ModalKey::Up,
+        RawKey::Down => ModalKey::Down,
+        RawKey::Other => return None,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use davimci_app::{CommandKey, Entry};
     use davimci_keys::Key;
 
     fn gui() -> Gui {
@@ -464,8 +347,8 @@ mod tests {
     fn the_picker_swallows_keys_until_it_closes() {
         let mut g = gui();
         g.open_picker(MediaPicker::new(
-            crate::picker::PickerIntent::Insert,
-            vec![crate::picker::Entry::file("/m/a.mkv")],
+            PickerIntent::Insert,
+            vec![Entry::file("/m/a.mkv")],
         ));
         g.push(GuiEvent::Key(RawKey::Char('a'), Modifiers::default()));
         assert!(g.poll().is_empty());

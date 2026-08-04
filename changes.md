@@ -858,3 +858,40 @@ Found on the way: `davimci-mlt`'s render smoke test had not been updated for
 `RenderSettings::burn_subtitles` and no longer compiled under `slow-tests`.
 The fast suite could not see it, which is the argument for building the slow
 suite in CI even when it is not run.
+
+## TUI frontend (`davimci-tui`)
+
+A `ratatui` terminal frontend behind `--features tui`, started with
+`davimci --tui`. One row per track, one cell per timeline column, the ruler's
+ticks and the playhead where the view state put them, and the status and `:`
+lines below. It renders the same `ViewState` the window does, so nothing about
+the editor changes with the host.
+
+The thing that made it thin was moving what both frontends need out of the
+GUI first. `picker.rs` and `subtitle.rs` were view state, not window state, so
+they now live in `davimci-app`, and the routing that decides *which* modal
+owns a keystroke moved with them as `davimci_app::Modals`. The GUI shell lost
+sixty lines to the move and the TUI never had to grow them: both map their raw
+key onto `ModalKey` and hand it to the same router. Two copies of that routing
+would have been two editors, and the parity test would have caught it only
+after the divergence existed.
+
+The `:` line takes its rows from the tracks rather than overlaying them, so
+opening it changes the `Surface` the app is told about. That fell out of a
+snapshot: the first draft drew the command line over the bottom track, because
+the surface still claimed a row the chrome had taken.
+
+Preview is detached, which is why `engine_for` now takes the presenter host
+instead of assuming `Embedded`. A terminal cannot hold the picture, and the
+detached window is already specified as bare and non-focusable (spec 15.5), so
+the terminal keeps the keyboard.
+
+The parity test is now three-way, and the degradation test runs a whole edit
+with no display and no preview. Both pass on the first script they were given,
+which is what the split between `davimci-app` and the frontends was for -
+there was no view logic in the terminal to disagree with the window about.
+
+Terminal keys needed one thing a window does not: a terminal has no Space key,
+only the character, so `translate` names a typed space as the transport token,
+and key *releases* from the kitty protocol are dropped before they can run
+every binding twice.

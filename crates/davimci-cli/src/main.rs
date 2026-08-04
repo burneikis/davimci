@@ -26,6 +26,7 @@ fn main() -> Result<()> {
     let mut ticks: u32 = 0;
     #[allow(unused_mut, unused_assignments)]
     let mut no_window = false;
+    let mut tui = false;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -43,6 +44,14 @@ fn main() -> Result<()> {
                 script = Some(PathBuf::from(args.next().context("--script needs a path")?));
             }
             "--no-window" => no_window = true,
+            "--tui" => {
+                if cfg!(not(feature = "tui")) {
+                    anyhow::bail!(
+                        "this build has no terminal frontend; rebuild with --features tui"
+                    );
+                }
+                tui = true;
+            }
             "--ticks" => {
                 ticks = args
                     .next()
@@ -105,6 +114,14 @@ fn main() -> Result<()> {
     if let Some(script) = keys {
         return run_session(ws, &script, ticks);
     }
+
+    #[cfg(feature = "tui")]
+    if tui {
+        return run_tui(ws);
+    }
+    // Without the feature the flag never gets this far, but the binding is
+    // still read so the parser and the build agree.
+    let _ = tui;
 
     // With no script and no `:` commands, the editor is what the user asked
     // for: open the window.
@@ -179,12 +196,25 @@ fn run_window(ws: Workspace) -> Result<()> {
         .map_err(|e| anyhow::anyhow!("the window could not open: {e}"))
 }
 
+/// Run the editor in the terminal.
+#[cfg(feature = "tui")]
+fn run_tui(ws: Workspace) -> Result<()> {
+    // A terminal cannot hold the picture, so the preview is detached before
+    // the editor is assembled around it.
+    let (app, editor) = assemble_with(ws, PresentHost::Detached);
+    davimci_cli::tui::run(app, editor)
+}
+
 /// Load user config and assemble the editor around it.
 ///
 /// The config is loaded before the `App` exists because it decides what the
 /// keymap is: a user binding has to be in the table the grammar consults,
 /// not layered on afterwards by whoever remembers to (spec 9.2).
 fn assemble(ws: Workspace) -> (App, Editor) {
+    assemble_with(ws, PresentHost::Embedded)
+}
+
+fn assemble_with(ws: Workspace, host: PresentHost) -> (App, Editor) {
     let root = ws.root().to_path_buf();
     let mut plugins = Plugins::load(
         davimci_lua::ConfigPaths::from_env().as_ref(),
@@ -196,7 +226,7 @@ fn assemble(ws: Workspace) -> (App, Editor) {
     let jump = plugins.timeline_config().jump;
 
     let session = ws.current_session();
-    let (backend, presenter) = engine_for(&session);
+    let (backend, presenter) = engine_for(&session, host);
     let mut editor = Editor::new(ws, backend, presenter).with_plugins(plugins);
     let mut app = App::with_keymap(session, keymap);
     app.set_jump_config(jump);
@@ -216,7 +246,10 @@ fn assemble(ws: Workspace) -> (App, Editor) {
 /// (spec 10.1). A missing or broken `libmlt` degrades to the mock backend
 /// rather than refusing to start, so editing still works without a working
 /// decoder (Phase 0: recoverable errors degrade locally).
-fn engine_for(session: &davimci_cmd::Session) -> (Box<dyn RenderBackend>, Presenter) {
+fn engine_for(
+    session: &davimci_cmd::Session,
+    host: PresentHost,
+) -> (Box<dyn RenderBackend>, Presenter) {
     let props = session.timeline().props;
     let backend: Box<dyn RenderBackend> = match davimci_mlt::MltBackend::new(props) {
         Ok(b) => Box::new(b),
@@ -227,7 +260,7 @@ fn engine_for(session: &davimci_cmd::Session) -> (Box<dyn RenderBackend>, Presen
         }
     };
     let presenter = Presenter::new(
-        PresentHost::Embedded,
+        host,
         Resolution {
             width: 640,
             height: 360,
@@ -348,6 +381,7 @@ fn print_help() {
            --script <f> run a scripted-session file (keys plus assertions)\n  \
            --ticks <n> presentation ticks to run after the keys\n  \
            --no-window stay on the command line instead of opening a window\n  \
+           --tui       run in the terminal instead of a window\n  \
            --version   print the version\n  \
            -h, --help  this text\n\n\
          with no -c and no -k, davimci opens the editor window. -c drives\n\

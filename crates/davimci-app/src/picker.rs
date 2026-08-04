@@ -1,8 +1,10 @@
-//! The media picker behind `i` / `a` / `r` (plan.md Phase 9c, spec 11).
+//! The media picker behind `i` / `a` / `r` (spec 11).
 //!
-//! State only: the shell draws a list and the host supplies its entries. The
-//! GUI never reads a directory - the crate does no I/O, so the picker stays
-//! testable and the "only the CLI layer touches the filesystem" rule holds.
+//! State only: a frontend draws a list and the host supplies its entries. It
+//! lives here rather than in a frontend because the GUI and the TUI both
+//! open it, and two copies would be two pickers. The crate does no I/O, so
+//! the picker stays testable and the "only the CLI layer touches the
+//! filesystem" rule holds.
 
 /// One selectable entry, as the host described it.
 #[derive(Debug, Clone, PartialEq, Eq)]

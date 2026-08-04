@@ -16,7 +16,10 @@ pub mod error;
 pub mod frontend;
 pub mod job;
 pub mod message;
+pub mod modal;
+pub mod picker;
 pub mod plugin;
+pub mod subtitle;
 pub mod thumbnail;
 pub mod view;
 pub mod viewport;
@@ -32,7 +35,10 @@ pub use error::AppError;
 pub use frontend::{Event, Frontend, Response, Surface};
 pub use job::{Job, JobList, JobState, JobUpdate};
 pub use message::{Message, MessageQueue, Severity};
+pub use modal::{ModalKey, Modals};
+pub use picker::{Entry, MediaPicker, PickerEvent, PickerIntent};
 pub use plugin::PluginEffects;
+pub use subtitle::{SubtitleEdit, SubtitleEvent};
 pub use thumbnail::{Thumbnail, ThumbnailRequest, Thumbnails};
 pub use view::{
     ClipView, CommandLineView, PlayheadView, SelectionView, Tick, TrackView, ViewInputs, ViewState,

@@ -55,29 +55,6 @@ The architectural rules these rest on are in `AGENTS.md`.
 
 ---
 
-## TUI frontend (`davimci-tui`, `--features tui`)
-
-Explicitly a nice-to-have. Ships only if it stays thin; cut without regret
-otherwise.
-
-Deliverables:
-- `ratatui` timeline, ruler, status line and command line, rendered from the
-  same `davimci-app` view state as the GUI.
-- Preview through `davimci-present` in `Detached` mode, `:set preview off` for
-  no-display sessions.
-- Terminal key translation into `davimci-keys` tokens.
-- Documented limitations: no in-video overlays, no properties panel, coarser
-  timeline resolution.
-
-Testing:
-- Terminal snapshot tests at fixed sizes per mode.
-- The cross-frontend parity test extended to three hosts: one scripted session
-  through headless, GUI and TUI must produce an identical timeline snapshot
-  and identical view state. A divergence is a frontend bug, never a core one.
-- Degradation test: with preview disabled and no display, the TUI still starts
-  and every edit works.
-
----
 
 ## Cross-cutting test strategy
 
@@ -116,21 +93,13 @@ Standing rules:
 
 ---
 
-## Milestones remaining
+## Milestones
 
-M1 to M6 are met: the GUI edits video, plays it in sync, saves, exports a
-multi-audio MKV, and the whole Lua surface - motions, text objects, keymaps,
+Every milestone is met: the GUI edits video, plays it in sync, saves, exports
+a multi-audio MKV, and the whole Lua surface - motions, text objects, keymaps,
 hooks, presets, transition types - reaches a running editor. Overlays and
 subtitles are editable through `:set` and exportable burned, sidecar or
-embedded.
-
-| M | Definition of done |
-|---|---|
-| M7 | Optional TUI behind `--features tui`, passing cross-frontend parity. Cut without regret if it is not thin. |
-
-M5 (audio operations) landed with M3. M8 is met. M7 is deliberately late: the
-TUI is a convenience, and shipping it early would mean maintaining two
-frontends through every core change.
+embedded, and the optional TUI passes cross-frontend parity.
 
 ---
 

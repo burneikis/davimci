@@ -1,5 +1,6 @@
-//! One scripted session, two frontends, identical view states (plan.md 9c;
-//! the full three-way parity test arrives with the TUI in 9d).
+//! One scripted session, two frontends, identical view states. The three-way
+//! test that adds the TUI lives in `davimci-tui`, which is the crate that can
+//! see all three.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 

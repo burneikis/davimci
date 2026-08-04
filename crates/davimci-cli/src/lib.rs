@@ -23,6 +23,8 @@ pub mod plugins;
 pub mod setting;
 pub mod thumbnail;
 pub mod transport;
+#[cfg(feature = "tui")]
+pub mod tui;
 #[cfg(feature = "window")]
 pub mod window;
 pub mod workspace;

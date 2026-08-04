@@ -68,8 +68,8 @@ Checks every prerequisite and prints exactly what is missing and how to get it.
 cargo build                      # GUI frontend (default)
 cargo run -- path/to/video.mkv
 
-cargo build --features tui       # optional TUI + detached preview window
-cargo run --features tui -- path/to/video.mkv
+cargo build -p davimci-cli --features tui    # optional terminal frontend
+cargo run -p davimci-cli --features tui -- --tui path/to/video.mkv
 ```
 
 ## Testing

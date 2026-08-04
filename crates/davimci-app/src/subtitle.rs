@@ -1,4 +1,4 @@
-//! INSERT-mode text editing for subtitle clips (plan.md Phase 9c, spec 8).
+//! INSERT-mode text editing for subtitle clips (spec 8, 15.4).
 //!
 //! A subtitle clip's text is timeline content, so committing an edit must go
 //! through a `Command`. This buffer therefore never writes anywhere: it holds

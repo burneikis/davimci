@@ -37,6 +37,8 @@ tracing   = "0.1"
 proptest  = "1"
 criterion = { version = "0.7", default-features = false, features = ["cargo_bench_support"] }
 insta     = { version = "1", features = ["yaml"] }
+ratatui   = "0.30"
+crossterm = "0.29"
 egui      = "0.35"
 eframe    = { version = "0.35", default-features = false, features = ["wgpu", "x11", "wayland", "default_fonts"] }
 
