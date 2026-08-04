@@ -1001,3 +1001,20 @@ stream analysed wrote the entry and the rest hit it - a real measurement, of
 somebody else's audio, which is exactly the failure `source_of` refuses to
 commit at the timeline level. The key now names the stream and its kind as
 well; entries written under the old key are simply never looked up.
+
+### Completion that knows where it is
+
+`:set ` used to suggest `write`. The `:` line held one flat candidate list and
+filtered it by prefix wherever the cursor stood, so every word on the line was
+treated as a command name. Candidates now hang off a *context* - the words
+before the word under the cursor, normalised to single spaces - with the empty
+context holding the command names, `set` the property names, `set
+previewprotocol` its four values, `transition` and `set transition.type` the
+transition types, `fade` its two ends.
+
+A context with no entry offers nothing rather than falling back to the command
+names, which is the whole point: a path, a frame count and a host-installed
+preset are argument positions the vocabulary cannot enumerate, and suggesting
+`quit!` in one of them is worse than suggesting nothing. The lists still come
+from the host next to the parser, so an argument that parses is an argument
+that completes.

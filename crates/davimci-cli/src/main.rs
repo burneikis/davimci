@@ -230,7 +230,7 @@ fn assemble_with(ws: Workspace, host: PresentHost) -> (App, Editor) {
     let mut editor = Editor::new(ws, backend, presenter).with_plugins(plugins);
     let mut app = App::with_keymap(session, keymap);
     app.set_jump_config(jump);
-    app.set_command_candidates(davimci_cli::excmd::vocabulary());
+    app.set_command_vocabulary(davimci_cli::excmd::vocabulary());
     // A config that failed to load says so on the status line and the editor
     // starts anyway: one broken plugin is not a reason to refuse to open.
     for notice in notices {

@@ -155,12 +155,12 @@ fn colon_opens_the_command_line_and_the_host_runs_the_line() {
 fn the_colon_line_is_visible_as_it_is_typed_and_suggests_completions() {
     let mut app = App::new(Session::new(timeline()));
     let mut host = TestHost::default();
-    app.set_command_candidates(
+    app.set_command_vocabulary(davimci_app::CommandVocabulary::new(
         ["b", "bn", "bp", "w"]
             .iter()
             .map(|s| (*s).to_string())
             .collect(),
-    );
+    ));
     for k in Key::parse_str(":b") {
         app.key(k, &mut host);
     }

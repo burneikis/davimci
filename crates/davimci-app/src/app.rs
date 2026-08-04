@@ -273,7 +273,7 @@ impl App {
             waveforms: Waveforms::default(),
             thumbnails: Thumbnails::default(),
             thumbnail_columns: 0,
-            command: CommandLine::new(crate::cmdline::default_candidates()),
+            command: CommandLine::new(crate::cmdline::default_vocabulary()),
             command_open: false,
             pending_pick: None,
             editing_text: None,
@@ -789,8 +789,8 @@ impl App {
     /// The vocabulary Tab completes against. The app does not own the ex
     /// vocabulary (`davimci-cli` does), so the host supplies it once at
     /// startup and it is shown to every frontend identically.
-    pub fn set_command_candidates(&mut self, candidates: Vec<String>) {
-        self.command.set_candidates(candidates);
+    pub fn set_command_vocabulary(&mut self, vocabulary: crate::CommandVocabulary) {
+        self.command.set_vocabulary(vocabulary);
     }
 
     /// The `:` line as it currently stands, if one is open.

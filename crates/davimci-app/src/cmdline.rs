@@ -4,6 +4,49 @@
 //! receives while `COMMAND` is open and draws what the view state says; what
 //! a key *does* is decided here, so no two frontends can grow two `:` lines.
 
+/// What may be completed, and where.
+///
+/// Completion is *contextual*: the words already typed decide the candidate
+/// list, so `:set` offers property names rather than command names and
+/// `:set previewprotocol` offers its values. A context is the words before
+/// the word under the cursor, joined by single spaces; the empty context is
+/// the command names.
+#[derive(Debug, Clone, Default)]
+pub struct CommandVocabulary {
+    contexts: std::collections::BTreeMap<String, Vec<String>>,
+}
+
+impl CommandVocabulary {
+    /// A vocabulary of command names and nothing else.
+    #[must_use]
+    pub fn new(commands: Vec<String>) -> Self {
+        let mut v = Self::default();
+        v.contexts.insert(String::new(), commands);
+        v
+    }
+
+    /// Candidates for the word that follows `context`, e.g. `"set"` for the
+    /// property names or `"set preview"` for `on`/`off`.
+    #[must_use]
+    pub fn with_arguments(mut self, context: &str, candidates: Vec<String>) -> Self {
+        self.contexts.insert(context.to_string(), candidates);
+        self
+    }
+
+    /// The command names.
+    #[must_use]
+    pub fn commands(&self) -> &[String] {
+        self.candidates("")
+    }
+
+    /// Candidates for one context, or nothing when the context takes an
+    /// argument no vocabulary can enumerate (a path, a number).
+    #[must_use]
+    pub fn candidates(&self, context: &str) -> &[String] {
+        self.contexts.get(context).map_or(&[], Vec::as_slice)
+    }
+}
+
 /// Command-line state.
 #[derive(Debug, Clone, Default)]
 pub struct CommandLine {
@@ -14,7 +57,7 @@ pub struct CommandLine {
     browsing: Option<usize>,
     /// Candidate vocabulary for Tab completion, supplied by the host: the
     /// GUI does not own the ex-command vocabulary (`davimci-cli` does).
-    candidates: Vec<String>,
+    vocabulary: CommandVocabulary,
 }
 
 /// One keystroke the `:` line understands. A frontend names the key; what it
@@ -48,15 +91,15 @@ pub enum CommandLineEvent {
 
 impl CommandLine {
     #[must_use]
-    pub fn new(candidates: Vec<String>) -> Self {
+    pub fn new(vocabulary: CommandVocabulary) -> Self {
         Self {
-            candidates,
+            vocabulary,
             ..Self::default()
         }
     }
 
-    pub fn set_candidates(&mut self, candidates: Vec<String>) {
-        self.candidates = candidates;
+    pub fn set_vocabulary(&mut self, vocabulary: CommandVocabulary) {
+        self.vocabulary = vocabulary;
     }
 
     #[must_use]
@@ -189,15 +232,24 @@ impl CommandLine {
         }
     }
 
-    /// Candidates matching the word being typed, in vocabulary order.
+    /// Candidates matching the word being typed, in vocabulary order, drawn
+    /// from the context the earlier words on the line establish.
     #[must_use]
     pub fn completions(&self) -> Vec<&str> {
         let prefix = self.word();
-        self.candidates
+        self.vocabulary
+            .candidates(&self.context())
             .iter()
             .filter(|c| c.starts_with(prefix))
             .map(String::as_str)
             .collect()
+    }
+
+    /// The completion context: the words before the word under the cursor,
+    /// normalised to single spaces. Empty on the first word.
+    fn context(&self) -> String {
+        let before = &self.buffer[..self.buffer.len() - self.word().len()];
+        before.split_whitespace().collect::<Vec<_>>().join(" ")
     }
 
     /// Tab: complete to the longest common prefix of the matches, which is
@@ -259,17 +311,18 @@ impl CommandLine {
     }
 }
 
-/// The spec 12 vocabulary, as a default candidate list for a host that has
-/// not supplied one.
+/// The spec 12 vocabulary, as a default for a host that has not supplied one.
 #[must_use]
-pub fn default_candidates() -> Vec<String> {
-    [
-        "w", "q", "q!", "wq", "x", "e", "new", "ls", "bn", "bp", "b", "relink", "analyze",
-        "export", "render",
-    ]
-    .iter()
-    .map(|s| (*s).to_string())
-    .collect()
+pub fn default_vocabulary() -> CommandVocabulary {
+    CommandVocabulary::new(
+        [
+            "w", "q", "q!", "wq", "x", "e", "new", "ls", "bn", "bp", "b", "relink", "analyze",
+            "export", "render", "set",
+        ]
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect(),
+    )
 }
 
 #[cfg(test)]
@@ -277,7 +330,13 @@ mod tests {
     use super::*;
 
     fn line() -> CommandLine {
-        CommandLine::new(default_candidates())
+        CommandLine::new(default_vocabulary())
+    }
+
+    fn typed(c: &mut CommandLine, text: &str) {
+        for ch in text.chars() {
+            c.insert(ch);
+        }
     }
 
     #[test]
@@ -347,11 +406,12 @@ mod tests {
 
     #[test]
     fn completion_applies_to_the_word_under_the_cursor_only() {
-        let mut c = CommandLine::new(vec!["h264-1080p".into(), "h264-720p".into()]);
+        let mut c = CommandLine::new(
+            default_vocabulary()
+                .with_arguments("render", vec!["h264-1080p".into(), "h264-720p".into()]),
+        );
         c.open();
-        for ch in "render h264-".chars() {
-            c.insert(ch);
-        }
+        typed(&mut c, "render h264-");
         c.complete();
         assert_eq!(c.buffer(), "render h264-");
         assert_eq!(c.completions().len(), 2);
@@ -366,6 +426,33 @@ mod tests {
         }
         c.complete();
         assert_eq!(c.buffer(), "zzz");
+    }
+
+    /// A second word is not a command: `:set ` must not suggest `write`.
+    #[test]
+    fn completion_is_contextual() {
+        let mut c = CommandLine::new(
+            default_vocabulary()
+                .with_arguments("set", vec!["preview".into(), "previewprotocol".into()])
+                .with_arguments("set preview", vec!["on".into(), "off".into()]),
+        );
+        c.open();
+        typed(&mut c, "set ");
+        assert_eq!(c.completions(), ["preview", "previewprotocol"]);
+        typed(&mut c, "preview ");
+        assert_eq!(c.completions(), ["on", "off"]);
+    }
+
+    /// A context with no candidates - a path, a number - suggests nothing
+    /// rather than falling back to the command names.
+    #[test]
+    fn an_unknown_context_suggests_nothing() {
+        let mut c = line();
+        c.open();
+        typed(&mut c, "w pro");
+        assert!(c.completions().is_empty());
+        c.complete();
+        assert_eq!(c.buffer(), "w pro");
     }
 
     #[test]

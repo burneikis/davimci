@@ -1032,11 +1032,18 @@ order.
   entry, browsed with Up/Down.
 - Tab completes the word under the cursor to the *longest common prefix* of
   the matches, and never guesses between two commands.
+- Completion is **contextual**: the words already typed decide the candidates.
+  The first word completes command names; a later word completes what that
+  command accepts there - `:set` offers property names, `:set previewprotocol`
+  offers `auto`/`kitty`/`sixel`/`blocks`, `:transition` offers transition
+  types. An argument position no vocabulary can enumerate - a path, a number,
+  a preset the host installs - offers nothing, and never falls back to the
+  command names.
 - The candidates for the word under the cursor are **shown** while typing, on
   their own row above the line. A single candidate identical to what is
   already typed is not shown, and a list too long for the row is truncated
   with a count of what was left out. The vocabulary comes from the host, so
-  completion covers exactly the commands that exist.
+  completion covers exactly the commands and arguments that exist.
 
 ### 15.4 Media picker and text editing
 

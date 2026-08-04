@@ -30,7 +30,9 @@ pub mod fixtures;
 
 pub use app::{App, Host, NullHost};
 pub use browse::{BrowseEntry, is_media, list_dir};
-pub use cmdline::{CommandKey, CommandLine, CommandLineEvent, default_candidates};
+pub use cmdline::{
+    CommandKey, CommandLine, CommandLineEvent, CommandVocabulary, default_vocabulary,
+};
 pub use error::AppError;
 pub use frontend::{Event, Frontend, Response, Surface};
 pub use job::{Job, JobList, JobState, JobUpdate};

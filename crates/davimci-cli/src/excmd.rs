@@ -291,11 +291,48 @@ pub fn parse(line: &str) -> Result<ExCommand, CliError> {
     }
 }
 
-/// Every `:` name this crate accepts, for the command line's completion
-/// (spec 12). The vocabulary lives here, next to [`parse`], so a command
-/// that exists is a command that can be completed.
+/// Every `:` name this crate accepts, and the arguments each one takes, for
+/// the command line's completion (spec 12). The vocabulary lives here, next
+/// to [`parse`], so a command that exists is a command that can be completed,
+/// and an argument that parses is an argument that can be completed.
+///
+/// Contexts a vocabulary cannot enumerate - paths, numbers, preset names the
+/// host installs - are simply absent, which suggests nothing rather than
+/// suggesting command names in an argument position.
 #[must_use]
-pub fn vocabulary() -> Vec<String> {
+pub fn vocabulary() -> davimci_app::CommandVocabulary {
+    let mut v = davimci_app::CommandVocabulary::new(command_names())
+        .with_arguments(
+            "set",
+            crate::setting::PROPERTIES
+                .iter()
+                .map(|p| (*p).to_string())
+                .collect(),
+        )
+        .with_arguments("set preview", words(&["on", "off"]))
+        .with_arguments("set previewheight", words(&["auto"]))
+        .with_arguments(
+            "set previewprotocol",
+            words(&["auto", "kitty", "sixel", "blocks"]),
+        )
+        .with_arguments("fade", words(&["in", "out"]));
+    let transitions: Vec<String> = davimci_mlt::transitions::names()
+        .into_iter()
+        .map(str::to_string)
+        .chain(std::iter::once("none".to_string()))
+        .chain(davimci_mlt::transitions::registered_names())
+        .collect();
+    v = v
+        .with_arguments("transition", transitions.clone())
+        .with_arguments("set transition.type", transitions);
+    v
+}
+
+fn words(w: &[&str]) -> Vec<String> {
+    w.iter().map(|s| (*s).to_string()).collect()
+}
+
+fn command_names() -> Vec<String> {
     [
         "w",
         "write",
