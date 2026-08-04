@@ -31,7 +31,8 @@
   a few frames more than the timeline holds
 
 # AI - deferred (not v1)
-- zero-copy hardware-decode surface import into the `wgpu` presenter
+- GPU/hardware acceleration (decode, planar upload, zero-copy import, hardware
+  encode) is planned in `docs/gpu_plan.md`
 - a custom subtitle layout engine in place of MLT's text producers
 - beat detection as a jump-point source
 - advanced audio: EQ, compression, noise reduction beyond `:duck`
