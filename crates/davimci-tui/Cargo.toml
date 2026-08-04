@@ -14,6 +14,7 @@ workspace = true
 davimci-app.workspace = true
 davimci-core.workspace = true
 davimci-keys.workspace = true
+davimci-present.workspace = true
 ratatui.workspace = true
 crossterm.workspace = true
 

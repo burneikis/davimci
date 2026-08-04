@@ -11,6 +11,8 @@
 //! overlays.
 
 use davimci_app::{MediaPicker, PickerIntent, SubtitleEdit, Surface, ViewState};
+
+use crate::preview::Band;
 use davimci_core::TrackKind;
 use ratatui::prelude::{Line, Span, Style};
 use ratatui::style::Color;
@@ -37,17 +39,19 @@ impl Overlay<'_> {
 
 /// The timeline area a terminal of this size offers.
 ///
-/// The `:` line and its completions take rows from the tracks, so the app is
-/// told about a smaller timeline the moment the line opens - a frontend that
-/// kept the old count would draw a track over its own command line.
+/// The `:` line, its completions and the preview band take rows from the
+/// tracks, so the app is told about a smaller timeline the moment any of them
+/// opens - a frontend that kept the old count would draw a track over its own
+/// command line.
 #[must_use]
-pub fn surface(width: u16, height: u16, command_rows: u16) -> Surface {
+pub fn surface(width: u16, height: u16, command_rows: u16, preview_rows: u16) -> Surface {
     Surface {
         columns: u32::from(width.saturating_sub(GUTTER)),
         rows: usize::from(
             height
                 .saturating_sub(CHROME_ROWS)
                 .saturating_sub(command_rows)
+                .saturating_sub(preview_rows)
                 .max(1),
         ),
         // A terminal cell cannot hold a picture, so no clip is ever sampled
@@ -67,21 +71,40 @@ pub fn command_rows(view: &ViewState) -> u16 {
     }
 }
 
-/// One screen, top row first.
+/// Rows a preview band of `requested` rows may actually have: never more
+/// than a third of the screen, whatever `:set previewheight` asked for
+/// (spec 12.1).
+#[must_use]
+pub fn preview_rows(requested: u16, height: u16) -> u16 {
+    requested.min(height / 3)
+}
+
+/// One screen, top row first. The preview band sits above the ruler; a
+/// graphics protocol leaves its rows blank here and writes over them, which
+/// is why they are still counted.
 #[must_use]
 pub fn lines(
     view: &ViewState,
     overlay: Overlay<'_>,
     width: u16,
     height: u16,
+    band: &Band,
 ) -> Vec<Line<'static>> {
     let columns = width.saturating_sub(GUTTER);
-    let mut out = vec![ruler(view, columns)];
+    let mut out: Vec<Line<'static>> = Vec::new();
+    for row in 0..band.rows {
+        out.push(match band.cells.get(usize::from(row)) {
+            Some(line) => line.clone(),
+            None => Line::from(Span::raw(fit("", width))),
+        });
+    }
+    out.push(ruler(view, columns));
 
     if overlay.is_open() {
         let rows = height
             .saturating_sub(CHROME_ROWS)
             .saturating_sub(command_rows(view))
+            .saturating_sub(band.rows)
             .max(1);
         out.extend(modal(overlay, width, rows));
     } else {
@@ -395,13 +418,23 @@ mod tests {
 
     #[test]
     fn the_surface_gives_the_command_line_its_rows_back() {
-        let full = surface(80, 10, 0);
+        let full = surface(80, 10, 0, 0);
         assert_eq!(full.columns, 80 - u32::from(GUTTER));
         assert_eq!(full.rows, 8);
-        assert_eq!(surface(80, 10, 2).rows, 6);
+        assert_eq!(surface(80, 10, 2, 0).rows, 6);
+        // The preview band takes its rows the same way the `:` line does.
+        assert_eq!(surface(80, 10, 2, 3).rows, 3);
         // A terminal too small for a track still claims one, rather than
         // reporting a timeline with no lanes at all.
-        assert_eq!(surface(4, 1, 0).rows, 1);
+        assert_eq!(surface(4, 1, 0, 0).rows, 1);
+    }
+
+    #[test]
+    fn a_preview_band_is_capped_at_a_third_of_the_screen() {
+        assert_eq!(preview_rows(0, 30), 0);
+        assert_eq!(preview_rows(8, 30), 8);
+        assert_eq!(preview_rows(20, 30), 10);
+        assert_eq!(preview_rows(4, 6), 2);
     }
 
     #[test]

@@ -6,27 +6,44 @@
 //! `davimci-tui` from a view state `davimci-app` assembled.
 //!
 //! The presenter runs in `Detached` mode, which only means overlays are
-//! refused: nothing yet puts the composited picture on screen here, and inline
-//! preview is the next step in `plan.md`. `:set preview off` stops the pulls
-//! altogether for a session with no display.
+//! refused: the composited picture it produces is downsampled into the
+//! terminal's own preview band (spec 15.6). `:set preview off` stops the pulls
+//! altogether for a session with no display, and `:set previewheight 0` keeps
+//! them while drawing nothing.
 
 use std::time::Duration;
 
 use anyhow::{Context, Result};
 use davimci_app::{App, Event, Frontend, Host};
-use davimci_tui::{Terminal, Tui};
+use davimci_tui::{Protocol, Terminal, Tui};
 
 use crate::editor::Editor;
+use crate::setting::PreviewProtocol;
 
 /// How long a quiet loop waits for input before ticking. Playback and shuttle
 /// advance off the clock, so the loop cannot simply block on the keyboard.
 const TICK: Duration = Duration::from_millis(16);
+
+/// `:set previewprotocol`, with `auto` deferring to what startup detected.
+fn resolve(setting: PreviewProtocol, detected: Protocol) -> Protocol {
+    match setting {
+        PreviewProtocol::Auto => detected,
+        PreviewProtocol::Kitty => Protocol::Kitty,
+        PreviewProtocol::Sixel => Protocol::Sixel,
+        PreviewProtocol::Blocks => Protocol::Blocks,
+    }
+}
 
 /// Run the editor in the terminal until it quits.
 pub fn run(mut app: App, mut editor: Editor) -> Result<()> {
     let mut term = Terminal::open().context("the terminal could not be put into raw mode")?;
     let (width, height) = term.size().unwrap_or((80, 24));
     let mut tui = Tui::new(width, height);
+    // Detected once, here: a capability query per frame would be both slow
+    // and unreliable through a multiplexer, which is why the override exists.
+    let detected = davimci_tui::detect();
+    let cell = term.cell();
+    tui.set_protocol(detected, cell);
     app.resize(tui.surface());
 
     loop {
@@ -53,13 +70,23 @@ pub fn run(mut app: App, mut editor: Editor) -> Result<()> {
             app.notify(notice);
         }
 
+        // View settings, read every loop: `:set previewheight` must take
+        // effect on the next frame, and the surface shrinks with the band.
+        tui.set_protocol(resolve(editor.preview_protocol(), detected), cell);
+        let before = tui.surface();
+        tui.set_preview_height(editor.preview_height());
+        if tui.surface() != before {
+            app.resize(tui.surface());
+        }
+        tui.present(editor.presentation());
+
         let view = app.view();
         if let Err(e) = tui.render(&view) {
             app.notify(davimci_app::Message::error(e.to_string()));
         }
         // A failed draw loses a frame, not the session (Phase 0: recoverable
         // errors degrade locally).
-        if let Err(e) = term.draw(tui.last_lines()) {
+        if let Err(e) = term.draw(tui.last_lines(), tui.preview_escape()) {
             app.notify(davimci_app::Message::error(format!(
                 "the terminal could not be redrawn: {e}"
             )));

@@ -95,44 +95,11 @@ Standing rules:
 
 ## TUI preview
 
-The TUI composites frames and shows none of them: `--tui` builds the presenter
-in `Detached` mode, and nothing consumes the `Presentation` it produces. Audio
-plays, the playhead moves, the picture is dropped. These two steps close that,
-in this order, because the second is only worth building for people who already
-have a display and the first is the one that serves a headless box.
+The terminal previews inline; what it cannot yet do is put the picture in a
+window instead, which is only worth building for people who already have a
+display.
 
-### Step 1 - inline preview in the terminal
-
-Downsample `Presentation.pixels` into the terminal itself, above the ruler, in
-the rows `:set previewheight` asks for. Protocol is detected once at startup
-and never guessed per frame:
-
-- Kitty graphics where the terminal supports it, sixel where it does not, and
-  half-block characters with 24-bit colour as the floor - the last works on any
-  terminal that can do truecolour, so the feature never depends on a query.
-- Detection is a `:set previewprotocol` override away, since terminal
-  capability queries are unreliable through multiplexers.
-- The rows come out of the track rows the way the `:` line already does, so
-  nothing is drawn over.
-- Escape-sequence throughput gives no pacing guarantee, so the presenter's
-  clock stays the master and a frame that cannot be written in time is dropped
-  by the existing pacer rather than queued. Preview is allowed to stutter; the
-  audio clock and the edit are not.
-
-Testing:
-- Encoder unit tests per protocol: a known RGBA buffer encodes to a byte string
-  asserted exactly, half-blocks included, so a protocol regression is a diff
-  and not a look.
-- A downsample test that a 1920x1080 frame reaching an N-row band keeps its
-  aspect ratio and letterboxes rather than stretching, matching `davimci-present`'s
-  own fit tests.
-- A throughput test that a preview which cannot keep up drops frames and never
-  blocks the event loop: the loop's iteration count must not fall when the
-  encoder is made artificially slow.
-- The three-way parity test must still pass with preview on, since preview is
-  not view state and may not change one.
-
-### Step 2 - optional detached window (`--preview-window`)
+### Step 1 - optional detached window (`--preview-window`)
 
 The bare, undecorated, non-focusable window spec 15.5 describes, opened only
 when asked for. A `winit` window in `davimci-cli` holding the same texture the
@@ -157,8 +124,9 @@ Every milestone is met: the GUI edits video, plays it in sync, saves, exports
 a multi-audio MKV, and the whole Lua surface - motions, text objects, keymaps,
 hooks, presets, transition types - reaches a running editor. Overlays and
 subtitles are editable through `:set` and exportable burned, sidecar or
-embedded, and the optional TUI passes cross-frontend parity - its preview is
-the one thing still outstanding, above.
+embedded, and the optional TUI passes cross-frontend parity with an inline
+preview - the detached window it can be given instead is the one thing still
+outstanding, above.
 
 ---
 

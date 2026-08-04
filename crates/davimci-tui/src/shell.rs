@@ -15,6 +15,7 @@ use davimci_app::{
 use ratatui::prelude::Line;
 
 use crate::input::{Modifiers, TermKey, translate};
+use crate::preview::{Band, Cell, Encoder, Layout, Protocol};
 use crate::render::{self, Overlay};
 
 /// Something the terminal observed.
@@ -49,6 +50,14 @@ pub struct Tui {
     command_rows: u16,
     last_lines: Vec<Line<'static>>,
     quit: bool,
+    /// `:set previewheight`, before the cap a small terminal imposes.
+    preview_height: u16,
+    protocol: Protocol,
+    cell: Cell,
+    encoder: Encoder,
+    /// The last band encoded, held until a newer one is ready: preview is
+    /// allowed to stutter, so a tick with nothing new redraws what is up.
+    band: Band,
 }
 
 impl Tui {
@@ -63,6 +72,93 @@ impl Tui {
             command_rows: 0,
             last_lines: Vec::new(),
             quit: false,
+            preview_height: 0,
+            protocol: Protocol::Blocks,
+            cell: Cell::default(),
+            encoder: Encoder::new(),
+            band: Band::default(),
+        }
+    }
+
+    /// Which protocol the preview uses, and what a cell measures. Settled
+    /// once at startup - detection or `:set previewprotocol` - never guessed
+    /// per frame.
+    pub fn set_protocol(&mut self, protocol: Protocol, cell: Cell) {
+        if (protocol, cell) != (self.protocol, self.cell) {
+            self.protocol = protocol;
+            self.cell = cell;
+            self.band = Band::default();
+        }
+    }
+
+    #[must_use]
+    pub fn protocol(&self) -> Protocol {
+        self.protocol
+    }
+
+    /// `:set previewheight` (spec 12.1). `0` turns the band off.
+    pub fn set_preview_height(&mut self, rows: u16) {
+        if rows != self.preview_height {
+            self.preview_height = rows;
+            self.band = Band::default();
+        }
+    }
+
+    /// Rows the band actually occupies at this terminal size.
+    #[must_use]
+    pub fn preview_rows(&self) -> u16 {
+        render::preview_rows(self.preview_height, self.height)
+    }
+
+    /// The band layout the current size and settings give.
+    #[must_use]
+    pub fn preview_layout(&self) -> Layout {
+        Layout {
+            columns: self.width,
+            rows: self.preview_rows(),
+            protocol: self.protocol,
+            cell: self.cell,
+        }
+    }
+
+    /// Offer the newest composited frame to the preview.
+    ///
+    /// Encoding happens on another thread, so this returns immediately and a
+    /// frame that cannot be encoded before the next one arrives is dropped
+    /// rather than queued: the audio clock stays master and the event loop is
+    /// never blocked by escape-sequence throughput.
+    pub fn present(&mut self, presentation: Option<&davimci_present::Presentation>) {
+        if self.preview_rows() == 0 {
+            self.band = Band::default();
+            return;
+        }
+        if let Some(p) = presentation {
+            self.encoder.submit(p, self.preview_layout());
+        }
+        if let Some(band) = self.encoder.take() {
+            self.band = band;
+        }
+    }
+
+    /// The bytes a graphics protocol wants written over the band, if any.
+    #[must_use]
+    pub fn preview_escape(&self) -> Option<&[u8]> {
+        (self.band.rows == self.preview_rows())
+            .then_some(self.band.escape.as_deref())
+            .flatten()
+    }
+
+    /// The band as it is drawn: the rows `:set previewheight` asked for are
+    /// reserved whether or not a frame has been encoded yet, so the timeline
+    /// never moves under the user while the first picture is on its way.
+    fn band(&self) -> Band {
+        let rows = self.preview_rows();
+        if self.band.rows == rows {
+            return self.band.clone();
+        }
+        Band {
+            rows,
+            ..Band::default()
         }
     }
 
@@ -132,6 +228,7 @@ impl Tui {
             },
             self.width,
             self.height,
+            &self.band(),
         )
     }
 
@@ -149,11 +246,13 @@ impl Tui {
             }
             TermEvent::Click { column, row } => {
                 // Where, never what it means: the app owns navigation.
-                if column >= render::GUTTER {
+                let band = self.preview_rows();
+                if column >= render::GUTTER && row >= band {
+                    let row = row - band;
                     self.out.push(Event::Click {
                         column: u32::from(column - render::GUTTER),
-                        // Row 0 is the ruler, which seeks without changing
-                        // which track is focused.
+                        // The band's first row after it is the ruler, which
+                        // seeks without changing which track is focused.
                         row: (row > 0).then(|| usize::from(row - 1)),
                     });
                 }
@@ -190,7 +289,12 @@ impl Frontend for Tui {
     }
 
     fn surface(&self) -> Surface {
-        render::surface(self.width, self.height, self.command_rows)
+        render::surface(
+            self.width,
+            self.height,
+            self.command_rows,
+            self.preview_rows(),
+        )
     }
 
     fn render(&mut self, view: &ViewState) -> Result<(), AppError> {
@@ -322,6 +426,51 @@ mod tests {
         // The gutter is not the timeline.
         t.push(TermEvent::Click { column: 1, row: 2 });
         assert!(t.poll().is_empty());
+    }
+
+    #[test]
+    fn a_preview_band_takes_rows_from_the_tracks_and_shifts_the_clicks() {
+        let mut t = Tui::new(80, 12);
+        let full = t.surface().rows;
+        t.set_preview_height(3);
+        assert_eq!(t.preview_rows(), 3);
+        assert_eq!(t.surface().rows, full - 3);
+        // Row 3 is now the ruler, so it seeks without taking a track.
+        t.push(TermEvent::Click {
+            column: render::GUTTER + 2,
+            row: 3,
+        });
+        assert_eq!(
+            t.poll(),
+            vec![Event::Click {
+                column: 2,
+                row: None
+            }]
+        );
+        t.push(TermEvent::Click {
+            column: render::GUTTER + 2,
+            row: 5,
+        });
+        assert_eq!(
+            t.poll(),
+            vec![Event::Click {
+                column: 2,
+                row: Some(1)
+            }]
+        );
+        // A click in the picture is not a click in the timeline.
+        t.push(TermEvent::Click {
+            column: render::GUTTER + 2,
+            row: 1,
+        });
+        assert!(t.poll().is_empty());
+    }
+
+    #[test]
+    fn a_band_taller_than_a_third_of_the_screen_is_capped() {
+        let mut t = Tui::new(80, 12);
+        t.set_preview_height(30);
+        assert_eq!(t.preview_rows(), 4);
     }
 
     #[test]

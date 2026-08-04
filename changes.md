@@ -895,3 +895,40 @@ Terminal keys needed one thing a window does not: a terminal has no Space key,
 only the character, so `translate` names a typed space as the transport token,
 and key *releases* from the kitty protocol are dropped before they can run
 every binding twice.
+
+## Inline terminal preview
+
+The composited frame now reaches the terminal: `davimci-tui::preview`
+downsamples a `Presentation` into the rows `:set previewheight` asks for and
+encodes them as kitty graphics, sixel, or truecolour half-blocks.
+`:set previewprotocol` overrides what startup detected, and both settings are
+view settings held by the editor, so neither enters the undo log and the window
+ignores both.
+
+Three things it taught.
+
+The band cannot be sized by the picture. The first draft reserved rows only
+once a frame had been encoded, so the timeline shifted under the user on the
+first tick and the parity test caught it as a row-count mismatch: with a band
+requested, the tracks shrink immediately and the rows are drawn blank until the
+picture arrives. `Surface` accounting is one rule - the `:` line already had
+it - and the preview joins it rather than inventing another.
+
+Throughput cannot be on the event loop. Encoding a megabyte of base64 per
+frame at 60 Hz would pace the editor by the terminal's escape parser, so
+`Encoder` holds exactly one job: submitting while an older frame waits replaces
+it, and `take` never blocks. A frame that cannot be encoded in time is lost,
+which is what "preview may stutter, the audio clock may not" means in code. The
+test drives it by making the encode artificially slow and asserting the loop's
+iteration count, not its output.
+
+The escape has to be written outside `ratatui`. A graphics protocol places its
+image at the cursor, and the diffing renderer knows nothing about it and would
+overwrite it on the next frame, so `Terminal::draw` writes the band's bytes at
+the home position after the rows go out - and the rows the image covers are
+drawn blank on purpose.
+
+The half-block floor is what keeps the feature from depending on a query:
+detection reads the environment once, anything unrecognised gets blocks, and a
+terminal with graphics behind an unusual `TERM` - a patched alacritty, say -
+is one `:set previewprotocol sixel` away.

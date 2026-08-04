@@ -8,6 +8,7 @@
 use std::io::{self, Stdout, Write};
 use std::time::Duration;
 
+use crossterm::cursor::MoveTo;
 use crossterm::event::{
     DisableMouseCapture, EnableMouseCapture, Event as CtEvent, MouseButton, MouseEventKind,
 };
@@ -20,6 +21,7 @@ use ratatui::prelude::Line;
 use ratatui::widgets::Paragraph;
 
 use crate::input::from_crossterm;
+use crate::preview::Cell;
 use crate::shell::TermEvent;
 
 /// A terminal in raw mode on the alternate screen, restored on drop.
@@ -50,6 +52,24 @@ impl Terminal {
     pub fn size(&self) -> io::Result<(u16, u16)> {
         let area = self.inner.size()?;
         Ok((area.width, area.height))
+    }
+
+    /// What one cell measures in pixels, for the graphics protocols.
+    ///
+    /// A terminal that will not say falls back to [`Cell::default`] rather
+    /// than refusing to preview: being wrong by a little skews a graphics
+    /// preview's aspect, and the layout is counted in cells either way.
+    pub fn cell(&self) -> Cell {
+        let Ok(size) = crossterm::terminal::window_size() else {
+            return Cell::default();
+        };
+        if size.columns == 0 || size.rows == 0 || size.width == 0 || size.height == 0 {
+            return Cell::default();
+        }
+        Cell {
+            width: size.width / size.columns,
+            height: size.height / size.rows,
+        }
     }
 
     /// Events waiting, oldest first, blocking at most `timeout`.
@@ -84,11 +104,23 @@ impl Terminal {
         Ok(out)
     }
 
-    /// Draw one screen.
-    pub fn draw(&mut self, lines: &[Line<'_>]) -> io::Result<()> {
+    /// Draw one screen, plus whatever a graphics preview wants written over
+    /// the band it was given.
+    ///
+    /// The escape goes out after the rows, at the home position, because the
+    /// rows the picture covers were drawn blank on purpose: `ratatui` knows
+    /// nothing about an image and would otherwise overwrite it on the next
+    /// diff.
+    pub fn draw(&mut self, lines: &[Line<'_>], preview: Option<&[u8]>) -> io::Result<()> {
         self.inner.draw(|frame| {
             frame.render_widget(Paragraph::new(lines.to_vec()), frame.area());
         })?;
+        if let Some(bytes) = preview {
+            let mut out = io::stdout();
+            queue!(out, MoveTo(0, 0))?;
+            out.write_all(bytes)?;
+            out.flush()?;
+        }
         Ok(())
     }
 

@@ -25,9 +25,15 @@ fn session() -> Session {
 
 /// Run a script through the TUI at a surface, and report the final view.
 fn through_tui(surface: Surface, keys: &str) -> (String, Vec<String>) {
+    through_tui_with_preview(surface, keys, 0)
+}
+
+/// As above, with an inline preview band of `preview` rows requested.
+fn through_tui_with_preview(surface: Surface, keys: &str, preview: u16) -> (String, Vec<String>) {
     // The TUI's surface is derived from its size, so it is sized to match
     // whatever the other frontends reported rather than the other way round.
     let mut tui = Tui::new(80, 12);
+    tui.set_preview_height(preview);
     let mut app = App::new(session());
     app.resize(surface);
     let mut host = NullHost;
@@ -77,6 +83,22 @@ fn headless_gui_and_tui_agree_on_the_view() {
         "the TUI and headless diverged"
     );
     assert!(!rows.is_empty(), "the TUI drew nothing");
+}
+
+/// Preview is not view state, so turning it on may not change one: the band
+/// takes rows from the tracks and nothing else.
+#[test]
+fn preview_does_not_change_the_view() {
+    let gui = Gui::new(800, 600);
+    let surface: Surface = gui.surface();
+    let (plain, plain_rows) = through_tui(surface, SCRIPT);
+    let (with_preview, preview_rows) = through_tui_with_preview(surface, SCRIPT, 4);
+    assert_eq!(plain, with_preview, "the preview band changed the view");
+    // The band's own rows are the only difference on screen, and they are
+    // blank until a frame has been composed.
+    assert_eq!(preview_rows.len(), plain_rows.len() + 4);
+    assert!(preview_rows[..4].iter().all(|r| r.trim().is_empty()));
+    assert_eq!(&preview_rows[4..], &plain_rows[..]);
 }
 
 /// The keys must survive translation too: a frontend that swallowed one

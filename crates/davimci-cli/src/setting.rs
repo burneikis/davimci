@@ -51,6 +51,33 @@ pub enum Setting {
     TimelineResolution(Resolution),
     /// `preview on|off` - a view setting, never an edit.
     Preview(bool),
+    /// `previewheight <rows>` - the terminal's inline preview band; `0` is
+    /// off. Inert outside the terminal frontend (spec 12.1, 15.6).
+    PreviewHeight(u16),
+    /// `previewprotocol auto|kitty|sixel|blocks` - as above.
+    PreviewProtocol(PreviewProtocol),
+}
+
+/// What `:set previewprotocol` accepts. `Auto` defers to the terminal
+/// frontend's own detection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreviewProtocol {
+    Auto,
+    Kitty,
+    Sixel,
+    Blocks,
+}
+
+impl PreviewProtocol {
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Kitty => "kitty",
+            Self::Sixel => "sixel",
+            Self::Blocks => "blocks",
+        }
+    }
 }
 
 impl Setting {
@@ -58,7 +85,10 @@ impl Setting {
     /// must not enter the undo log.
     #[must_use]
     pub fn is_view_only(&self) -> bool {
-        matches!(self, Self::Preview(_))
+        matches!(
+            self,
+            Self::Preview(_) | Self::PreviewHeight(_) | Self::PreviewProtocol(_)
+        )
     }
 }
 
@@ -77,6 +107,8 @@ pub const PROPERTIES: &[&str] = &[
     "timeline.fps",
     "timeline.resolution",
     "preview",
+    "previewheight",
+    "previewprotocol",
 ];
 
 fn bad(prop: &str, expected: &str) -> CliError {
@@ -161,6 +193,19 @@ pub fn parse(prop: &str, value: &str) -> Result<Setting, CliError> {
             "on" | "true" | "1" => Ok(Setting::Preview(true)),
             "off" | "false" | "0" => Ok(Setting::Preview(false)),
             _ => Err(bad(prop, "on or off")),
+        },
+        // The upper bound is a third of the screen, which only the terminal
+        // knows; it clamps, so any row count parses here.
+        "previewheight" => value
+            .parse::<u16>()
+            .map(Setting::PreviewHeight)
+            .map_err(|_| bad(prop, "a number of rows")),
+        "previewprotocol" => match value {
+            "auto" => Ok(Setting::PreviewProtocol(PreviewProtocol::Auto)),
+            "kitty" => Ok(Setting::PreviewProtocol(PreviewProtocol::Kitty)),
+            "sixel" => Ok(Setting::PreviewProtocol(PreviewProtocol::Sixel)),
+            "blocks" => Ok(Setting::PreviewProtocol(PreviewProtocol::Blocks)),
+            _ => Err(bad(prop, "auto, kitty, sixel or blocks")),
         },
         other => Err(CliError::UnknownProperty(other.to_string())),
     }
@@ -258,6 +303,18 @@ mod tests {
             ),
             ("preview", "off", Setting::Preview(false)),
             ("preview", "on", Setting::Preview(true)),
+            ("previewheight", "0", Setting::PreviewHeight(0)),
+            ("previewheight", "8", Setting::PreviewHeight(8)),
+            (
+                "previewprotocol",
+                "auto",
+                Setting::PreviewProtocol(PreviewProtocol::Auto),
+            ),
+            (
+                "previewprotocol",
+                "sixel",
+                Setting::PreviewProtocol(PreviewProtocol::Sixel),
+            ),
         ];
         for (prop, value, want) in cases {
             assert_eq!(
@@ -279,6 +336,9 @@ mod tests {
             ("timeline.fps", "0"),
             ("timeline.resolution", "1920"),
             ("preview", "maybe"),
+            ("previewheight", "tall"),
+            ("previewheight", "-1"),
+            ("previewprotocol", "iterm"),
             ("clip.wobble", "1"),
         ] {
             let e = parse(prop, value).expect_err("must reject");
@@ -294,6 +354,8 @@ mod tests {
     #[test]
     fn only_preview_is_view_only() {
         assert!(parse("preview", "off").unwrap().is_view_only());
+        assert!(parse("previewheight", "6").unwrap().is_view_only());
+        assert!(parse("previewprotocol", "kitty").unwrap().is_view_only());
         assert!(!parse("clip.gain", "0").unwrap().is_view_only());
     }
 }

@@ -625,6 +625,8 @@ impl Workspace {
             }
             // Handled by the editor; unreachable through this path.
             Setting::Preview(_) => Err(CliError::UnknownProperty("preview".into())),
+            Setting::PreviewHeight(_) => Err(CliError::UnknownProperty("previewheight".into())),
+            Setting::PreviewProtocol(_) => Err(CliError::UnknownProperty("previewprotocol".into())),
         }
     }
 
@@ -732,6 +734,8 @@ fn describe_setting(setting: &crate::setting::Setting) -> String {
         Setting::TimelineFps(fps) => format!("{fps}"),
         Setting::TimelineResolution(r) => format!("{r}"),
         Setting::Preview(on) => format!("preview {}", if *on { "on" } else { "off" }),
+        Setting::PreviewHeight(rows) => format!("inline preview {rows} rows"),
+        Setting::PreviewProtocol(p) => format!("preview protocol {}", p.name()),
     }
 }
 

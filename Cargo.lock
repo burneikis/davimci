@@ -917,6 +917,7 @@ dependencies = [
  "davimci-gui",
  "davimci-headless",
  "davimci-keys",
+ "davimci-present",
  "ratatui",
 ]
 

@@ -30,6 +30,7 @@ use crate::error::CliError;
 use crate::excmd::{ExCommand, ExOutcome};
 use crate::export::{ExportEvent, Exporter};
 use crate::plugins::Plugins;
+use crate::setting::PreviewProtocol;
 use crate::transport::{Transport, TransportState};
 use crate::workspace::Workspace;
 
@@ -88,6 +89,11 @@ pub struct Editor {
     /// `:set preview off` (spec 15.5): no frame is pulled or composed, which
     /// is what makes a no-display session possible.
     preview: bool,
+    /// `:set previewheight` and `:set previewprotocol` (spec 15.6). Held here
+    /// with the other view settings and read by the terminal session; inert
+    /// for the window, which has a texture instead of a band.
+    preview_height: u16,
+    preview_protocol: PreviewProtocol,
     quit: bool,
 }
 
@@ -131,6 +137,8 @@ impl Editor {
             last_export: None,
             known_clips: std::collections::BTreeSet::new(),
             preview: true,
+            preview_height: 0,
+            preview_protocol: PreviewProtocol::Auto,
             quit: false,
         }
     }
@@ -253,6 +261,20 @@ impl Editor {
             ExCommand::Set(crate::setting::Setting::Preview(on)) => {
                 Some(Ok(self.set_preview(*on, session)))
             }
+            // Inert here by design: the terminal session reads these every
+            // loop, and the window has no band to put a picture in.
+            ExCommand::Set(crate::setting::Setting::PreviewHeight(rows)) => {
+                self.preview_height = *rows;
+                Some(Ok(if *rows == 0 {
+                    "inline preview off".into()
+                } else {
+                    format!("inline preview {rows} rows")
+                }))
+            }
+            ExCommand::Set(crate::setting::Setting::PreviewProtocol(protocol)) => {
+                self.preview_protocol = *protocol;
+                Some(Ok(format!("preview protocol {}", protocol.name())))
+            }
             ExCommand::Presets => Some(Ok(self.exporter.list_presets().join("  |  "))),
             ExCommand::CancelRender => Some(self.exporter.cancel(self.backend.as_mut())),
             _ => None,
@@ -280,6 +302,18 @@ impl Editor {
     #[must_use]
     pub fn preview_enabled(&self) -> bool {
         self.preview
+    }
+
+    /// Rows `:set previewheight` asks the terminal for, before its own cap.
+    #[must_use]
+    pub fn preview_height(&self) -> u16 {
+        self.preview_height
+    }
+
+    /// What `:set previewprotocol` asks the terminal to draw with.
+    #[must_use]
+    pub fn preview_protocol(&self) -> PreviewProtocol {
+        self.preview_protocol
     }
 
     /// `:normalize` and `:duck` (spec 6.1).
