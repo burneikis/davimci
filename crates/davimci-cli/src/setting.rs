@@ -6,7 +6,7 @@
 //! only layers that own a session or a preview.
 
 pub use davimci_app::Numbers;
-use davimci_core::{Fps, Resolution};
+use davimci_core::{ClipProps, Fps, Frame, Resolution, Transition};
 
 use crate::audio::FadeEnd;
 use crate::error::CliError;
@@ -80,6 +80,17 @@ pub enum PreviewHeight {
 }
 
 impl PreviewHeight {
+    /// The value as `:set previewheight` would take it back.
+    #[must_use]
+    pub fn value(self) -> String {
+        match self {
+            Self::Off => "0".into(),
+            Self::Rows(rows) => rows.to_string(),
+            Self::Percent(pc) => format!("{pc}%"),
+            Self::Auto => "auto".into(),
+        }
+    }
+
     /// How the setting reads back, for the status line and completion.
     #[must_use]
     pub fn describe(self) -> String {
@@ -145,6 +156,94 @@ pub const PROPERTIES: &[&str] = &[
     "previewprotocol",
     "numbers",
 ];
+
+/// The values a property enumerates, for completion. Empty for a property
+/// whose values cannot be listed - a number, a resolution, a transition name
+/// the host installs - where the current value is offered instead.
+#[must_use]
+pub fn values(prop: &str) -> Vec<String> {
+    let words: &[&str] = match prop {
+        "preview" => &["on", "off"],
+        "previewheight" => &["auto"],
+        "previewprotocol" => &["auto", "kitty", "sixel", "blocks"],
+        "numbers" => Numbers::NAMES,
+        _ => &[],
+    };
+    words.iter().map(|w| (*w).to_string()).collect()
+}
+
+/// What every `:set` property currently holds, so completion can show a
+/// free-form value rather than nothing.
+///
+/// A snapshot, not a handle: the registry stays parseable without a session,
+/// and whoever owns the state decides when to take one.
+#[derive(Debug, Clone, Default)]
+pub struct CurrentSettings {
+    pub preview: Option<bool>,
+    pub preview_height: Option<PreviewHeight>,
+    pub preview_protocol: Option<PreviewProtocol>,
+    pub numbers: Option<Numbers>,
+    pub fps: Option<Fps>,
+    pub resolution: Option<Resolution>,
+    /// The clip the next `:set clip.*` would act on.
+    pub clip: Option<ClipProps>,
+    /// The transition the next `:set transition.*` would act on.
+    pub transition: Option<Transition>,
+}
+
+impl CurrentSettings {
+    /// What `prop` reads right now, spelled as `:set` would take it back.
+    #[must_use]
+    pub fn value(&self, prop: &str) -> Option<String> {
+        let clip = self.clip.as_ref();
+        let ms = |frames: Frame| -> Option<String> {
+            let fps = self.fps?;
+            Some((crate::audio::ms_for_frames(frames.get(), fps)).to_string())
+        };
+        match prop {
+            "clip.x" => clip.map(|c| c.transform.x.to_string()),
+            "clip.y" => clip.map(|c| c.transform.y.to_string()),
+            "clip.scale" => clip.map(|c| c.transform.scale.to_string()),
+            "clip.opacity" => clip.map(|c| c.transform.opacity.to_string()),
+            "clip.gain" => clip.map(|c| c.gain_db.to_string()),
+            "clip.fade_in" => clip.and_then(|c| ms(c.fade_in)),
+            "clip.fade_out" => clip.and_then(|c| ms(c.fade_out)),
+            "transition.duration" => self
+                .transition
+                .as_ref()
+                .map(|t| t.duration.get().to_string()),
+            "transition.type" => self.transition.as_ref().map(|t| t.kind.clone()),
+            "timeline.fps" => self.fps.map(|f| {
+                if f.den == 1 {
+                    f.num.to_string()
+                } else {
+                    format!("{}/{}", f.num, f.den)
+                }
+            }),
+            "timeline.resolution" => self.resolution.map(|r| r.to_string()),
+            "preview" => self
+                .preview
+                .map(|on| if on { "on" } else { "off" }.to_string()),
+            "previewheight" => self.preview_height.map(PreviewHeight::value),
+            "previewprotocol" => self.preview_protocol.map(|p| p.name().to_string()),
+            "numbers" => self.numbers.map(|n| n.name().to_string()),
+            _ => None,
+        }
+    }
+
+    /// The completion candidates for `prop`: its enumerated values, with the
+    /// current value first when it is not one of them.
+    #[must_use]
+    pub fn candidates(&self, prop: &str) -> Vec<String> {
+        let mut out = values(prop);
+        if let Some(current) = self.value(prop)
+            && !out.contains(&current)
+        {
+            out.insert(0, current);
+        }
+        out
+    }
+}
 
 fn bad(prop: &str, expected: &str) -> CliError {
     CliError::BadPropertyValue {
@@ -241,7 +340,7 @@ pub fn parse(prop: &str, value: &str) -> Result<Setting, CliError> {
         },
         "numbers" => Numbers::parse(value)
             .map(Setting::Numbers)
-            .ok_or_else(|| bad(prop, "none, absolute or relative")),
+            .ok_or_else(|| bad(prop, "none, absolute, relative or both")),
         other => Err(CliError::UnknownProperty(other.to_string())),
     }
 }
@@ -397,6 +496,8 @@ mod tests {
             ("numbers", "none", Setting::Numbers(Numbers::Off)),
             ("numbers", "absolute", Setting::Numbers(Numbers::Absolute)),
             ("numbers", "relative", Setting::Numbers(Numbers::Relative)),
+            ("numbers", "both", Setting::Numbers(Numbers::Both)),
+            ("numbers", "current", Setting::Numbers(Numbers::Both)),
         ];
         for (prop, value, want) in cases {
             assert_eq!(
@@ -424,7 +525,7 @@ mod tests {
             ("previewheight", "half%"),
             ("previewheight", "%"),
             ("previewprotocol", "iterm"),
-            ("numbers", "hybrid"),
+            ("numbers", "sideways"),
             ("clip.wobble", "1"),
         ] {
             let e = parse(prop, value).expect_err("must reject");

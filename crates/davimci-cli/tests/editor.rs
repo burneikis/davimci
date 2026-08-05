@@ -224,9 +224,12 @@ fn set_numbers_reaches_the_editor_without_an_undoable_edit() {
     assert_eq!(editor.numbers(), davimci_cli::Numbers::Relative);
     app.event(Event::Command("set numbers absolute".into()), &mut editor);
     assert_eq!(editor.numbers(), davimci_cli::Numbers::Absolute);
+    app.event(Event::Command("set numbers current".into()), &mut editor);
+    assert_eq!(editor.numbers(), davimci_cli::Numbers::Both);
+    app.event(Event::Command("set numbers absolute".into()), &mut editor);
     assert_eq!(app.session().undolist().len(), undos);
 
-    app.event(Event::Command("set numbers hybrid".into()), &mut editor);
+    app.event(Event::Command("set numbers sideways".into()), &mut editor);
     assert_eq!(
         app.messages().current().map(|m| m.severity),
         Some(davimci_app::Severity::Error)

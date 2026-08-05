@@ -73,6 +73,8 @@ pub enum ExCommand {
     /// `:analyze` - drop every envelope and measure the audio again
     ///. Needs the analyser, so the editor runs it.
     Analyze,
+    /// `:<n>` - put the playhead on frame `n`, clamped to the timeline.
+    Goto(Frame),
     /// `:set <property> <value>`. The value is parsed and
     /// range-checked at parse time, so an accepted `ExCommand::Set` is one
     /// the model will take.
@@ -154,6 +156,18 @@ pub fn parse(line: &str) -> Result<ExCommand, CliError> {
             None => Ok((PathBuf::from(tail), None)),
         }
     };
+
+    // `:1234` is a frame, exactly as `:1234` is a line in vim; a number is
+    // never a command name, so this cannot shadow one.
+    if head.chars().all(|c| c.is_ascii_digit()) {
+        return head
+            .parse::<u64>()
+            .map(|n| ExCommand::Goto(Frame(n)))
+            .map_err(|_| CliError::Usage {
+                cmd: head.to_string(),
+                usage: "a frame number".into(),
+            });
+    }
 
     match head {
         "w" | "write" => Ok(ExCommand::Write(optional_path())),
@@ -301,6 +315,15 @@ pub fn parse(line: &str) -> Result<ExCommand, CliError> {
 /// suggesting command names in an argument position.
 #[must_use]
 pub fn vocabulary() -> davimci_app::CommandVocabulary {
+    vocabulary_with(&crate::setting::CurrentSettings::default())
+}
+
+/// As [`vocabulary`], but with the session's current values folded in, so a
+/// free-form `:set` offers what it holds now instead of offering nothing.
+#[must_use]
+pub fn vocabulary_with(
+    current: &crate::setting::CurrentSettings,
+) -> davimci_app::CommandVocabulary {
     let mut v = davimci_app::CommandVocabulary::new(command_names())
         .with_arguments(
             "set",
@@ -309,12 +332,6 @@ pub fn vocabulary() -> davimci_app::CommandVocabulary {
                 .map(|p| (*p).to_string())
                 .collect(),
         )
-        .with_arguments("set preview", words(&["on", "off"]))
-        .with_arguments("set previewheight", words(&["auto"]))
-        .with_arguments(
-            "set previewprotocol",
-            words(&["auto", "kitty", "sixel", "blocks"]),
-        )
         .with_arguments("fade", words(&["in", "out"]));
     let transitions: Vec<String> = davimci_mlt::transitions::names()
         .into_iter()
@@ -322,10 +339,21 @@ pub fn vocabulary() -> davimci_app::CommandVocabulary {
         .chain(std::iter::once("none".to_string()))
         .chain(davimci_mlt::transitions::registered_names())
         .collect();
-    v = v
-        .with_arguments("transition", transitions.clone())
-        .with_arguments("set transition.type", transitions);
-    v
+    for prop in crate::setting::PROPERTIES {
+        let mut candidates = current.candidates(prop);
+        if *prop == "transition.type" {
+            let extra: Vec<String> = transitions
+                .iter()
+                .filter(|t| !candidates.contains(t))
+                .cloned()
+                .collect();
+            candidates.extend(extra);
+        }
+        if !candidates.is_empty() {
+            v = v.with_arguments(&format!("set {prop}"), candidates);
+        }
+    }
+    v.with_arguments("transition", transitions)
 }
 
 fn words(w: &[&str]) -> Vec<String> {
@@ -443,6 +471,15 @@ impl Workspace {
             ExCommand::New => {
                 self.new_timeline(TimelineProps::default());
                 Ok(ExOutcome::msg("new timeline"))
+            }
+            // Navigation, not an edit: the playhead never enters the undo
+            // log, and a frame past the end lands on the end, as `:$` does.
+            ExCommand::Goto(frame) => {
+                let tl = self.current().timeline();
+                let target = (*frame).min(tl.duration());
+                let track = tl.playhead().track;
+                self.with_session(|s| s.set_playhead(target, track))?;
+                Ok(ExOutcome::msg(format!("frame {}", target.get())))
             }
             ExCommand::List => Ok(ExOutcome::Lines(self.list())),
             ExCommand::BufferNext => {

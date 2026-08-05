@@ -69,8 +69,11 @@ cargo run -p davimci-cli --features tui -- --tui path/to/video.mkv
 
 In both frontends the ruler can number its jump points, the way vim numbers
 lines: `--numbers relative` (the count `3l` needs), `--numbers absolute` (the
-frame) or `--numbers none`, the default. Changeable live with
+frame), `--numbers both` (absolute at the playhead, relative elsewhere; also
+spelled `current`) or `--numbers none`, the default. Changeable live with
 `:set numbers relative`.
+
+`:1234` puts the playhead on frame 1234, clamped to the end of the timeline.
 
 ## Testing
 

@@ -318,6 +318,29 @@ impl Editor {
         self.preview_protocol
     }
 
+    /// What every `:set` property holds right now, for completion: the view
+    /// settings the editor owns, and the clip and transition the next
+    /// `:set clip.*` / `:set transition.*` would act on.
+    #[must_use]
+    pub fn current_settings(&self, session: &Session) -> crate::setting::CurrentSettings {
+        let tl = session.timeline();
+        let head = tl.playhead();
+        let clip = tl.track(head.track).and_then(|t| t.clip_at(head.frame));
+        crate::setting::CurrentSettings {
+            preview: Some(self.preview),
+            preview_height: Some(self.preview_height),
+            preview_protocol: Some(self.preview_protocol),
+            numbers: Some(self.numbers),
+            fps: Some(tl.props.fps),
+            resolution: Some(tl.props.resolution),
+            clip: clip.map(|c| c.props),
+            transition: tl
+                .transition_at(head.track, head.frame)
+                .map(|(_, t)| t.clone())
+                .or_else(|| clip.and_then(|c| c.transition_in.clone())),
+        }
+    }
+
     /// What `:set numbers` (or `--numbers`) asks the ruler to label with.
     #[must_use]
     pub fn numbers(&self) -> Numbers {
@@ -932,6 +955,12 @@ impl Host for Editor {
 
     fn jobs(&mut self) -> Vec<JobUpdate> {
         std::mem::take(&mut self.job_updates)
+    }
+
+    fn command_vocabulary(&mut self, session: &Session) -> Option<davimci_app::CommandVocabulary> {
+        Some(crate::excmd::vocabulary_with(
+            &self.current_settings(session),
+        ))
     }
 
     fn plugin(&mut self, id: u32, session: &mut Session) -> Result<PluginEffects, AppError> {

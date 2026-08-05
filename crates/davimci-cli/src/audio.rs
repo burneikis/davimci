@@ -262,6 +262,11 @@ pub(crate) fn frames_for_ms(ms: u64, fps: Fps) -> u64 {
     (ms as f64 * fps.as_f64() / 1000.0).round() as u64
 }
 
+/// The inverse, for reading a fade back as the milliseconds `:set` takes.
+pub(crate) fn ms_for_frames(frames: u64, fps: Fps) -> u64 {
+    (frames as f64 * 1000.0 / fps.as_f64()).round() as u64
+}
+
 /// Complement of the silence spans, clipped to `[from_ms, to_ms)`.
 fn loud_ranges(silence: &[Span], from_ms: u64, to_ms: u64) -> Vec<(u64, u64)> {
     let mut out = Vec::new();

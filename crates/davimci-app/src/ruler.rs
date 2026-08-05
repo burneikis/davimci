@@ -18,15 +18,23 @@ pub enum Numbers {
     Off,
     Absolute,
     Relative,
+    /// Vim's `number` plus `relativenumber`: the playhead's own tick reads
+    /// its absolute frame, every other tick reads the count that lands on it.
+    Both,
 }
 
 impl Numbers {
+    /// Every value `:set numbers` accepts, canonical spelling first, for
+    /// completion.
+    pub const NAMES: &'static [&'static str] = &["none", "absolute", "relative", "both", "current"];
+
     #[must_use]
     pub fn name(self) -> &'static str {
         match self {
             Self::Off => "none",
             Self::Absolute => "absolute",
             Self::Relative => "relative",
+            Self::Both => "both",
         }
     }
 
@@ -37,6 +45,7 @@ impl Numbers {
             Self::Off => "no ruler numbers",
             Self::Absolute => "absolute ruler numbers",
             Self::Relative => "relative ruler numbers",
+            Self::Both => "absolute at the playhead, relative elsewhere",
         }
     }
 
@@ -47,6 +56,7 @@ impl Numbers {
             "none" | "off" | "no" => Some(Self::Off),
             "absolute" | "abs" | "on" => Some(Self::Absolute),
             "relative" | "rel" => Some(Self::Relative),
+            "both" | "current" | "hybrid" => Some(Self::Both),
             _ => None,
         }
     }
@@ -118,6 +128,8 @@ pub fn labels(view: &ViewState, numbers: Numbers, metrics: LabelMetrics) -> Vec<
             Numbers::Off => return Vec::new(),
             Numbers::Absolute => tick.frame.get().to_string(),
             Numbers::Relative => tick.relative.unsigned_abs().to_string(),
+            Numbers::Both if tick.relative == 0 => tick.frame.get().to_string(),
+            Numbers::Both => tick.relative.unsigned_abs().to_string(),
         };
         let width = text.chars().count() as u32 * metrics.digit + metrics.padding;
         let offset = tick.column.saturating_add(metrics.gap);
@@ -190,6 +202,21 @@ mod tests {
             texts(&labels(&v, Numbers::Absolute, LabelMetrics::cells(40))),
             vec![(1, "0"), (11, "10")]
         );
+    }
+
+    #[test]
+    fn both_labels_the_playhead_absolutely_and_the_rest_relatively() {
+        let v = view(&[(0, -1), (10, 0), (20, 1)]);
+        assert_eq!(
+            texts(&labels(&v, Numbers::Both, LabelMetrics::cells(40))),
+            vec![(1, "1"), (11, "10"), (21, "1")]
+        );
+    }
+
+    #[test]
+    fn current_is_a_spelling_of_both() {
+        assert_eq!(Numbers::parse("current"), Some(Numbers::Both));
+        assert_eq!(Numbers::parse("both"), Some(Numbers::Both));
     }
 
     /// Two jump points a cell apart cannot both be labelled, and the ruler's

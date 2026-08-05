@@ -106,6 +106,15 @@ pub trait Host {
         PluginEffects::default()
     }
 
+    /// The vocabulary Tab completes against, asked for each time the `:`
+    /// line opens. Only the host knows what the settings currently hold, and
+    /// a completion that shows a stale value is worse than none; `None`
+    /// keeps whatever vocabulary was supplied at startup.
+    fn command_vocabulary(&mut self, session: &Session) -> Option<crate::CommandVocabulary> {
+        let _ = session;
+        None
+    }
+
     /// The mode changed, for the `ModeChanged` event. The app owns
     /// the mode FSM, so this is the only place a host can learn of it.
     fn mode_changed(&mut self, from: Mode, to: Mode) {
@@ -685,7 +694,7 @@ impl App {
             // the line itself; the frontend is told to route keys to it.
             Outcome::Mode(change) => {
                 if change.to == Mode::Command {
-                    self.open_command_line();
+                    self.open_command_line(host);
                     self.follow();
                     return Response::OpenCommandLine;
                 }
@@ -733,7 +742,7 @@ impl App {
                 return Response::EditText { clip, text };
             }
             Outcome::EnterCommandMode => {
-                self.open_command_line();
+                self.open_command_line(host);
                 self.follow();
                 return Response::OpenCommandLine;
             }
@@ -799,7 +808,10 @@ impl App {
         self.command_open.then(|| self.command.view())
     }
 
-    fn open_command_line(&mut self) {
+    fn open_command_line(&mut self, host: &mut dyn Host) {
+        if let Some(vocabulary) = host.command_vocabulary(&self.session) {
+            self.command.set_vocabulary(vocabulary);
+        }
         self.command_open = true;
         self.command.open();
     }

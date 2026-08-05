@@ -557,6 +557,46 @@ fn a_project_file_is_recognised_by_its_content_not_its_name() {
     assert_eq!(ws.current().timeline().dump(), "V1:[a 0-60]\nA1: -\n");
 }
 
+// jumping
+
+#[test]
+fn a_bare_number_is_a_frame_to_jump_to_and_clamps_to_the_timeline() {
+    let dir = Scratch::new("goto");
+    let mut ws = Workspace::new(dir.path()).without_autosave();
+    let tl = media_fixture(&[(0, 100, 20, 400)]);
+    seeded(&mut ws, tl);
+
+    assert_eq!(parse(":42").unwrap(), ExCommand::Goto(Frame(42)));
+    ws.run(":42", OnRecovery::Discard).unwrap();
+    assert_eq!(ws.current().timeline().playhead().frame, Frame(42));
+
+    // Past the end lands on the end rather than off it.
+    ws.run(":99999", OnRecovery::Discard).unwrap();
+    let duration = ws.current().timeline().duration();
+    assert_eq!(ws.current().timeline().playhead().frame, duration);
+}
+
+// completion
+
+#[test]
+fn set_completes_enumerated_values_and_shows_a_free_form_setting_current_value() {
+    use crate::setting::{CurrentSettings, PreviewHeight};
+
+    let current = CurrentSettings {
+        preview_height: Some(PreviewHeight::Percent(50)),
+        numbers: Some(davimci_app::Numbers::Relative),
+        ..CurrentSettings::default()
+    };
+    let v = crate::excmd::vocabulary_with(&current);
+    assert_eq!(v.candidates("set numbers"), davimci_app::Numbers::NAMES);
+    assert_eq!(
+        v.candidates("set previewheight"),
+        ["50%".to_string(), "auto".to_string()],
+        "a free-form setting offers what it currently holds"
+    );
+    assert_eq!(v.candidates("set preview"), ["on", "off"]);
+}
+
 // transitions
 
 #[test]
