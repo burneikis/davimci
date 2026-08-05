@@ -1,19 +1,18 @@
 # Human
-- add relative line numbers for tui mode (make relative line numbers/normal numbers/no numbers, settable with a flag) (this is for the jump points in timeline)
-- allow plugins that render smth / a window. e.g. something like which-key
+- :1234 to jump to frame 1234
+- :set nunber both, :set number current (show current abs, and relative for the rest)
+- refactor all for clean code
+- use clippy on pedantic / nursery
 - backwards shuttle audio?
 - different speed shuttle audio
 - backwards shuttle lag, we can skip a lot of frames when going backwards shuttling speed
 - figure out how davinci resolve can cleanly step framewise backwards
 - figure out whats causing playback to break after doing a few seeks, or shuttles to the end or fast backwards etc
-- refactor all for clean code
+- allow plugins that render smth / a window. e.g. something like which-key
 - plugin support for gui/tui sub-windows
-- use clippy on pedantic / nursery
 - command to center the playhead, moving the timeline scroll to center the playhead in the timeline view (user may want to have this on all the time, or bind it, or hook pause/playing states/transitions)
 - strip down to core features, everything else should be built as a plugin, include default plugins for common features (first decide what features are core, and what can be plugins)
 - clip grouping, imported clip video/audio should be grouped together until un-grouped, meaning splitting the clip for example should split both the video and audio, and moving one should move the other, etc
-- :1234 to jump to frame 1234
-- :set nunber both, :set number current (show current abs, and relative for the rest)
 
 # AI
 - `:set` has no value completion: typing `:set numbers ` offers nothing.
