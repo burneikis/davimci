@@ -1,4 +1,5 @@
 # Human
+- set previewheight in gui mode too
 - use clippy on pedantic / nursery
 - backwards shuttle audio?
 - different speed shuttle audio
