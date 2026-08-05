@@ -17,130 +17,160 @@ use davimci_core::{Classify, Fps, Resolution};
 use davimci_headless::HeadlessFrontend;
 use davimci_present::{Host as PresentHost, Presenter};
 
-fn main() -> Result<()> {
-    let mut args = std::env::args().skip(1);
-    let mut open: Option<PathBuf> = None;
-    let mut commands: Vec<String> = Vec::new();
-    let mut keys: Option<String> = None;
-    let mut script: Option<PathBuf> = None;
-    let mut ticks: u32 = 0;
-    #[allow(unused_mut, unused_assignments)]
-    let mut no_window = false;
-    let mut tui = false;
-    let mut numbers = davimci_cli::Numbers::Off;
+/// Everything the command line can ask for, once parsed.
+#[derive(Debug, Default)]
+struct Args {
+    open: Option<PathBuf>,
+    commands: Vec<String>,
+    keys: Option<String>,
+    script: Option<PathBuf>,
+    ticks: u32,
+    no_window: bool,
+    tui: bool,
+    numbers: davimci_cli::Numbers,
+}
 
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "-h" | "--help" => {
-                print_help();
-                return Ok(());
-            }
-            "--version" => {
-                println!("davimci {}", env!("CARGO_PKG_VERSION"));
-                return Ok(());
-            }
-            "-c" => commands.push(args.next().context("-c needs a command")?),
-            "-k" => keys = Some(args.next().context("-k needs a key sequence")?),
-            "--script" => {
-                script = Some(PathBuf::from(args.next().context("--script needs a path")?));
-            }
-            "--no-window" => no_window = true,
-            "--tui" => {
-                if cfg!(not(feature = "tui")) {
-                    anyhow::bail!(
-                        "this build has no terminal frontend; rebuild with --features tui"
-                    );
+/// `--help` and `--version` answer themselves and stop; anything else is a
+/// session to run.
+enum Invocation {
+    Done,
+    Run(Box<Args>),
+}
+
+impl Args {
+    fn parse(argv: impl Iterator<Item = String>) -> Result<Invocation> {
+        let mut argv = argv;
+        let mut args = Self::default();
+        while let Some(arg) = argv.next() {
+            match arg.as_str() {
+                "-h" | "--help" => {
+                    print_help();
+                    return Ok(Invocation::Done);
                 }
-                tui = true;
+                "--version" => {
+                    println!("davimci {}", env!("CARGO_PKG_VERSION"));
+                    return Ok(Invocation::Done);
+                }
+                "-c" => args
+                    .commands
+                    .push(argv.next().context("-c needs a command")?),
+                "-k" => args.keys = Some(argv.next().context("-k needs a key sequence")?),
+                "--script" => {
+                    args.script =
+                        Some(PathBuf::from(argv.next().context("--script needs a path")?));
+                }
+                "--no-window" => args.no_window = true,
+                "--tui" => {
+                    if cfg!(not(feature = "tui")) {
+                        anyhow::bail!(
+                            "this build has no terminal frontend; rebuild with --features tui"
+                        );
+                    }
+                    args.tui = true;
+                }
+                "--numbers" => {
+                    let value = argv.next().context("--numbers needs a mode")?;
+                    args.numbers = davimci_cli::Numbers::parse(&value).with_context(|| {
+                        format!("--numbers takes none, absolute or relative, not {value}")
+                    })?;
+                }
+                "--ticks" => {
+                    args.ticks = argv
+                        .next()
+                        .context("--ticks needs a count")?
+                        .parse()
+                        .context("--ticks needs a number")?;
+                }
+                other if other.starts_with('-') => {
+                    anyhow::bail!("unknown option {other}; try --help")
+                }
+                other => args.open = Some(PathBuf::from(other)),
             }
-            "--numbers" => {
-                let value = args.next().context("--numbers needs a mode")?;
-                numbers = davimci_cli::Numbers::parse(&value).with_context(|| {
-                    format!("--numbers takes none, absolute or relative, not {value}")
-                })?;
-            }
-            "--ticks" => {
-                ticks = args
-                    .next()
-                    .context("--ticks needs a count")?
-                    .parse()
-                    .context("--ticks needs a number")?;
-            }
-            other if other.starts_with('-') => {
-                anyhow::bail!("unknown option {other}; try --help")
-            }
-            other => open = Some(PathBuf::from(other)),
         }
+        Ok(Invocation::Run(Box::new(args)))
     }
+}
 
+fn main() -> Result<()> {
+    match Args::parse(std::env::args().skip(1))? {
+        Invocation::Done => Ok(()),
+        Invocation::Run(args) => run(*args),
+    }
+}
+
+fn run(args: Args) -> Result<()> {
     let root = std::env::current_dir().context("the working directory is unreadable")?;
     let mut ws = Workspace::new(root);
 
-    if let Some(path) = open {
-        let recovery = ws.pending_recovery(&path);
-        let choice = match &recovery {
-            Some(r) => {
-                println!(
-                    "{} has an autosave with {} unsaved edit(s) from a previous session.",
-                    path.display(),
-                    r.commands
-                );
-                if prompt_yes("recover them?") {
-                    OnRecovery::Recover
-                } else {
-                    OnRecovery::Discard
-                }
-            }
-            None => OnRecovery::Discard,
-        };
-        // Straight to the command, not through the `:` parser: a path from
-        // argv is already exact, and stringifying it just to re-split it on
-        // whitespace is how filenames with spaces get lost.
-        report(ws.run_command(&davimci_cli::ExCommand::Edit(path), choice));
+    if let Some(path) = args.open {
+        open_project(&mut ws, path);
     }
 
     // Export needs a render backend, which a bare workspace has no business
     // owning. When a `-c` line asks for one, run the whole list through a
     // real editor instead - that is what makes batch export from a script
     // possible.
-    if commands.iter().any(|l| needs_backend(l)) {
-        return run_commands_with_editor(ws, &commands);
+    if args.commands.iter().any(|l| needs_backend(l)) {
+        return run_commands_with_editor(ws, &args.commands);
     }
 
-    for line in &commands {
+    for line in &args.commands {
         report(ws.run(line, OnRecovery::Discard));
         if ws.should_quit() {
             return Ok(());
         }
     }
 
-    if let Some(path) = script {
+    if let Some(path) = args.script {
         return run_script(ws, &path);
     }
 
-    if let Some(script) = keys {
-        return run_session(ws, &script, ticks);
+    if let Some(keys) = args.keys {
+        return run_session(ws, &keys, args.ticks);
     }
 
     #[cfg(feature = "tui")]
-    if tui {
-        return run_tui(ws, numbers);
+    if args.tui {
+        return run_tui(ws, args.numbers);
     }
     // Without the feature the flag never gets this far, but the bindings are
     // still read so the parser and the build agree.
-    let _ = (tui, numbers);
+    let _ = (args.tui, args.numbers);
 
     // With no script and no `:` commands, the editor is what the user asked
     // for: open the window.
     #[cfg(feature = "window")]
-    if commands.is_empty() && !no_window {
-        return run_window(ws, numbers);
+    if args.commands.is_empty() && !args.no_window {
+        return run_window(ws, args.numbers);
     }
 
     for line in ws.list() {
         println!("{line}");
     }
     Ok(())
+}
+
+/// Open the project named on argv, asking about any autosave first.
+fn open_project(ws: &mut Workspace, path: PathBuf) {
+    let choice = match ws.pending_recovery(&path) {
+        Some(r) => {
+            println!(
+                "{} has an autosave with {} unsaved edit(s) from a previous session.",
+                path.display(),
+                r.commands
+            );
+            if prompt_yes("recover them?") {
+                OnRecovery::Recover
+            } else {
+                OnRecovery::Discard
+            }
+        }
+        None => OnRecovery::Discard,
+    };
+    // Straight to the command, not through the `:` parser: a path from argv
+    // is already exact, and stringifying it just to re-split it on
+    // whitespace is how filenames with spaces get lost.
+    report(ws.run_command(&davimci_cli::ExCommand::Edit(path), choice));
 }
 
 /// True for `:` lines only the editor can answer.

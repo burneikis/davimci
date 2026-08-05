@@ -103,176 +103,86 @@ impl ExOutcome {
     }
 }
 
+/// One `:` line split into its command name and its arguments, in both the
+/// forms the vocabulary needs: whitespace-delimited tokens, and the raw
+/// remainder for the commands that take a path.
+struct Line<'a> {
+    head: &'a str,
+    args: Vec<&'a str>,
+    tail: &'a str,
+}
+
+impl<'a> Line<'a> {
+    fn split(line: &'a str) -> Option<Self> {
+        let line = line.trim().strip_prefix(':').unwrap_or(line.trim());
+        let head = line.split_whitespace().next()?;
+        Some(Self {
+            head,
+            args: line.split_whitespace().skip(1).collect(),
+            tail: line[head.len()..].trim(),
+        })
+    }
+
+    fn usage(&self, usage: &str) -> CliError {
+        CliError::usage(self.head, usage)
+    }
+
+    /// The single token this command takes.
+    fn one(&self, usage: &str) -> Result<String, CliError> {
+        match self.args.as_slice() {
+            [a] => Ok((*a).to_string()),
+            _ => Err(self.usage(usage)),
+        }
+    }
+
+    /// A path argument is the *rest of the line*, not one whitespace-delimited
+    /// token: media filenames contain spaces constantly, and these commands
+    /// take exactly one path, so there is nothing else the remainder could be.
+    fn optional_path(&self) -> Option<PathBuf> {
+        (!self.tail.is_empty()).then(|| PathBuf::from(self.tail))
+    }
+
+    fn path(&self, usage: &str) -> Result<PathBuf, CliError> {
+        self.optional_path().ok_or_else(|| self.usage(usage))
+    }
+
+    fn number<T: std::str::FromStr>(&self, text: &str, usage: &str) -> Result<T, CliError> {
+        text.parse().map_err(|_| self.usage(usage))
+    }
+}
+
 /// Parse a `:` line. The leading colon is optional.
 pub fn parse(line: &str) -> Result<ExCommand, CliError> {
-    let line = line.trim().strip_prefix(':').unwrap_or(line.trim());
-    let mut parts = line.split_whitespace();
-    let Some(head) = parts.next() else {
+    let Some(line) = Line::split(line) else {
         return Err(CliError::UnknownCommand(String::new()));
-    };
-    let args: Vec<&str> = parts.collect();
-    let one = |cmd: &str, usage: &str| -> Result<String, CliError> {
-        match args.as_slice() {
-            [a] => Ok((*a).to_string()),
-            _ => Err(CliError::Usage {
-                cmd: cmd.to_string(),
-                usage: usage.to_string(),
-            }),
-        }
-    };
-    // A path argument is the *rest of the line*, not one whitespace-delimited
-    // token: media filenames contain spaces constantly, and these commands
-    // take exactly one path, so there is nothing else the remainder could be.
-    let rest = || {
-        let after = line[head.len()..].trim();
-        (!after.is_empty()).then(|| after.to_string())
-    };
-    let one_path = |cmd: &str, usage: &str| -> Result<PathBuf, CliError> {
-        rest().map(PathBuf::from).ok_or_else(|| CliError::Usage {
-            cmd: cmd.to_string(),
-            usage: usage.to_string(),
-        })
-    };
-    let optional_path = || rest().map(PathBuf::from);
-
-    // `--preset <name>` is a trailing flag, so the path before it may contain
-    // spaces like any other path argument.
-    let split_preset = |usage: &str| -> Result<(PathBuf, Option<String>), CliError> {
-        let tail = rest().ok_or_else(|| CliError::Usage {
-            cmd: head.to_string(),
-            usage: usage.to_string(),
-        })?;
-        match tail.split_once("--preset") {
-            Some((path, name)) => {
-                let name = name.trim();
-                if name.is_empty() {
-                    return Err(CliError::Usage {
-                        cmd: head.to_string(),
-                        usage: usage.to_string(),
-                    });
-                }
-                Ok((PathBuf::from(path.trim()), Some(name.to_string())))
-            }
-            None => Ok((PathBuf::from(tail), None)),
-        }
     };
 
     // `:1234` is a frame, exactly as `:1234` is a line in vim; a number is
     // never a command name, so this cannot shadow one.
-    if head.chars().all(|c| c.is_ascii_digit()) {
-        return head
-            .parse::<u64>()
-            .map(|n| ExCommand::Goto(Frame(n)))
-            .map_err(|_| CliError::Usage {
-                cmd: head.to_string(),
-                usage: "a frame number".into(),
-            });
+    if line.head.chars().all(|c| c.is_ascii_digit()) {
+        return Ok(ExCommand::Goto(Frame(
+            line.number(line.head, "a frame number")?,
+        )));
     }
 
-    match head {
-        "w" | "write" => Ok(ExCommand::Write(optional_path())),
+    match line.head {
+        "w" | "write" => Ok(ExCommand::Write(line.optional_path())),
         "q" | "quit" => Ok(ExCommand::Quit { force: false }),
         "q!" | "quit!" => Ok(ExCommand::Quit { force: true }),
-        "wq" | "x" => Ok(ExCommand::WriteQuit(optional_path())),
-        "e" | "edit" => Ok(ExCommand::Edit(one_path("e", "<path>")?)),
-        "export" => {
-            let (path, preset) = split_preset("<path> [--preset <name>]")?;
-            Ok(ExCommand::Export { path, preset })
-        }
+        "wq" | "x" => Ok(ExCommand::WriteQuit(line.optional_path())),
+        "e" | "edit" => Ok(ExCommand::Edit(line.path("<path>")?)),
+        "export" => parse_export(&line),
         "render" => Ok(ExCommand::Render {
-            preset: one("render", "<preset>")?,
+            preset: line.one("<preset>")?,
         }),
-        "gain" => {
-            let v = one("gain", "<db>")?;
-            v.parse::<f32>()
-                .map(ExCommand::Gain)
-                .map_err(|_| CliError::Usage {
-                    cmd: "gain".into(),
-                    usage: "<db>".into(),
-                })
-        }
-        "fade" => match args.as_slice() {
-            [dir, ms] => {
-                let end = crate::audio::FadeEnd::parse(dir).ok_or_else(|| CliError::Usage {
-                    cmd: "fade".into(),
-                    usage: "in|out <ms>".into(),
-                })?;
-                let ms = ms.parse::<u64>().map_err(|_| CliError::Usage {
-                    cmd: "fade".into(),
-                    usage: "in|out <ms>".into(),
-                })?;
-                Ok(ExCommand::Fade { end, ms })
-            }
-            _ => Err(CliError::Usage {
-                cmd: "fade".into(),
-                usage: "in|out <ms>".into(),
-            }),
-        },
-        "normalize" | "normalise" => match args.as_slice() {
-            [] => Ok(ExCommand::Normalize {
-                target_db: DEFAULT_NORMALIZE_DB,
-            }),
-            [db] => db
-                .parse::<f32>()
-                .map(|target_db| ExCommand::Normalize { target_db })
-                .map_err(|_| CliError::Usage {
-                    cmd: "normalize".into(),
-                    usage: "[target_db]".into(),
-                }),
-            _ => Err(CliError::Usage {
-                cmd: "normalize".into(),
-                usage: "[target_db]".into(),
-            }),
-        },
-        "duck" => match args.as_slice() {
-            [track, db] => db
-                .parse::<f32>()
-                .map(|db| ExCommand::Duck {
-                    track: (*track).to_string(),
-                    db,
-                })
-                .map_err(|_| CliError::Usage {
-                    cmd: "duck".into(),
-                    usage: "<track> <db>".into(),
-                }),
-            _ => Err(CliError::Usage {
-                cmd: "duck".into(),
-                usage: "<track> <db>".into(),
-            }),
-        },
-        "transition" => {
-            let usage = "<name|none> [frames]";
-            let bad = || CliError::Usage {
-                cmd: "transition".into(),
-                usage: usage.into(),
-            };
-            let frames = |s: &str| s.parse::<u64>().map_err(|_| bad());
-            match args.as_slice() {
-                [] => Ok(ExCommand::Transition {
-                    kind: Some(DEFAULT_TRANSITION.to_string()),
-                    frames: None,
-                }),
-                ["none"] => Ok(ExCommand::Transition {
-                    kind: None,
-                    frames: None,
-                }),
-                [name] => Ok(ExCommand::Transition {
-                    kind: Some((*name).to_string()),
-                    frames: None,
-                }),
-                [name, n] => Ok(ExCommand::Transition {
-                    kind: Some((*name).to_string()),
-                    frames: Some(frames(n)?),
-                }),
-                _ => Err(bad()),
-            }
-        }
-        "set" | "se" => match args.as_slice() {
+        "gain" => Ok(ExCommand::Gain(line.number(&line.one("<db>")?, "<db>")?)),
+        "fade" => parse_fade(&line),
+        "normalize" | "normalise" => parse_normalize(&line),
+        "duck" => parse_duck(&line),
+        "transition" => parse_transition(&line),
+        "set" | "se" => match line.args.as_slice() {
             [prop, value] => crate::setting::parse(prop, value).map(ExCommand::Set),
-            _ => Err(CliError::Usage {
-                cmd: "set".into(),
-                usage: "<property> <value>".into(),
-            }),
+            _ => Err(line.usage("<property> <value>")),
         },
         "analyze" | "analyse" => Ok(ExCommand::Analyze),
         "presets" => Ok(ExCommand::Presets),
@@ -282,26 +192,109 @@ pub fn parse(line: &str) -> Result<ExCommand, CliError> {
         "bn" | "bnext" => Ok(ExCommand::BufferNext),
         "bp" | "bprev" => Ok(ExCommand::BufferPrev),
         "b" | "buffer" => {
-            let n = one("b", "<n>")?;
+            let n = line.one("<n>")?;
             n.parse::<usize>()
                 .map(ExCommand::Buffer)
                 .map_err(|_| CliError::NoSuchBuffer(n))
         }
-        "relink" => match args.as_slice() {
-            [new] => Ok(ExCommand::Relink {
-                old: None,
-                new: (*new).to_string(),
-            }),
-            [old, new] => Ok(ExCommand::Relink {
-                old: Some((*old).to_string()),
-                new: (*new).to_string(),
-            }),
-            _ => Err(CliError::Usage {
-                cmd: "relink".into(),
-                usage: "[old path] <new path>".into(),
-            }),
-        },
+        "relink" => parse_relink(&line),
         other => Err(CliError::UnknownCommand(other.to_string())),
+    }
+}
+
+/// `--preset <name>` is a trailing flag, so the path before it may contain
+/// spaces like any other path argument.
+fn parse_export(line: &Line<'_>) -> Result<ExCommand, CliError> {
+    const USAGE: &str = "<path> [--preset <name>]";
+    if line.tail.is_empty() {
+        return Err(line.usage(USAGE));
+    }
+    let Some((path, name)) = line.tail.split_once("--preset") else {
+        return Ok(ExCommand::Export {
+            path: PathBuf::from(line.tail),
+            preset: None,
+        });
+    };
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(line.usage(USAGE));
+    }
+    Ok(ExCommand::Export {
+        path: PathBuf::from(path.trim()),
+        preset: Some(name.to_string()),
+    })
+}
+
+fn parse_fade(line: &Line<'_>) -> Result<ExCommand, CliError> {
+    const USAGE: &str = "in|out <ms>";
+    let [dir, ms] = line.args.as_slice() else {
+        return Err(line.usage(USAGE));
+    };
+    let end = crate::audio::FadeEnd::parse(dir).ok_or_else(|| line.usage(USAGE))?;
+    Ok(ExCommand::Fade {
+        end,
+        ms: line.number(ms, USAGE)?,
+    })
+}
+
+fn parse_normalize(line: &Line<'_>) -> Result<ExCommand, CliError> {
+    const USAGE: &str = "[target_db]";
+    match line.args.as_slice() {
+        [] => Ok(ExCommand::Normalize {
+            target_db: DEFAULT_NORMALIZE_DB,
+        }),
+        [db] => Ok(ExCommand::Normalize {
+            target_db: line.number(db, USAGE)?,
+        }),
+        _ => Err(line.usage(USAGE)),
+    }
+}
+
+fn parse_duck(line: &Line<'_>) -> Result<ExCommand, CliError> {
+    const USAGE: &str = "<track> <db>";
+    let [track, db] = line.args.as_slice() else {
+        return Err(line.usage(USAGE));
+    };
+    Ok(ExCommand::Duck {
+        track: (*track).to_string(),
+        db: line.number(db, USAGE)?,
+    })
+}
+
+fn parse_transition(line: &Line<'_>) -> Result<ExCommand, CliError> {
+    const USAGE: &str = "<name|none> [frames]";
+    match line.args.as_slice() {
+        [] => Ok(ExCommand::Transition {
+            kind: Some(DEFAULT_TRANSITION.to_string()),
+            frames: None,
+        }),
+        ["none"] => Ok(ExCommand::Transition {
+            kind: None,
+            frames: None,
+        }),
+        [name] => Ok(ExCommand::Transition {
+            kind: Some((*name).to_string()),
+            frames: None,
+        }),
+        [name, n] => Ok(ExCommand::Transition {
+            kind: Some((*name).to_string()),
+            frames: Some(line.number(n, USAGE)?),
+        }),
+        _ => Err(line.usage(USAGE)),
+    }
+}
+
+fn parse_relink(line: &Line<'_>) -> Result<ExCommand, CliError> {
+    match line.args.as_slice() {
+        [new] => Ok(ExCommand::Relink {
+            old: None,
+            new: (*new).to_string(),
+        }),
+        [old, new] => Ok(ExCommand::Relink {
+            old: Some((*old).to_string()),
+            new: (*new).to_string(),
+        }),
+        _ => Err(line.usage("[old path] <new path>")),
     }
 }
 

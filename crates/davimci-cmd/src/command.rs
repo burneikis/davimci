@@ -380,26 +380,7 @@ impl Command for EditCommand {
                 track,
                 frame,
                 new_id,
-            } => {
-                let id = match new_id {
-                    Some(id) => tl.split_at_with_id(*track, *frame, *id)?,
-                    None => with_ids(tl, 1, |tl, ids| {
-                        let id = first(ids)?;
-                        Ok(tl.split_at_with_id(*track, *frame, id)?)
-                    })?,
-                };
-                Ok(Effect {
-                    applied: Self::Split {
-                        track: *track,
-                        frame: *frame,
-                        new_id: Some(id),
-                    },
-                    inverse: Self::Join {
-                        track: *track,
-                        frame: *frame,
-                    },
-                })
-            }
+            } => apply_split(tl, *track, *frame, *new_id),
 
             Self::Join { track, frame } => {
                 let absorbed = tl.join_at(*track, *frame)?;
@@ -459,35 +440,7 @@ impl Command for EditCommand {
                 if let Some(expanded) = expand_cuts(tl, *track, cuts, self) {
                     return expanded.apply(tl);
                 }
-                let inverse = if *ripple {
-                    Self::RippleDelete {
-                        track: *track,
-                        start: *at,
-                        end,
-                    }
-                } else {
-                    // Whatever we are about to cover has to come back.
-                    let covered = tl.yank_range(*track, *at, end)?;
-                    let lift = Self::Lift {
-                        track: *track,
-                        start: *at,
-                        end,
-                    };
-                    if covered.is_empty() {
-                        lift
-                    } else {
-                        Self::Sequence(vec![
-                            lift,
-                            Self::Restore {
-                                track: *track,
-                                at: *at,
-                                clips: covered.clips,
-                                span: covered.span,
-                                ripple: false,
-                            },
-                        ])
-                    }
-                };
+                let inverse = restore_inverse(tl, *track, *at, end, *ripple)?;
                 tl.restore(*track, *at, clips, *span, *ripple)?;
                 Ok(Effect {
                     applied: self.clone(),
@@ -514,60 +467,9 @@ impl Command for EditCommand {
                 at,
                 register,
                 ripple,
-            } => {
-                if register.is_empty() {
-                    return Err(CoreError::EmptyRegister.into());
-                }
-                with_ids(tl, register.clips.len(), |tl, ids| {
-                    let clips = register
-                        .clips
-                        .iter()
-                        .zip(ids)
-                        .map(|(c, id)| {
-                            let mut copy = c.clone();
-                            copy.id = *id;
-                            // A paste is new material: it inherits no linkage.
-                            copy.group = None;
-                            copy
-                        })
-                        .collect();
-                    Self::Restore {
-                        track: *track,
-                        at: *at,
-                        clips,
-                        span: register.span,
-                        ripple: *ripple,
-                    }
-                    .apply(tl)
-                })
-            }
+            } => apply_paste(tl, *track, *at, register, *ripple),
 
-            Self::MoveClip { track, clip, to } => {
-                let (found, c) = tl
-                    .find_clip(*clip)
-                    .ok_or_else(|| CoreError::NoSuchClip(clip.to_string()))?;
-                if found != *track {
-                    return Err(CoreError::NoSuchClip(clip.to_string()).into());
-                }
-                let (start, end, dur) = (c.start, c.end(), c.duration);
-                let mut moved = c.clone();
-                moved.start = Frame::ZERO;
-                Self::Sequence(vec![
-                    Self::Lift {
-                        track: *track,
-                        start,
-                        end,
-                    },
-                    Self::Restore {
-                        track: *track,
-                        at: *to,
-                        clips: vec![moved],
-                        span: dur,
-                        ripple: false,
-                    },
-                ])
-                .apply(tl)
-            }
+            Self::MoveClip { track, clip, to } => apply_move_clip(tl, *track, *clip, *to),
 
             Self::Trim {
                 track,
@@ -627,46 +529,10 @@ impl Command for EditCommand {
                 })
             }
 
-            Self::Link { clips, group } => {
-                if clips.len() < 2 {
-                    return Err(CoreError::CannotLink {
-                        reason: "a link group needs at least two clips".into(),
-                    }
-                    .into());
-                }
-                let reserved = tl.id_cursor();
-                let group = match group {
-                    Some(g) => *g,
-                    None => tl.new_group_id(),
-                };
-                let members = clips
-                    .iter()
-                    .map(|c| Self::SetGroup {
-                        clip: *c,
-                        group: Some(group),
-                    })
-                    .collect();
-                match Self::Sequence(members).apply(tl) {
-                    Ok(effect) => Ok(Effect {
-                        applied: Self::Link {
-                            clips: clips.clone(),
-                            group: Some(group),
-                        },
-                        inverse: effect.inverse,
-                    }),
-                    Err(e) => {
-                        tl.set_id_cursor(reserved);
-                        Err(e)
-                    }
-                }
-            }
+            Self::Link { clips, group } => apply_link(tl, clips, *group),
 
             Self::SetGroup { clip, group } => {
-                let previous = tl
-                    .find_clip(*clip)
-                    .ok_or_else(|| CoreError::NoSuchClip(clip.to_string()))?
-                    .1
-                    .group;
+                let previous = clip_of(tl, *clip)?.group;
                 tl.set_group(*clip, *group)?;
                 Ok(Effect {
                     applied: self.clone(),
@@ -678,26 +544,7 @@ impl Command for EditCommand {
             }
 
             Self::AddTrack { kind, name, new_id } => {
-                let name = name.clone().unwrap_or_else(|| tl.next_track_name(*kind));
-                let cursor = tl.id_cursor();
-                let id = match new_id {
-                    Some(id) => *id,
-                    None => tl.new_track_id(),
-                };
-                match tl.add_track_with_id(id, name.clone(), *kind) {
-                    Ok(()) => Ok(Effect {
-                        applied: Self::AddTrack {
-                            kind: *kind,
-                            name: Some(name),
-                            new_id: Some(id),
-                        },
-                        inverse: Self::RemoveTrack { track: id },
-                    }),
-                    Err(e) => {
-                        tl.set_id_cursor(cursor);
-                        Err(e.into())
-                    }
-                }
+                apply_add_track(tl, *kind, name.clone(), *new_id)
             }
 
             Self::RemoveTrack { track } => {
@@ -737,11 +584,7 @@ impl Command for EditCommand {
                 clip,
                 props: next,
             } => {
-                let previous = tl
-                    .find_clip(*clip)
-                    .ok_or_else(|| CoreError::NoSuchClip(clip.to_string()))?
-                    .1
-                    .props;
+                let previous = clip_of(tl, *clip)?.props;
                 tl.set_clip_props(*track, *clip, *next)?;
                 Ok(Effect {
                     applied: self.clone(),
@@ -826,6 +669,196 @@ impl Command for EditCommand {
 }
 
 // helpers
+
+/// The clip `id` names, or the refusal that names it back to the user.
+fn clip_of(tl: &Timeline, id: ClipId) -> Result<&Clip, CmdError> {
+    tl.find_clip(id)
+        .map(|(_, clip)| clip)
+        .ok_or_else(|| CoreError::NoSuchClip(id.to_string()).into())
+}
+
+fn apply_split(
+    tl: &mut Timeline,
+    track: TrackId,
+    frame: Frame,
+    new_id: Option<ClipId>,
+) -> Result<Effect, CmdError> {
+    let new_id = match new_id {
+        Some(id) => tl.split_at_with_id(track, frame, id)?,
+        None => with_ids(tl, 1, |tl, ids| {
+            Ok(tl.split_at_with_id(track, frame, first(ids)?)?)
+        })?,
+    };
+    Ok(Effect {
+        applied: EditCommand::Split {
+            track,
+            frame,
+            new_id: Some(new_id),
+        },
+        inverse: EditCommand::Join { track, frame },
+    })
+}
+
+/// Undoing a restore means lifting what was laid down - and, when it covered
+/// something, putting that back too.
+fn restore_inverse(
+    tl: &mut Timeline,
+    track: TrackId,
+    at: Frame,
+    end: Frame,
+    ripple: bool,
+) -> Result<EditCommand, CmdError> {
+    if ripple {
+        return Ok(EditCommand::RippleDelete {
+            track,
+            start: at,
+            end,
+        });
+    }
+    let covered = tl.yank_range(track, at, end)?;
+    let lift = EditCommand::Lift {
+        track,
+        start: at,
+        end,
+    };
+    if covered.is_empty() {
+        return Ok(lift);
+    }
+    Ok(EditCommand::Sequence(vec![
+        lift,
+        EditCommand::Restore {
+            track,
+            at,
+            clips: covered.clips,
+            span: covered.span,
+            ripple: false,
+        },
+    ]))
+}
+
+fn apply_paste(
+    tl: &mut Timeline,
+    track: TrackId,
+    at: Frame,
+    register: &Register,
+    ripple: bool,
+) -> Result<Effect, CmdError> {
+    if register.is_empty() {
+        return Err(CoreError::EmptyRegister.into());
+    }
+    with_ids(tl, register.clips.len(), |tl, ids| {
+        let clips = register
+            .clips
+            .iter()
+            .zip(ids)
+            .map(|(c, id)| {
+                let mut copy = c.clone();
+                copy.id = *id;
+                // A paste is new material: it inherits no linkage.
+                copy.group = None;
+                copy
+            })
+            .collect();
+        EditCommand::Restore {
+            track,
+            at,
+            clips,
+            span: register.span,
+            ripple,
+        }
+        .apply(tl)
+    })
+}
+
+/// A move is a lift followed by a restore, so it inherits both their
+/// validation and their undo.
+fn apply_move_clip(
+    tl: &mut Timeline,
+    track: TrackId,
+    clip: ClipId,
+    to: Frame,
+) -> Result<Effect, CmdError> {
+    let (found, c) = tl
+        .find_clip(clip)
+        .ok_or_else(|| CoreError::NoSuchClip(clip.to_string()))?;
+    if found != track {
+        return Err(CoreError::NoSuchClip(clip.to_string()).into());
+    }
+    let (start, end, span) = (c.start, c.end(), c.duration);
+    let mut moved = c.clone();
+    moved.start = Frame::ZERO;
+    EditCommand::Sequence(vec![
+        EditCommand::Lift { track, start, end },
+        EditCommand::Restore {
+            track,
+            at: to,
+            clips: vec![moved],
+            span,
+            ripple: false,
+        },
+    ])
+    .apply(tl)
+}
+
+fn apply_link(
+    tl: &mut Timeline,
+    clips: &[ClipId],
+    group: Option<GroupId>,
+) -> Result<Effect, CmdError> {
+    if clips.len() < 2 {
+        return Err(CoreError::CannotLink {
+            reason: "a link group needs at least two clips".into(),
+        }
+        .into());
+    }
+    let reserved = tl.id_cursor();
+    let group = group.unwrap_or_else(|| tl.new_group_id());
+    let members = clips
+        .iter()
+        .map(|c| EditCommand::SetGroup {
+            clip: *c,
+            group: Some(group),
+        })
+        .collect();
+    match EditCommand::Sequence(members).apply(tl) {
+        Ok(effect) => Ok(Effect {
+            applied: EditCommand::Link {
+                clips: clips.to_vec(),
+                group: Some(group),
+            },
+            inverse: effect.inverse,
+        }),
+        Err(e) => {
+            tl.set_id_cursor(reserved);
+            Err(e)
+        }
+    }
+}
+
+fn apply_add_track(
+    tl: &mut Timeline,
+    kind: TrackKind,
+    name: Option<String>,
+    new_id: Option<TrackId>,
+) -> Result<Effect, CmdError> {
+    let name = name.unwrap_or_else(|| tl.next_track_name(kind));
+    let cursor = tl.id_cursor();
+    let id = new_id.unwrap_or_else(|| tl.new_track_id());
+    match tl.add_track_with_id(id, name.clone(), kind) {
+        Ok(()) => Ok(Effect {
+            applied: EditCommand::AddTrack {
+                kind,
+                name: Some(name),
+                new_id: Some(id),
+            },
+            inverse: EditCommand::RemoveTrack { track: id },
+        }),
+        Err(e) => {
+            tl.set_id_cursor(cursor);
+            Err(e.into())
+        }
+    }
+}
 
 fn plus(a: Frame, b: Frame) -> Frame {
     Frame(a.get().saturating_add(b.get()))

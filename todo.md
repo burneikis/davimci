@@ -1,5 +1,4 @@
 # Human
-- refactor all for clean code
 - use clippy on pedantic / nursery
 - backwards shuttle audio?
 - different speed shuttle audio

@@ -13,6 +13,13 @@ use crate::paint::{Chrome, DrawList, Fill, PickerView, Rect, TextRole, status_te
 /// allow for it: a box sized to its glyphs alone loses its last character.
 pub const TEXT_PADDING: u32 = 4;
 
+/// A clip narrower or shorter than this has no room for a thumbnail that
+/// would read as a picture rather than as noise.
+const MIN_THUMBNAIL_SIDE: u32 = 4;
+
+/// Vertical gap between the caret and the edges of the `:` line.
+const CARET_INSET: u32 = 2;
+
 /// Fixed metrics. A theme may change these; nothing else may.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Metrics {
@@ -207,28 +214,44 @@ impl Layout {
 pub fn paint(view: &ViewState, layout: &Layout, chrome: &Chrome) -> DrawList {
     let mut d = DrawList::default();
     d.rect(layout.window, Fill::Background);
-
-    // Video pane: the presenter has already letterboxed, so the shell only
-    // places the quad it was handed.
-    d.rect(layout.video, Fill::Background);
-    if let Some(q) = chrome.video {
-        d.rect(
-            Rect {
-                x: layout.video.x.saturating_add(q.x as i32),
-                y: layout.video.y.saturating_add(q.y as i32),
-                width: q.width,
-                height: q.height,
-            },
-            Fill::Video,
-        );
-        if let Some(tc) = q.timecode {
-            d.text(layout.video, TextRole::Timecode, tc);
-        }
+    paint_video(&mut d, layout, chrome);
+    paint_ruler(&mut d, layout, view, chrome);
+    paint_lanes(&mut d, layout, view);
+    paint_selection(&mut d, layout, view);
+    paint_playhead(&mut d, layout, view);
+    paint_status(&mut d, layout, view);
+    paint_command_line(&mut d, layout, view);
+    // The picker is modal: it owns the keyboard, so it is drawn over
+    // everything and drawn last.
+    if let Some(picker) = &chrome.picker {
+        paint_picker(&mut d, layout, picker);
     }
+    d
+}
 
-    // Ruler. Numbers first so a tick is never hidden behind one.
+/// The video pane. The presenter has already letterboxed, so the shell only
+/// places the quad it was handed.
+fn paint_video(d: &mut DrawList, layout: &Layout, chrome: &Chrome) {
+    d.rect(layout.video, Fill::Background);
+    let Some(q) = chrome.video else { return };
+    d.rect(
+        Rect {
+            x: layout.video.x.saturating_add(q.x as i32),
+            y: layout.video.y.saturating_add(q.y as i32),
+            width: q.width,
+            height: q.height,
+        },
+        Fill::Video,
+    );
+    if let Some(tc) = q.timecode {
+        d.text(layout.video, TextRole::Timecode, tc);
+    }
+}
+
+/// The ruler. Numbers go down first so a tick is never hidden behind one.
+fn paint_ruler(d: &mut DrawList, layout: &Layout, view: &ViewState, chrome: &Chrome) {
     d.rect(layout.ruler, Fill::Ruler);
-    paint_numbers(&mut d, layout, view, chrome);
+    paint_numbers(d, layout, view, chrome);
     for tick in &view.ticks {
         let height = if tick.major {
             layout.ruler.height
@@ -252,8 +275,10 @@ pub fn paint(view: &ViewState, layout: &Layout, chrome: &Chrome) -> DrawList {
             },
         );
     }
+}
 
-    // Track lanes.
+/// One row per visible track: lane, header, clips, waveform, labels.
+fn paint_lanes(d: &mut DrawList, layout: &Layout, view: &ViewState) {
     let row_h = layout.metrics.row_height;
     for (row, track) in view.tracks.iter().enumerate() {
         let y = layout.lane_y(row);
@@ -291,155 +316,171 @@ pub fn paint(view: &ViewState, layout: &Layout, chrome: &Chrome) -> DrawList {
         d.text(header, TextRole::TrackName, name);
 
         for clip in &track.clips {
-            let (first, last) = clip.columns;
-            let rect = Rect {
-                x: layout.tracks.x.saturating_add(first as i32),
-                y: y.saturating_add(1),
-                width: last.saturating_sub(first).saturating_add(1),
-                height: row_h.saturating_sub(2),
-            };
-            let fill = if clip.offline {
-                Fill::ClipOffline
-            } else if clip.selected {
-                Fill::ClipSelected
-            } else if clip.linked {
-                Fill::ClipLinked
-            } else {
-                Fill::Clip
-            };
-            d.rect(rect, fill);
-            // A filmstrip: one picture per sample point, each of the media
-            // at *that* point, so a long clip reads as the shot changing
-            // rather than as one frame stamped over and over. The app chose
-            // the sample columns; a tile is cropped at the clip's edge
-            // rather than spilling onto the neighbour it is not a picture
-            // of.
-            let end = rect.x.saturating_add(rect.width as i32);
-            for (column, thumb) in &clip.thumbnails {
-                if rect.width <= 4 || rect.height <= 4 {
-                    break;
-                }
-                let height = rect.height;
-                let tile = (thumb.width * height / thumb.height.max(1)).max(1);
-                let x = layout.tracks.x.saturating_add(*column as i32).max(rect.x);
-                if x >= end {
-                    continue;
-                }
-                let width = tile.min((end - x) as u32);
-                d.image(
-                    Rect {
-                        x,
-                        y: rect.y,
-                        width,
-                        height,
-                    },
-                    clip.id,
-                    thumb.clone(),
-                    tile,
-                );
-            }
+            paint_clip(d, layout, clip, y, row_h);
         }
 
         // Waveform, drawn over the clips it belongs to: an envelope beside
         // the audio it describes is the whole point of showing it.
-        paint_waveform(&mut d, layout, track, y, row_h);
+        paint_waveform(d, layout, track, y, row_h);
 
         // Labels last, so a clip is still identifiable on a lane whose
         // waveform would otherwise scribble over its own name.
         for clip in &track.clips {
-            let (first, last) = clip.columns;
             d.text(
-                Rect {
-                    x: layout.tracks.x.saturating_add(first as i32),
-                    y: y.saturating_add(1),
-                    width: last.saturating_sub(first).saturating_add(1),
-                    height: row_h.saturating_sub(2),
-                },
+                clip_rect(layout, clip, y, row_h),
                 TextRole::ClipLabel,
                 clip.label.clone(),
             );
         }
     }
+}
 
-    // Selection band, drawn over the lanes it covers.
-    if let Some(sel) = &view.selection
-        && let Some((first, last)) = sel.columns
-    {
-        for (row, track) in view.tracks.iter().enumerate() {
-            if !sel.tracks.contains(&track.id) {
-                continue;
-            }
-            d.rect(
-                Rect {
-                    x: layout.tracks.x.saturating_add(first as i32),
-                    y: layout.lane_y(row),
-                    width: last.saturating_sub(first).saturating_add(1),
-                    height: row_h,
-                },
-                Fill::Selection,
-            );
-        }
+fn clip_rect(layout: &Layout, clip: &davimci_app::ClipView, y: i32, row_h: u32) -> Rect {
+    let (first, last) = clip.columns;
+    Rect {
+        x: layout.tracks.x.saturating_add(first as i32),
+        y: y.saturating_add(1),
+        width: last.saturating_sub(first).saturating_add(1),
+        height: row_h.saturating_sub(2),
     }
+}
 
-    // Playhead: one pixel through the ruler and every lane.
-    if let Some(col) = view.playhead.column {
-        d.rect(
+fn paint_clip(d: &mut DrawList, layout: &Layout, clip: &davimci_app::ClipView, y: i32, row_h: u32) {
+    let rect = clip_rect(layout, clip, y, row_h);
+    let fill = if clip.offline {
+        Fill::ClipOffline
+    } else if clip.selected {
+        Fill::ClipSelected
+    } else if clip.linked {
+        Fill::ClipLinked
+    } else {
+        Fill::Clip
+    };
+    d.rect(rect, fill);
+    paint_filmstrip(d, layout, clip, rect);
+}
+
+/// One picture per sample point, each of the media at *that* point, so a long
+/// clip reads as the shot changing rather than as one frame stamped over and
+/// over. The app chose the sample columns; a tile is cropped at the clip's
+/// edge rather than spilling onto the neighbour it is not a picture of.
+fn paint_filmstrip(d: &mut DrawList, layout: &Layout, clip: &davimci_app::ClipView, rect: Rect) {
+    if rect.width <= MIN_THUMBNAIL_SIDE || rect.height <= MIN_THUMBNAIL_SIDE {
+        return;
+    }
+    let end = rect.x.saturating_add(rect.width as i32);
+    let height = rect.height;
+    for (column, thumb) in &clip.thumbnails {
+        let tile = (thumb.width * height / thumb.height.max(1)).max(1);
+        let x = layout.tracks.x.saturating_add(*column as i32).max(rect.x);
+        if x >= end {
+            continue;
+        }
+        let width = tile.min((end - x) as u32);
+        d.image(
             Rect {
-                x: layout.tracks.x.saturating_add(col as i32),
-                y: layout.ruler.y,
-                width: 1,
-                height: layout.ruler.height.saturating_add(layout.tracks.height),
+                x,
+                y: rect.y,
+                width,
+                height,
             },
-            Fill::Playhead,
+            clip.id,
+            thumb.clone(),
+            tile,
         );
     }
+}
 
-    // Status and command lines.
+/// The selection band, drawn over the lanes it covers.
+fn paint_selection(d: &mut DrawList, layout: &Layout, view: &ViewState) {
+    let Some(sel) = &view.selection else { return };
+    let Some((first, last)) = sel.columns else {
+        return;
+    };
+    for (row, track) in view.tracks.iter().enumerate() {
+        if !sel.tracks.contains(&track.id) {
+            continue;
+        }
+        d.rect(
+            Rect {
+                x: layout.tracks.x.saturating_add(first as i32),
+                y: layout.lane_y(row),
+                width: last.saturating_sub(first).saturating_add(1),
+                height: layout.metrics.row_height,
+            },
+            Fill::Selection,
+        );
+    }
+}
+
+/// One pixel through the ruler and every lane.
+fn paint_playhead(d: &mut DrawList, layout: &Layout, view: &ViewState) {
+    let Some(col) = view.playhead.column else {
+        return;
+    };
+    d.rect(
+        Rect {
+            x: layout.tracks.x.saturating_add(col as i32),
+            y: layout.ruler.y,
+            width: 1,
+            height: layout.ruler.height.saturating_add(layout.tracks.height),
+        },
+        Fill::Playhead,
+    );
+}
+
+fn paint_status(d: &mut DrawList, layout: &Layout, view: &ViewState) {
     d.rect(layout.status, Fill::StatusLine);
     d.text(layout.status, TextRole::Status, status_text(view));
-    if let (Some(rect), Some(line)) = (layout.command, view.command_line.as_ref()) {
-        d.rect(rect, Fill::CommandLine);
-        d.text(rect, TextRole::Command, format!(":{}", line.buffer));
-        // The caret: a rectangle, because the shell owns the font and the
-        // layout owns the geometry. `:` plus the characters before the
-        // cursor, in monospace advances.
-        let before = line.buffer[..line.cursor.min(line.buffer.len())]
-            .chars()
-            .count() as u32;
-        let cw = layout.metrics.char_width.max(1);
-        d.rect(
-            Rect {
-                x: rect
-                    .x
-                    .saturating_add(4)
-                    .saturating_add((before.saturating_add(1) * cw) as i32),
-                y: rect.y.saturating_add(2),
-                width: 1.max(cw / 8),
-                height: rect.height.saturating_sub(4),
-            },
-            Fill::Caret,
-        );
-        // Suggestions for the word being typed, on their own row above the
-        // line - the app decided what they are, so both frontends show the
-        // same list.
-        if let Some(row) = layout.completions
-            && !line.completions.is_empty()
-        {
-            d.rect(row, Fill::CommandLine);
-            d.text(
-                row,
-                TextRole::Completion,
-                fit_completions(&line.completions, row.width, cw),
-            );
-        }
-    }
+}
 
-    // The picker is modal: it owns the keyboard, so it is drawn over
-    // everything and drawn last.
-    if let Some(picker) = &chrome.picker {
-        paint_picker(&mut d, layout, picker);
+fn paint_command_line(d: &mut DrawList, layout: &Layout, view: &ViewState) {
+    let (Some(rect), Some(line)) = (layout.command, view.command_line.as_ref()) else {
+        return;
+    };
+    d.rect(rect, Fill::CommandLine);
+    d.text(rect, TextRole::Command, format!(":{}", line.buffer));
+    let cw = layout.metrics.char_width.max(1);
+    paint_caret(
+        d,
+        rect,
+        line.buffer[..line.cursor.min(line.buffer.len())]
+            .chars()
+            .count(),
+        cw,
+    );
+    // Suggestions for the word being typed, on their own row above the
+    // line - the app decided what they are, so both frontends show the
+    // same list.
+    if let Some(row) = layout.completions
+        && !line.completions.is_empty()
+    {
+        d.rect(row, Fill::CommandLine);
+        d.text(
+            row,
+            TextRole::Completion,
+            fit_completions(&line.completions, row.width, cw),
+        );
     }
-    d
+}
+
+/// The caret is a rectangle, because the shell owns the font and the layout
+/// owns the geometry: `:` plus the characters before the cursor, in monospace
+/// advances.
+fn paint_caret(d: &mut DrawList, rect: Rect, chars_before_cursor: usize, char_width: u32) {
+    let columns = (chars_before_cursor as u32).saturating_add(1);
+    d.rect(
+        Rect {
+            x: rect
+                .x
+                .saturating_add(TEXT_PADDING as i32)
+                .saturating_add((columns * char_width) as i32),
+            y: rect.y.saturating_add(CARET_INSET as i32),
+            width: 1.max(char_width / 8),
+            height: rect.height.saturating_sub(2 * CARET_INSET),
+        },
+        Fill::Caret,
+    );
 }
 
 /// Jump-point numbers on the ruler, as `:set numbers` asked for.

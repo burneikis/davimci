@@ -755,87 +755,92 @@ impl Editor {
         let mut effects = PluginEffects::default();
         effects.messages.append(&mut self.plugin_messages);
         for request in requests {
-            match request {
-                Request::Edit(action) => effects.act(action),
-                Request::Message(text) => effects.say(Message::info(text)),
-                // Routed as the `:` line it stands for, so a config-set
-                // property is validated, applied and reported by exactly the
-                // code a typed `:set` uses - including the undo rules, for the
-                // properties that are edits.
-                Request::Set { property, value } => {
-                    match self.command(&format!("set {property} {value}"), session, None) {
-                        Ok(Some(msg)) => effects.say(Message::info(msg)),
-                        Ok(None) => {}
-                        Err(e) => effects.say(Message::error(e.to_string())),
-                    }
-                }
-                Request::Export { preset } => {
-                    let container = match self.exporter.presets().get(&preset) {
-                        Ok(p) => p.container,
-                        Err(e) => {
-                            effects.say(Message::error(e.to_string()));
-                            continue;
-                        }
-                    };
-                    let out = crate::export::default_output(
-                        self.workspace.current().path().map(std::path::Path::new),
-                        container,
-                    );
-                    if let Some(reason) = self.before_export(&preset, &out.display().to_string()) {
-                        effects.say(Message::error(reason));
-                        continue;
-                    }
-                    match self.exporter.start(
-                        self.backend.as_mut(),
-                        &out,
-                        Some(&preset),
-                        session.timeline(),
-                    ) {
-                        Ok(msg) => effects.say(Message::info(msg)),
-                        Err(e) => effects.say(Message::error(e.to_string())),
-                    }
-                }
-                Request::Import { path } => {
-                    match self.import_picked(
-                        std::path::Path::new(&path),
-                        MediaIntent::Insert,
-                        session,
-                    ) {
-                        Ok(msg) => effects.say(Message::info(msg)),
-                        Err(e) => effects.say(Message::error(e.to_string())),
-                    }
-                }
-                Request::Analyze { track } => {
-                    let n = self.analyser.reanalyse();
-                    effects.say(Message::info(match track {
-                        Some(name) => format!("re-analysing {name}"),
-                        None => format!("re-analysing {n} track(s)"),
-                    }));
-                }
-                Request::Motion { name, opts } => {
-                    let env = self.motion_env(session);
-                    match self.plugins.run_motion(&name, &opts, &env) {
-                        // A motion is a pure query: it answers a frame and
-                        // the editor moves, so a plugin never touches the
-                        // playhead itself.
-                        Ok(MotionAnswer::Found(frame)) => {
-                            let track = session.timeline().playhead().track;
-                            if let Err(e) = session.set_playhead(Frame(frame), track) {
-                                effects.say(Message::error(e.to_string()));
-                            }
-                        }
-                        Ok(MotionAnswer::NoMatch) => effects.say(Message::warning(format!(
-                            "the motion '{name}' found nothing from here"
-                        ))),
-                        Ok(MotionAnswer::Pending) => effects.say(Message::warning(format!(
-                            "analysis is still running; the motion '{name}' cannot be resolved yet"
-                        ))),
-                        Err(e) => effects.say(Message::error(e.to_string())),
-                    }
-                }
-            }
+            self.run_request(request, session, &mut effects);
         }
         effects
+    }
+
+    fn run_request(&mut self, request: Request, session: &mut Session, out: &mut PluginEffects) {
+        match request {
+            Request::Edit(action) => out.act(action),
+            Request::Message(text) => out.say(Message::info(text)),
+            // Routed as the `:` line it stands for, so a config-set property
+            // is validated, applied and reported by exactly the code a typed
+            // `:set` uses - including the undo rules, for the properties that
+            // are edits.
+            Request::Set { property, value } => {
+                match self.command(&format!("set {property} {value}"), session, None) {
+                    Ok(Some(msg)) => out.say(Message::info(msg)),
+                    Ok(None) => {}
+                    Err(e) => out.say(Message::error(e.to_string())),
+                }
+            }
+            Request::Export { preset } => self.export_for_plugin(&preset, session, out),
+            Request::Import { path } => out.report(self.import_picked(
+                std::path::Path::new(&path),
+                MediaIntent::Insert,
+                session,
+            )),
+            Request::Analyze { track } => {
+                let n = self.analyser.reanalyse();
+                out.say(Message::info(match track {
+                    Some(name) => format!("re-analysing {name}"),
+                    None => format!("re-analysing {n} track(s)"),
+                }));
+            }
+            Request::Motion { name, opts } => {
+                self.move_by_plugin_motion(&name, &opts, session, out)
+            }
+        }
+    }
+
+    /// A plugin export goes to the preset's own default output, through the
+    /// same guards a typed `:export` passes.
+    fn export_for_plugin(&mut self, preset: &str, session: &Session, out: &mut PluginEffects) {
+        let container = match self.exporter.presets().get(preset) {
+            Ok(p) => p.container,
+            Err(e) => return out.say(Message::error(e.to_string())),
+        };
+        let path = crate::export::default_output(
+            self.workspace.current().path().map(std::path::Path::new),
+            container,
+        );
+        if let Some(reason) = self.before_export(preset, &path.display().to_string()) {
+            return out.say(Message::error(reason));
+        }
+        out.report(self.exporter.start(
+            self.backend.as_mut(),
+            &path,
+            Some(preset),
+            session.timeline(),
+        ));
+    }
+
+    /// A motion is a pure query: it answers a frame and the editor moves, so
+    /// a plugin never touches the playhead itself.
+    fn move_by_plugin_motion(
+        &mut self,
+        name: &str,
+        opts: &davimci_lua::Opts,
+        session: &mut Session,
+        out: &mut PluginEffects,
+    ) {
+        let env = self.motion_env(session);
+        match self.plugins.run_motion(name, opts, &env) {
+            Ok(MotionAnswer::Found(frame)) => {
+                let track = session.timeline().playhead().track;
+                if let Err(e) = session.set_playhead(Frame(frame), track) {
+                    out.say(Message::error(e.to_string()));
+                }
+            }
+            Ok(MotionAnswer::NoMatch) => out.say(Message::warning(format!(
+                "the motion '{name}' found nothing from here"
+            ))),
+            Ok(MotionAnswer::Pending) => out.say(Message::warning(format!(
+                "analysis is still running; the motion '{name}' cannot be resolved yet"
+            ))),
+            Err(e) => out.say(Message::error(e.to_string())),
+        }
     }
 
     /// The snapshot a registered motion runs against.

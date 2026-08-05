@@ -449,7 +449,7 @@ impl App {
                 self.note_moved(host);
                 self.follow();
             }
-            Err(e) => self.messages.push(Message::error(e.to_string())),
+            Err(e) => self.fail(e.to_string()),
         }
         Response::Continue
     }
@@ -530,154 +530,169 @@ impl App {
                 Response::Continue
             }
             Event::CommandKey(key) => self.command_key(key, host),
-            Event::Command(line) => {
-                self.close_command_line();
-                // A `:` line may edit or swap the timeline, neither of which
-                // is survivable mid-playback, and the ex vocabulary lives in
-                // the host - so the clock is dropped unconditionally rather
-                // than parsed for.
-                host.interrupt_transport(&self.session);
-                // Read before the command runs: `:` mode has already left
-                // visual mode behind, so the selection is the one the user
-                // was looking at when they typed the line.
-                // Falling back to the live selection covers a frontend that
-                // submits a line without the `:` key ever being fed.
-                let selection = self
-                    .pending_selection
-                    .take()
-                    .or_else(|| self.engine.selection());
-                match host.command(&line, &mut self.session, selection.as_ref()) {
-                    Ok(Some(msg)) => self.messages.push(Message::info(msg)),
-                    Ok(None) => {}
-                    Err(e) => self.messages.push(Message::error(e.to_string())),
-                }
-                // A `:` line can edit (`:relink`) or swap the whole timeline
-                // (`:e`, `:bn`), so the graph and the playhead are both
-                // assumed stale rather than diffed.
-                self.note_changed(host);
-                self.note_moved(host);
-                self.follow();
-                if host.wants_quit() {
-                    self.quit = true;
-                    return Response::Quit;
-                }
-                Response::Continue
-            }
+            Event::Command(line) => self.run_command_line(line, host),
             Event::CommandCancelled => {
                 self.close_command_line();
                 self.pending_selection = None;
                 Response::Continue
             }
-            Event::MediaChosen(path) => {
-                let Some(intent) = self.pending_pick.take() else {
-                    // No picker was open, so nothing asked for this file.
-                    // Silently importing it would be a write the user never
-                    // requested.
-                    self.messages
-                        .push(Message::error("no media picker is open".to_string()));
-                    return Response::Continue;
-                };
-                // An import into an empty timeline is the one place the view
-                // may move on its own: the default zoom would show a clip as
-                // a couple of columns, which reads as "nothing happened".
-                let was_empty = self.session.timeline().duration() == Frame::ZERO;
-                match host.import_media(&path, intent, &mut self.session) {
-                    Ok(msg) => {
-                        if was_empty {
-                            self.viewport.fit(self.session.timeline().duration());
-                            self.engine.set_zoom(self.viewport.zoom());
-                        }
-                        // Importing is an edit: the graph is stale and the
-                        // frame under the playhead may have changed.
-                        self.note_changed(host);
-                        self.note_moved(host);
-                        if let Some(m) = msg {
-                            self.messages.push(Message::info(m));
-                        }
-                    }
-                    Err(e) => self.messages.push(Message::error(e.to_string())),
-                }
-                self.follow();
-                Response::Continue
-            }
+            Event::MediaChosen(path) => self.import_chosen_media(path, host),
             Event::PickerCancelled => {
                 self.pending_pick = None;
                 Response::Continue
             }
             Event::Click { column, row } => self.click(column, row, host),
-            Event::TextEdited { clip, text } => {
-                let Some(open) = self.editing_text.take() else {
-                    // Nothing asked for this text, so committing it would be
-                    // a write the user never requested.
-                    self.messages
-                        .push(Message::error("no subtitle is being edited".to_string()));
-                    return Response::Continue;
-                };
-                if open != clip {
-                    self.messages.push(Message::error(
-                        "that text belongs to a different subtitle".to_string(),
-                    ));
-                    return Response::Continue;
-                }
-                let track = self
-                    .session
-                    .timeline()
-                    .find_clip(clip)
-                    .map(|(track, _)| track);
-                let Some(track) = track else {
-                    self.messages
-                        .push(Message::error("that subtitle is gone".to_string()));
-                    return Response::Continue;
-                };
-                // Editing text is an ordinary edit: one command, one undo
-                // step.
-                match self.session.exec(&davimci_cmd::EditCommand::SetClipText {
-                    track,
-                    clip,
-                    text,
-                }) {
-                    Ok(label) => {
-                        self.messages.push(Message::info(label));
-                        self.note_changed(host);
-                        self.note_moved(host);
-                    }
-                    Err(e) => self.messages.push(Message::error(e.to_string())),
-                }
-                Response::Continue
-            }
+            Event::TextEdited { clip, text } => self.commit_clip_text(clip, text, host),
             Event::TextEditCancelled => {
                 self.editing_text = None;
                 Response::Continue
             }
-            Event::Tick => {
-                host.tick(&mut self.session);
-                // Anything Lua queued since the last tick - an event handler
-                // that asked for an edit, most often. Run before the view is
-                // assembled so the edit and its status line land together.
-                let effects = host.plugin_tick(&mut self.session);
-                self.apply_plugin(effects, host);
-                // Jobs report on the clock, not on the edit: an export runs
-                // in the background and the status line has to keep up.
-                for update in host.jobs() {
-                    self.jobs.apply(update);
-                }
-                for track in host.stale_waveforms() {
-                    self.waveforms.invalidate(track);
-                }
-                for (track, waveform) in host.waveforms() {
-                    self.waveforms.insert(track, waveform);
-                }
-                for (clip, thumbnail) in host.thumbnails() {
-                    self.thumbnails.insert(clip, thumbnail);
-                }
-                self.ask_for_thumbnails(host);
-                self.follow();
-                Response::Continue
-            }
+            Event::Tick => self.tick(host),
             Event::Quit => {
                 self.quit = true;
                 Response::Quit
             }
+        }
+    }
+
+    /// Run a submitted `:` line against the host's ex vocabulary.
+    fn run_command_line(&mut self, line: String, host: &mut dyn Host) -> Response {
+        self.close_command_line();
+        // A `:` line may edit or swap the timeline, neither of which
+        // is survivable mid-playback, and the ex vocabulary lives in
+        // the host - so the clock is dropped unconditionally rather
+        // than parsed for.
+        host.interrupt_transport(&self.session);
+        // Read before the command runs: `:` mode has already left
+        // visual mode behind, so the selection is the one the user
+        // was looking at when they typed the line.
+        // Falling back to the live selection covers a frontend that
+        // submits a line without the `:` key ever being fed.
+        let selection = self
+            .pending_selection
+            .take()
+            .or_else(|| self.engine.selection());
+        match host.command(&line, &mut self.session, selection.as_ref()) {
+            Ok(Some(msg)) => self.say(msg),
+            Ok(None) => {}
+            Err(e) => self.fail(e.to_string()),
+        }
+        // A `:` line can edit (`:relink`) or swap the whole timeline
+        // (`:e`, `:bn`), so the graph and the playhead are both
+        // assumed stale rather than diffed.
+        self.note_changed(host);
+        self.note_moved(host);
+        self.follow();
+        if host.wants_quit() {
+            self.quit = true;
+            return Response::Quit;
+        }
+        Response::Continue
+    }
+
+    /// Import the file a media picker returned, for the intent that opened it.
+    fn import_chosen_media(&mut self, path: std::path::PathBuf, host: &mut dyn Host) -> Response {
+        let Some(intent) = self.pending_pick.take() else {
+            // No picker was open, so nothing asked for this file. Silently
+            // importing it would be a write the user never requested.
+            self.fail("no media picker is open".to_string());
+            return Response::Continue;
+        };
+        // An import into an empty timeline is the one place the view may move
+        // on its own: the default zoom would show a clip as a couple of
+        // columns, which reads as "nothing happened".
+        let was_empty = self.session.timeline().duration() == Frame::ZERO;
+        match host.import_media(&path, intent, &mut self.session) {
+            Ok(msg) => {
+                if was_empty {
+                    self.viewport.fit(self.session.timeline().duration());
+                    self.engine.set_zoom(self.viewport.zoom());
+                }
+                // Importing is an edit: the graph is stale and the frame
+                // under the playhead may have changed.
+                self.note_changed(host);
+                self.note_moved(host);
+                if let Some(m) = msg {
+                    self.say(m);
+                }
+            }
+            Err(e) => self.fail(e.to_string()),
+        }
+        self.follow();
+        Response::Continue
+    }
+
+    /// Commit subtitle text the frontend collected for the clip it was opened
+    /// on.
+    fn commit_clip_text(
+        &mut self,
+        clip: davimci_core::ClipId,
+        text: String,
+        host: &mut dyn Host,
+    ) -> Response {
+        let Some(open) = self.editing_text.take() else {
+            // Nothing asked for this text, so committing it would be a write
+            // the user never requested.
+            self.fail("no subtitle is being edited".to_string());
+            return Response::Continue;
+        };
+        if open != clip {
+            self.fail("that text belongs to a different subtitle".to_string());
+            return Response::Continue;
+        }
+        let track = self
+            .session
+            .timeline()
+            .find_clip(clip)
+            .map(|(track, _)| track);
+        let Some(track) = track else {
+            self.fail("that subtitle is gone".to_string());
+            return Response::Continue;
+        };
+        // Editing text is an ordinary edit: one command, one undo step.
+        match self
+            .session
+            .exec(&davimci_cmd::EditCommand::SetClipText { track, clip, text })
+        {
+            Ok(label) => {
+                self.say(label);
+                self.note_changed(host);
+                self.note_moved(host);
+            }
+            Err(e) => self.fail(e.to_string()),
+        }
+        Response::Continue
+    }
+
+    /// One turn of the clock: plugin work, then whatever the host finished
+    /// off the edit path.
+    fn tick(&mut self, host: &mut dyn Host) -> Response {
+        host.tick(&mut self.session);
+        // Anything Lua queued since the last tick - an event handler that
+        // asked for an edit, most often. Run before the view is assembled so
+        // the edit and its status line land together.
+        let effects = host.plugin_tick(&mut self.session);
+        self.apply_plugin(effects, host);
+        self.collect_background_work(host);
+        self.ask_for_thumbnails(host);
+        self.follow();
+        Response::Continue
+    }
+
+    /// Results that arrive on the clock rather than on an edit: an export runs
+    /// in the background and the status line has to keep up.
+    fn collect_background_work(&mut self, host: &mut dyn Host) {
+        for update in host.jobs() {
+            self.jobs.apply(update);
+        }
+        for track in host.stale_waveforms() {
+            self.waveforms.invalidate(track);
+        }
+        for (track, waveform) in host.waveforms() {
+            self.waveforms.insert(track, waveform);
+        }
+        for (clip, thumbnail) in host.thumbnails() {
+            self.thumbnails.insert(clip, thumbnail);
         }
     }
 
@@ -703,14 +718,13 @@ impl App {
                 }
                 host.mode_changed(change.from, change.to);
             }
-            Outcome::Invalid => self.messages.push(Message::warning(
-                "That key sequence is not bound to anything.".to_string(),
-            )),
-            Outcome::Applied(label) => self.messages.push(Message::info(label)),
+            Outcome::Invalid => {
+                self.warn("That key sequence is not bound to anything.".to_string())
+            }
+            Outcome::Applied(label) => self.say(label),
             Outcome::Moved => {}
-            Outcome::PredicatePending => self.messages.push(Message::warning(
-                "Analysis is still running; that motion cannot be resolved yet.".to_string(),
-            )),
+            Outcome::PredicatePending => self
+                .warn("Analysis is still running; that motion cannot be resolved yet.".to_string()),
             Outcome::MacroStarted(r) => self
                 .messages
                 .push(Message::info(format!("Recording into register {r}."))),
@@ -748,7 +762,7 @@ impl App {
             }
             Outcome::Plugin(id) => match host.plugin(id, &mut self.session) {
                 Ok(effects) => self.apply_plugin(effects, host),
-                Err(e) => self.messages.push(Message::error(e.to_string())),
+                Err(e) => self.fail(e.to_string()),
             },
             // A registered object is resolved by the host and the verb then
             // runs through the engine, so a plugin object edits by the same
@@ -761,16 +775,16 @@ impl App {
                             .execute_action(verb.with_range(range), &mut self.session);
                         return self.apply_outcome(outcome, host);
                     }
-                    Ok(None) => self.messages.push(Message::warning(format!(
-                        "The text object '{name}' matched nothing here."
-                    ))),
-                    Err(e) => self.messages.push(Message::error(e.to_string())),
+                    Ok(None) => {
+                        self.warn(format!("The text object '{name}' matched nothing here."))
+                    }
+                    Err(e) => self.fail(e.to_string()),
                 }
             }
             Outcome::NotImplemented(what) => self
                 .messages
                 .push(Message::warning(format!("Not implemented yet: {what}."))),
-            Outcome::Error(msg) => self.messages.push(Message::error(msg)),
+            Outcome::Error(msg) => self.fail(msg),
         }
         if edited {
             self.note_changed(host);
@@ -899,6 +913,20 @@ impl App {
         host.request_thumbnails(&requests);
     }
 
+    /// Status-line shorthands. Every message the app raises goes through one
+    /// of these, so a frontend cannot be handed a bare string.
+    fn say(&mut self, text: String) {
+        self.messages.push(Message::info(text));
+    }
+
+    fn warn(&mut self, text: String) {
+        self.messages.push(Message::warning(text));
+    }
+
+    fn fail(&mut self, text: String) {
+        self.messages.push(Message::error(text));
+    }
+
     /// "The graph is stale" - issued now, or once at the end of the batch.
     fn note_changed(&mut self, host: &mut dyn Host) {
         if self.batching {
@@ -976,7 +1004,7 @@ impl App {
             }
             let view = self.view();
             if let Err(e) = frontend.render(&view) {
-                self.messages.push(Message::error(e.to_string()));
+                self.fail(e.to_string());
             }
         }
     }

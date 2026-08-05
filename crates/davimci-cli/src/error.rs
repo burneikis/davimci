@@ -100,6 +100,14 @@ impl CliError {
             reason: e.to_string(),
         }
     }
+
+    /// The `:cmd` was recognised but its arguments were not what it takes.
+    pub(crate) fn usage(cmd: impl Into<String>, usage: impl Into<String>) -> Self {
+        Self::Usage {
+            cmd: cmd.into(),
+            usage: usage.into(),
+        }
+    }
 }
 
 impl Classify for CliError {

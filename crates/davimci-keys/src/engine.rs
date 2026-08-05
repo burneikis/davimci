@@ -279,10 +279,7 @@ impl Engine {
                 count,
                 register,
                 target,
-            } => match self.do_verb(op, count, register, target, session) {
-                Ok(o) => o,
-                Err(e) => Outcome::Error(e.user_message_pub()),
-            },
+            } => or_error(self.do_verb(op, count, register, target, session)),
             Action::SplitCurrent => self.do_split(false, session),
             Action::SplitAll => self.do_split(true, session),
             Action::RippleDeleteClip => self.do_ripple_delete_clip(session),
@@ -291,29 +288,9 @@ impl Engine {
                 ripple,
                 register,
             } => self.do_paste(before, ripple, register, session),
-            // `i` means two different things by context: on a text track it
-            // edits the subtitle under the playhead, anywhere else
-            // it inserts media.
-            Action::InsertMedia => match text_clip_under_playhead(session) {
-                Some((clip, text)) => Outcome::EditText { clip, text },
-                None => Outcome::PickMedia(MediaIntent::Insert),
-            },
+            Action::InsertMedia => do_insert_media(session),
             Action::AppendMedia => Outcome::PickMedia(MediaIntent::Append),
-            Action::Replace => {
-                // Replace needs something to replace; refusing here means the
-                // picker never opens for an edit that cannot land.
-                let head = session.timeline().playhead();
-                if session
-                    .timeline()
-                    .track(head.track)
-                    .and_then(|t| t.clip_at(head.frame))
-                    .is_some()
-                {
-                    Outcome::PickMedia(MediaIntent::Replace)
-                } else {
-                    Outcome::Error("there is no clip under the playhead to replace".to_string())
-                }
-            }
+            Action::Replace => do_replace(session),
             Action::Undo => run(session.undo()),
             Action::Redo => run(session.redo()),
             Action::Repeat => run(session.repeat()),
@@ -326,21 +303,15 @@ impl Engine {
                 Err(e) => Outcome::Error(e.to_string()),
             },
             Action::MacroReplay(reg, count) => self.do_replay(reg, count, session),
-            Action::SetMark(name) => {
-                let p = session.timeline().playhead();
-                session.set_mark(name, p.frame, Some(p.track));
-                Outcome::Applied(format!("mark '{name}' set at {}", p.frame))
-            }
+            Action::SetMark(name) => do_set_mark(name, session),
             Action::JumpMark(name) => self.do_jump_mark(name, session),
             Action::EnterVisual(kind) => {
                 let p = session.timeline().playhead();
-                Outcome::Mode(self.mode.toggle_visual(
-                    kind,
-                    Anchor {
-                        frame: p.frame,
-                        track: p.track,
-                    },
-                ))
+                let anchor = Anchor {
+                    frame: p.frame,
+                    track: p.track,
+                };
+                Outcome::Mode(self.mode.toggle_visual(kind, anchor))
             }
             Action::SwapVisualEnds => {
                 self.mode.swap_visual_ends();
@@ -353,10 +324,7 @@ impl Engine {
             }
             Action::NarrowSelection { group } => self.do_narrow_selection(group, session),
             Action::TrimEdgeStep { forward, count } => {
-                match self.do_trim_edge_step(forward, count, session) {
-                    Ok(o) => o,
-                    Err(e) => Outcome::Error(e.user_message_pub()),
-                }
+                or_error(self.do_trim_edge_step(forward, count, session))
             }
             Action::GainAdjust(step) => self.do_gain(step, session),
             Action::ToggleMute => self.do_track_flags(session, true),
@@ -375,10 +343,7 @@ impl Engine {
             Action::Zoom(intent) => Outcome::Zoom(intent),
             Action::Plugin { id, .. } => Outcome::Plugin(id),
             Action::InterruptTransport => Outcome::Transport(TransportCmd::Interrupt),
-            Action::EnterCommandMode => {
-                let c = self.mode.enter(Mode::Command);
-                Outcome::Mode(c)
-            }
+            Action::EnterCommandMode => Outcome::Mode(self.mode.enter(Mode::Command)),
             Action::Escape => Outcome::Mode(self.mode.escape()),
         }
     }
@@ -944,6 +909,37 @@ fn run(result: Result<String, davimci_cmd::CmdError>) -> Outcome {
         Ok(label) => Outcome::Applied(label),
         Err(e) => Outcome::Error(e.to_string()),
     }
+}
+
+/// A refusal from a verb is a status line, not a failure of the engine.
+fn or_error(result: Result<Outcome, KeysError>) -> Outcome {
+    result.unwrap_or_else(|e| Outcome::Error(e.user_message_pub()))
+}
+
+/// `i` means two different things by context: on a text track it edits the
+/// subtitle under the playhead, anywhere else it inserts media.
+fn do_insert_media(session: &Session) -> Outcome {
+    match text_clip_under_playhead(session) {
+        Some((clip, text)) => Outcome::EditText { clip, text },
+        None => Outcome::PickMedia(MediaIntent::Insert),
+    }
+}
+
+/// Replace needs something to replace; refusing here means the picker never
+/// opens for an edit that cannot land.
+fn do_replace(session: &Session) -> Outcome {
+    let head = session.timeline().playhead();
+    if clip_under(session.timeline(), head.track, head.frame).is_some() {
+        Outcome::PickMedia(MediaIntent::Replace)
+    } else {
+        Outcome::Error("there is no clip under the playhead to replace".to_string())
+    }
+}
+
+fn do_set_mark(name: char, session: &mut Session) -> Outcome {
+    let p = session.timeline().playhead();
+    session.set_mark(name, p.frame, Some(p.track));
+    Outcome::Applied(format!("mark '{name}' set at {}", p.frame))
 }
 
 fn interior(bounds: impl Iterator<Item = (Frame, Frame)>, frame: Frame) -> bool {

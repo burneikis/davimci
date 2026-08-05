@@ -30,4 +30,13 @@ impl PluginEffects {
     pub fn act(&mut self, action: Action) {
         self.actions.push(action);
     }
+
+    /// Report whatever a request came back with: its own sentence either way,
+    /// so a plugin failure reads like any other status line.
+    pub fn report<E: std::fmt::Display>(&mut self, result: Result<String, E>) {
+        match result {
+            Ok(text) => self.say(Message::info(text)),
+            Err(e) => self.say(Message::error(e.to_string())),
+        }
+    }
 }
