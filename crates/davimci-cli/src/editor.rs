@@ -1018,13 +1018,17 @@ impl Host for Editor {
         // The app holds the live session; give it to the workspace so the
         // command acts on what the user can see.
         self.workspace.set_current_session(session.clone());
+        let buffer_before = self.workspace.current().id();
         let outcome = self
             .workspace
             .run_selected(line, OnRecovery::Discard, selection);
         // Take back whatever buffer is now current - possibly a different
-        // timeline entirely.
+        // timeline entirely. A swap is a *different buffer*, not a different
+        // timeline: replacing the session resets the viewport, so a command
+        // that merely edits or moves the playhead (`:1234`) must not look
+        // like one, or the user's zoom and scroll are thrown away.
         let after = self.workspace.current_session();
-        if after.timeline() != session.timeline() {
+        if self.workspace.current().id() != buffer_before {
             self.swap = Some(after.clone());
         }
         *session = after;

@@ -795,3 +795,22 @@ fn analyze_is_accepted_and_reports_what_it_queued() {
         ":analyze was not accepted: {message}"
     );
 }
+
+/// Regression: `:1234` is navigation, so it must not look like a buffer
+/// swap. Replacing the session resets the viewport, which threw the user's
+/// zoom and scroll away on every jump.
+#[test]
+fn jumping_to_a_frame_keeps_the_zoom_and_never_swaps_the_buffer() {
+    let (mut app, mut editor) = editor();
+    app.zoom_in();
+    app.zoom_in();
+    let zoom = app.viewport().zoom();
+
+    app.event(Event::Command(":150".into()), &mut editor);
+    assert_eq!(
+        app.session().timeline().playhead().frame,
+        davimci_core::Frame(150)
+    );
+    assert!(editor.take_session_swap().is_none());
+    assert_eq!(app.viewport().zoom(), zoom);
+}
