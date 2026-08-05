@@ -1,6 +1,6 @@
 # Human
 - :1234 to jump to frame 1234
-- :set nunber both, :set number current (show current abs, and relative for the rest)
+- :set number both, :set number current (show current abs, and relative for the rest)
 - refactor all for clean code
 - use clippy on pedantic / nursery
 - backwards shuttle audio?
