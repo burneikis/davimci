@@ -92,7 +92,10 @@ pub struct Editor {
     /// `:set previewheight` and `:set previewprotocol`. Held here
     /// with the other view settings and read by the terminal session; inert
     /// for the window, which has a texture instead of a band.
-    preview_height: PreviewHeight,
+    /// `None` until `:set previewheight` says otherwise, because the band a
+    /// terminal opens with and the pane a window opens with are not the same
+    /// default. Each frontend resolves `None` for itself.
+    preview_height: Option<PreviewHeight>,
     preview_protocol: PreviewProtocol,
     numbers: Numbers,
     quit: bool,
@@ -138,7 +141,7 @@ impl Editor {
             last_export: None,
             known_clips: std::collections::BTreeSet::new(),
             preview: true,
-            preview_height: PreviewHeight::Off,
+            preview_height: None,
             preview_protocol: PreviewProtocol::Auto,
             numbers: Numbers::Off,
             quit: false,
@@ -263,10 +266,10 @@ impl Editor {
             ExCommand::Set(crate::setting::Setting::Preview(on)) => {
                 Some(Ok(self.set_preview(*on, session)))
             }
-            // Inert here by design: the terminal session reads these every
-            // loop, and the window has no band to put a picture in.
+            // Inert here by design: both frontends read this every loop and
+            // turn it into rows or pixels themselves.
             ExCommand::Set(crate::setting::Setting::PreviewHeight(height)) => {
-                self.preview_height = *height;
+                self.preview_height = Some(*height);
                 Some(Ok(height.describe()))
             }
             ExCommand::Set(crate::setting::Setting::PreviewProtocol(protocol)) => {
@@ -306,9 +309,9 @@ impl Editor {
         self.preview
     }
 
-    /// What `:set previewheight` asks the terminal for, before its own cap.
+    /// What `:set previewheight` asks for, or `None` if it was never set.
     #[must_use]
-    pub fn preview_height(&self) -> PreviewHeight {
+    pub fn preview_height(&self) -> Option<PreviewHeight> {
         self.preview_height
     }
 
@@ -328,7 +331,7 @@ impl Editor {
         let clip = tl.track(head.track).and_then(|t| t.clip_at(head.frame));
         crate::setting::CurrentSettings {
             preview: Some(self.preview),
-            preview_height: Some(self.preview_height),
+            preview_height: self.preview_height,
             preview_protocol: Some(self.preview_protocol),
             numbers: Some(self.numbers),
             fps: Some(tl.props.fps),

@@ -13,7 +13,7 @@ use davimci_app::{AppError, Event, Frontend, Response, Surface, ViewState};
 use davimci_app::{MediaPicker, ModalKey, Modals, PickerIntent, SubtitleEdit};
 
 use crate::input::{Modifiers, RawKey, translate};
-use crate::layout::{Layout, Metrics, paint};
+use crate::layout::{Layout, Metrics, VideoHeight, paint};
 use crate::paint::{Chrome, DrawList, PickerRow, PickerView};
 
 /// Something the windowing layer observed.
@@ -79,6 +79,17 @@ impl Gui {
 
     pub fn set_metrics(&mut self, metrics: Metrics) {
         self.metrics = metrics;
+    }
+
+    /// `:set previewheight`, in the window's terms. [`VideoHeight::Off`]
+    /// gives the whole window to the timeline.
+    pub fn set_preview_height(&mut self, height: VideoHeight) {
+        self.metrics.video = height;
+    }
+
+    #[must_use]
+    pub fn preview_height(&self) -> VideoHeight {
+        self.metrics.video
     }
 
     #[must_use]
@@ -371,6 +382,19 @@ mod tests {
         g.push(GuiEvent::Key(RawKey::Escape, Modifiers::default()));
         g.poll();
         assert!(g.subtitle().is_none());
+    }
+
+    /// `:set previewheight 0` is honoured by the window, not only by the
+    /// terminal: the timeline takes the pane's pixels and the surface grows.
+    #[test]
+    fn preview_height_reaches_the_layout_and_the_surface() {
+        let mut g = gui();
+        let tall = g.layout().tracks.height;
+        assert!(tall > 0);
+        g.set_preview_height(VideoHeight::Off);
+        assert_eq!(g.layout().video.height, 0);
+        assert!(g.layout().tracks.height > tall);
+        assert!(g.surface().rows > 0);
     }
 
     #[test]

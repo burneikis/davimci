@@ -20,6 +20,40 @@ const MIN_THUMBNAIL_SIDE: u32 = 4;
 /// Vertical gap between the caret and the edges of the `:` line.
 const CARET_INSET: u32 = 2;
 
+/// Share of the window the video pane takes when nothing asked for a size.
+const AUTO_VIDEO_PERCENT: u32 = 50;
+
+/// How tall the video pane is, as `:set previewheight` states it.
+///
+/// The window has no cells, so a row count is read as timeline rows: the one
+/// unit both frontends can name a height in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum VideoHeight {
+    /// `0` - no video pane; the timeline gets the whole window.
+    Off,
+    /// A count of timeline rows.
+    Rows(u16),
+    /// A share of the window height, recomputed on resize.
+    Percent(u8),
+    /// The share a fresh window opens with.
+    #[default]
+    Auto,
+}
+
+impl VideoHeight {
+    /// Pixels the pane asks for, before the layout caps it against what the
+    /// panes below it need.
+    #[must_use]
+    pub fn pixels(self, window_height: u32, row_height: u32) -> u32 {
+        match self {
+            Self::Off => 0,
+            Self::Rows(rows) => u32::from(rows).saturating_mul(row_height),
+            Self::Percent(pc) => window_height.saturating_mul(u32::from(pc).min(100)) / 100,
+            Self::Auto => window_height.saturating_mul(AUTO_VIDEO_PERCENT) / 100,
+        }
+    }
+}
+
 /// Fixed metrics. A theme may change these; nothing else may.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Metrics {
@@ -28,8 +62,8 @@ pub struct Metrics {
     pub status_height: u32,
     pub command_height: u32,
     pub track_header_width: u32,
-    /// Fraction of the window height the video pane wants, in percent.
-    pub video_percent: u32,
+    /// How much of the window the video pane wants (`:set previewheight`).
+    pub video: VideoHeight,
     /// Advance of one monospace character on the `:` line, used to place the
     /// caret. Text is measured by the shell's font, but a caret has to be a
     /// rectangle somewhere.
@@ -47,7 +81,7 @@ impl Default for Metrics {
             status_height: 20,
             command_height: 20,
             track_header_width: 80,
-            video_percent: 50,
+            video: VideoHeight::Auto,
             char_width: 8,
             number_char_width: 6,
         }
@@ -111,7 +145,7 @@ impl Layout {
         let ruler_h = take(&mut remaining, metrics.ruler_height);
         let video_h = take(
             &mut remaining,
-            height.saturating_mul(metrics.video_percent.min(100)) / 100,
+            metrics.video.pixels(height, metrics.row_height),
         );
         let tracks_h = remaining;
 
@@ -652,6 +686,62 @@ mod tests {
         assert_eq!(heights, 600);
         assert_eq!(l.headers.height, l.tracks.height);
         assert_eq!(l.tracks.x, l.metrics.track_header_width as i32);
+    }
+
+    /// `:set previewheight` sizes the video pane in the window exactly as it
+    /// sizes the band in the terminal.
+    #[test]
+    fn preview_height_sizes_the_video_pane() {
+        let with = |video| {
+            Layout::compute(
+                800,
+                600,
+                Metrics {
+                    video,
+                    ..Metrics::default()
+                },
+                false,
+                false,
+            )
+        };
+        assert_eq!(with(VideoHeight::Auto).video.height, 300);
+        assert_eq!(with(VideoHeight::Percent(25)).video.height, 150);
+        assert_eq!(
+            with(VideoHeight::Rows(3)).video.height,
+            3 * Metrics::default().row_height
+        );
+
+        // Off is not a thin pane: the timeline takes every row the video
+        // would have had.
+        let off = with(VideoHeight::Off);
+        assert_eq!(off.video.height, 0);
+        assert_eq!(
+            off.tracks.height,
+            with(VideoHeight::Auto).tracks.height + 300
+        );
+    }
+
+    /// A percentage larger than the window cannot push the status line off
+    /// the bottom.
+    #[test]
+    fn an_oversized_preview_still_leaves_the_status_line() {
+        let l = Layout::compute(
+            800,
+            600,
+            Metrics {
+                video: VideoHeight::Rows(1000),
+                ..Metrics::default()
+            },
+            false,
+            false,
+        );
+        assert_eq!(l.status.height, Metrics::default().status_height);
+        assert_eq!(l.tracks.height, 0);
+        assert_eq!(
+            l.video.height + l.ruler.height + l.status.height,
+            600,
+            "panes must still tile the window"
+        );
     }
 
     #[test]

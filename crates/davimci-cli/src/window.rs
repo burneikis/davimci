@@ -12,9 +12,22 @@
 use davimci_app::{App, Event, Frontend, Host, Surface};
 use davimci_core::Resolution;
 use davimci_gui::egui_shell;
-use davimci_gui::{Chrome, Gui, GuiEvent, VideoQuad};
+use davimci_gui::{Chrome, Gui, GuiEvent, VideoHeight, VideoQuad};
 
 use crate::editor::Editor;
+use crate::setting::PreviewHeight;
+
+/// `:set previewheight` in the window's terms. Unset gives the pane the
+/// share a fresh window opens with; `0` hands the whole window to the
+/// timeline.
+fn video_height(setting: Option<PreviewHeight>) -> VideoHeight {
+    match setting.unwrap_or(PreviewHeight::Auto) {
+        PreviewHeight::Off => VideoHeight::Off,
+        PreviewHeight::Rows(rows) => VideoHeight::Rows(rows),
+        PreviewHeight::Percent(pc) => VideoHeight::Percent(pc),
+        PreviewHeight::Auto => VideoHeight::Auto,
+    }
+}
 
 /// Window title, kept in one place so `:e` can extend it later.
 const TITLE: &str = "davimci";
@@ -165,6 +178,9 @@ impl eframe::App for Window {
             self.app.notify(notice);
         }
 
+        // Read every frame, so `:set previewheight` lands on the next one.
+        self.gui
+            .set_preview_height(video_height(self.editor.preview_height()));
         let layout = self.gui.layout();
         self.sync_video_surface(layout.video.width, layout.video.height);
         self.upload_video(ctx);
@@ -217,7 +233,9 @@ impl eframe::App for Window {
         // included - so it is drawn over the whole video pane. Drawing it
         // into the quad would letterbox a second time and squash the
         // picture into the middle of its own bars.
-        if let (Some(tex), Some(p)) = (&self.texture, self.editor.presentation()) {
+        if let (Some(tex), Some(p)) = (&self.texture, self.editor.presentation())
+            && layout.video.height > 0
+        {
             let rect = egui::Rect::from_min_size(
                 screen.min + egui::Vec2::new(layout.video.x as f32, layout.video.y as f32),
                 egui::Vec2::new(p.surface.width as f32, p.surface.height as f32),

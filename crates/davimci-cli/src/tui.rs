@@ -36,8 +36,10 @@ fn resolve(setting: PreviewProtocol, detected: Protocol) -> Protocol {
 
 /// `:set previewheight`. The registry validates the value; the terminal is
 /// what turns it into rows, since only it knows the screen and the picture.
-fn band_height(setting: PreviewHeight) -> Height {
-    match setting {
+/// Unset means no band: a terminal session that never asked for a picture
+/// must not spend decode on one.
+fn band_height(setting: Option<PreviewHeight>) -> Height {
+    match setting.unwrap_or(PreviewHeight::Off) {
         PreviewHeight::Off => Height::Off,
         PreviewHeight::Rows(rows) => Height::Rows(rows),
         PreviewHeight::Percent(pc) => Height::Percent(pc),
