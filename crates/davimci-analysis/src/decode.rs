@@ -100,6 +100,11 @@ pub fn scene_changes(path: &Path, threshold: f32) -> Result<Vec<u64>, AnalysisEr
 /// [Parsed_scdet_0 @ 0x1] lavfi.scd.score: 15.625, lavfi.scd.time: 2
 /// ```
 #[must_use]
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "the value is rounded and floored at zero before the conversion"
+)]
 pub fn parse_scdet(log: &str) -> Vec<u64> {
     let mut out: Vec<u64> = log
         .lines()
@@ -107,7 +112,10 @@ pub fn parse_scdet(log: &str) -> Vec<u64> {
             let (_, rest) = l.split_once("lavfi.scd.time:")?;
             let field = rest.split(',').next()?.trim();
             let secs: f64 = field.trim_end_matches('s').trim().parse().ok()?;
-            Some((secs * 1000.0).round().max(0.0) as u64)
+            let ms = (secs * 1000.0).round().max(0.0);
+            // A timestamp ffmpeg reports is seconds into a file, so this is
+            // never large enough to lose anything.
+            Some(ms as u64)
         })
         .collect();
     out.sort_unstable();

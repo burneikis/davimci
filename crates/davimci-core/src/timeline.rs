@@ -107,7 +107,9 @@ impl Timeline {
     #[must_use]
     pub fn next_track_name(&self, kind: TrackKind) -> String {
         let prefix = kind.prefix();
-        (1..)
+        // One more candidate than tracks that exist, so a free one always
+        // exists and the search terminates.
+        (1..=self.tracks.len() + 1)
             .map(|n| format!("{prefix}{n}"))
             .find(|name| self.track_by_name(name).is_none())
             .unwrap_or_else(|| format!("{prefix}1"))
@@ -828,12 +830,10 @@ mod tests {
         let mut tl = fixture(&[("V1", &[(0, 100, "a")]), ("A1", &[(0, 100, "a-aud")])]);
         let v = tl
             .track_by_name("V1")
-            .map(|t| t.clips()[0].id)
-            .unwrap_or(crate::id::ClipId(0));
+            .map_or(crate::id::ClipId(0), |t| t.clips()[0].id);
         let a = tl
             .track_by_name("A1")
-            .map(|t| t.clips()[0].id)
-            .unwrap_or(crate::id::ClipId(0));
+            .map_or(crate::id::ClipId(0), |t| t.clips()[0].id);
         let g = tl.link(&[v, a]).unwrap_or(GroupId(0));
         assert_eq!(tl.group_members(g).len(), 2);
         tl.assert_invariants();

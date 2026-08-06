@@ -298,7 +298,7 @@ impl Parser {
                     if let Step::Pending = resolved {
                         for k in remaining {
                             match self.feed(k, keymap, mode) {
-                                Step::Pending => continue,
+                                Step::Pending => {}
                                 other => return other,
                             }
                         }
@@ -570,9 +570,17 @@ fn instantiate(action: Action, count1: Option<u32>, register: Option<char>) -> A
             forward,
             count: count1.unwrap_or(1),
         },
-        Action::GainAdjust(step) => Action::GainAdjust(step * count1.unwrap_or(1) as i32),
+        Action::GainAdjust(step) => {
+            Action::GainAdjust(step.saturating_mul(count_as_i32(count1.unwrap_or(1))))
+        }
         other => other,
     }
+}
+
+/// A count is a repeat, so a count too large to express saturates rather than
+/// wrapping into a negative step.
+fn count_as_i32(count: u32) -> i32 {
+    i32::try_from(count).unwrap_or(i32::MAX)
 }
 
 #[cfg(test)]

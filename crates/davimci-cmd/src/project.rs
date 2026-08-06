@@ -133,7 +133,8 @@ pub fn migrate(mut value: Value) -> Result<Value, ProjectError> {
         .get("version")
         .and_then(Value::as_u64)
         .unwrap_or(0)
-        .min(u64::from(u32::MAX)) as u32;
+        .try_into()
+        .unwrap_or(u32::MAX);
     if version > FORMAT_VERSION {
         return Err(ProjectError::TooNew(version));
     }
@@ -330,16 +331,16 @@ mod tests {
             seed ^= seed << 13;
             seed ^= seed >> 7;
             seed ^= seed << 17;
-            let cut = (seed as usize) % bytes.len();
+            let cut = usize::try_from(seed % bytes.len() as u64).unwrap_or(0);
             let mut mutated = bytes.to_vec();
             mutated.truncate(cut);
             if seed.is_multiple_of(3) {
                 mutated.push(b'}');
             }
             if seed.is_multiple_of(5) && cut > 0 {
-                let at = (seed >> 8) as usize % cut;
+                let at = usize::try_from((seed >> 8) % cut as u64).unwrap_or(0);
                 if let Some(b) = mutated.get_mut(at) {
-                    *b = (seed >> 16) as u8 | 0x20;
+                    *b = (seed >> 16).to_le_bytes()[0] | 0x20;
                 }
             }
             let text = String::from_utf8_lossy(&mutated).into_owned();

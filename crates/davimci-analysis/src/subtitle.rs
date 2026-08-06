@@ -4,6 +4,7 @@
 //! Parsing is pure - SRT text in, cues out - so the import path can be tested
 //! without ffmpeg; [`extract`] is the only part that shells out.
 
+use std::fmt::Write as _;
 use std::path::Path;
 use std::process::Command;
 
@@ -63,13 +64,14 @@ pub fn parse_srt(text: &str) -> Vec<Cue> {
 pub fn to_srt(cues: &[Cue]) -> String {
     let mut out = String::new();
     for (i, cue) in cues.iter().enumerate() {
-        out.push_str(&format!(
+        let _ = write!(
+            out,
             "{}\n{} --> {}\n{}\n\n",
             i + 1,
             srt_timestamp(cue.start_ms),
             srt_timestamp(cue.end_ms),
             cue.text
-        ));
+        );
     }
     out
 }
@@ -81,6 +83,11 @@ fn srt_timestamp(ms: u64) -> String {
 }
 
 /// `00:00:01,500` or `00:00:01.500` -> milliseconds.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "the value is rounded and floored at zero before the conversion"
+)]
 fn timestamp(text: &str) -> Option<u64> {
     let text = text.split_whitespace().next()?.replace(',', ".");
     let mut parts = text.split(':');
@@ -90,7 +97,9 @@ fn timestamp(text: &str) -> Option<u64> {
     if parts.next().is_some() {
         return None;
     }
-    Some((h * 3600 + m * 60) * 1000 + (s * 1000.0).round() as u64)
+    // A cue timestamp is bounded by the length of the media it belongs to.
+    let ms = (s * 1000.0).round().max(0.0);
+    Some((h * 3600 + m * 60) * 1000 + ms as u64)
 }
 
 /// Pull subtitle stream `index` out of a container as SRT, via ffmpeg.

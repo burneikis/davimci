@@ -294,24 +294,24 @@ impl Tui {
                     });
                 }
             }
-            TermEvent::Key(key, mods) => self.handle_key(key, mods),
+            TermEvent::Key(key, mods) => self.handle_key(&key, mods),
         }
     }
 
-    fn handle_key(&mut self, key: TermKey, mods: Modifiers) {
+    fn handle_key(&mut self, key: &TermKey, mods: Modifiers) {
         // A modal owns the keyboard while it is open. Chorded keys are never
         // a modal's, so Ctrl-o still reaches the grammar from a picker.
         if self.modals.is_open()
             && !mods.ctrl
             && !mods.alt
-            && let Some(modal) = modal_key(&key)
+            && let Some(modal) = modal_key(key)
             && let Some(events) = self.modals.handle(modal)
         {
             self.out.extend(events);
             return;
         }
 
-        if let Some(key) = translate(&key, mods) {
+        if let Some(key) = translate(key, mods) {
             self.out.push(Event::Key(key));
         }
     }

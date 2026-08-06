@@ -10,9 +10,10 @@ fn main() {
     println!("cargo:rerun-if-env-changed=MLT_PKGCONFIG");
 
     // MLT 7 suffixes its pkg-config name with the major version.
-    let names = std::env::var("MLT_PKGCONFIG")
-        .map(|n| vec![n])
-        .unwrap_or_else(|_| vec!["mlt-framework-7".into(), "mlt-framework".into()]);
+    let names = std::env::var("MLT_PKGCONFIG").map_or_else(
+        |_| vec!["mlt-framework-7".into(), "mlt-framework".into()],
+        |n| vec![n],
+    );
 
     let mut last_err = None;
     for name in &names {

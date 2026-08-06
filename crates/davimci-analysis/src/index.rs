@@ -47,7 +47,7 @@ impl MaxTree {
             self.max[node] = values[lo];
             return;
         }
-        let mid = (lo + hi) / 2;
+        let mid = usize::midpoint(lo, hi);
         self.build(2 * node, lo, mid, values);
         self.build(2 * node + 1, mid + 1, hi, values);
         self.max[node] = self.max[2 * node].max(self.max[2 * node + 1]);
@@ -94,7 +94,7 @@ impl MaxTree {
         if lo == hi {
             return Some(lo);
         }
-        let mid = (lo + hi) / 2;
+        let mid = usize::midpoint(lo, hi);
         let (first, second) = if forward {
             ((2 * node, lo, mid), (2 * node + 1, mid + 1, hi))
         } else {
@@ -103,6 +103,27 @@ impl MaxTree {
         self.descend(first.0, first.1, first.2, bound, threshold, forward)
             .or_else(|| self.descend(second.0, second.1, second.2, bound, threshold, forward))
     }
+}
+
+/// A duration in milliseconds as the `f32` the max-tree stores. Durations are
+/// media-length values, far below the mantissa; a longer one only has to
+/// compare greater, which saturating preserves.
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "a duration is compared, not measured, and is far below the f32 mantissa"
+)]
+fn duration_as_f32(ms: u64) -> f32 {
+    ms as f32
+}
+
+/// A hop count as an index into the analysis arrays.
+fn hop_index(hop: u64) -> usize {
+    usize::try_from(hop).unwrap_or(usize::MAX)
+}
+
+/// The start of hop `index`, in milliseconds.
+fn hop_ms(index: usize, hop_ms: u32) -> u64 {
+    u64::try_from(index).unwrap_or(u64::MAX) * u64::from(hop_ms)
 }
 
 /// What is known about one track's media.
@@ -134,7 +155,7 @@ impl Indexed {
         let durations: Vec<f32> = analysis
             .silence
             .iter()
-            .map(|s| s.duration_ms() as f32)
+            .map(|s| duration_as_f32(s.duration_ms()))
             .collect();
         Self {
             hop_ms: analysis.params.hop_ms.max(1),
@@ -220,19 +241,19 @@ impl PredicateIndex for AnalysisIndex {
                 match dir {
                     Direction::Forward => idx
                         .peaks
-                        .first_at_least(hop as usize + 1, *threshold_db)
-                        .map(|i| i as u64 * u64::from(idx.hop_ms)),
+                        .first_at_least(hop_index(hop) + 1, *threshold_db)
+                        .map(|i| hop_ms(i, idx.hop_ms)),
                     Direction::Backward => hop.checked_sub(1).and_then(|before| {
                         idx.peaks
-                            .last_at_least(before as usize, *threshold_db)
-                            .map(|i| i as u64 * u64::from(idx.hop_ms))
+                            .last_at_least(hop_index(before), *threshold_db)
+                            .map(|i| hop_ms(i, idx.hop_ms))
                     }),
                 }
             }
             Predicate::Silence {
                 min_duration_ms, ..
             } => {
-                let want = *min_duration_ms as f32;
+                let want = duration_as_f32(u64::from(*min_duration_ms));
                 // Spans are sorted, so the search window is a binary search
                 // and the pick within it is another O(log n) descent.
                 match dir {
@@ -472,6 +493,10 @@ mod tests {
     }
 
     #[test]
+    #[allow(
+        clippy::cast_precision_loss,
+        reason = "the fixture values are two-digit integers"
+    )]
     fn the_max_tree_agrees_with_a_linear_scan() {
         let values: Vec<f32> = (0..97).map(|i| ((i * 37) % 91) as f32 - 45.0).collect();
         let tree = MaxTree::new(&values);

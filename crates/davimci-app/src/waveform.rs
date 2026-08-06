@@ -51,13 +51,19 @@ impl Waveform {
     /// A column narrower than a hop still reads that hop: dropping it would
     /// make a zoomed-in waveform flicker between silence and signal.
     #[must_use]
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "the value is clamped to 0..=LEVELS and rounded before the conversion"
+    )]
     pub fn level(&self, from_ms: u64, to_ms: u64) -> u8 {
         if self.peaks.is_empty() {
             return 0;
         }
         let hop = u64::from(self.hop_ms);
-        let first = (from_ms / hop) as usize;
-        let last = (to_ms.max(from_ms + 1).saturating_sub(1) / hop) as usize;
+        let index = |ms: u64| usize::try_from(ms / hop).unwrap_or(usize::MAX);
+        let first = index(from_ms);
+        let last = index(to_ms.max(from_ms + 1).saturating_sub(1));
         if first >= self.peaks.len() {
             return 0;
         }
@@ -66,7 +72,10 @@ impl Waveform {
             .iter()
             .copied()
             .fold(0.0f32, f32::max);
-        (peak.clamp(0.0, 1.0) * f32::from(LEVELS)).round() as u8
+        // Clamped to 0..=LEVELS first, so the rounded value is always a
+        // level and the conversion cannot lose anything.
+        let level = (peak.clamp(0.0, 1.0) * f32::from(LEVELS)).round();
+        level as u8
     }
 }
 
@@ -101,6 +110,10 @@ impl Waveforms {
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
+#[allow(
+    clippy::float_cmp,
+    reason = "the values under test are set exactly, so exact equality is the assertion"
+)]
 mod tests {
     use super::*;
 

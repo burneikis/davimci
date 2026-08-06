@@ -96,7 +96,10 @@ fn inset(quad: Quad, percent: u32) -> Quad {
 ///, so there is no drop-frame case to represent.
 #[must_use]
 pub fn timecode(position: Frame, fps: Fps) -> String {
-    let rate = fps.as_f64().round().max(1.0) as u64;
+    // Rounded in integers: 24000/1001 counts as 24 frames per second, as
+    // non-drop-frame timecode requires, with no float in the model.
+    let den = u64::from(fps.den).max(1);
+    let rate = ((u64::from(fps.num) + den / 2) / den).max(1);
     let total = position.get();
     let frames = total % rate;
     let secs = total / rate;

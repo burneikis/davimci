@@ -326,12 +326,12 @@ impl Projection {
             .enumerate()
             .map(|(n, &track_index)| AudioRoute {
                 track_index,
-                start: n as u16 * CHANNELS_PER_TRACK,
+                start: u16::try_from(n).unwrap_or(u16::MAX) * CHANNELS_PER_TRACK,
                 channels: CHANNELS_PER_TRACK,
             })
             .collect::<Vec<_>>();
         Some(AudioLayout {
-            total_channels: routes.len() as u16 * CHANNELS_PER_TRACK,
+            total_channels: u16::try_from(routes.len()).unwrap_or(u16::MAX) * CHANNELS_PER_TRACK,
             routes,
         })
     }
@@ -513,7 +513,7 @@ fn filters_for(clip: &Clip, kind: TrackKind) -> Vec<FilterSpec> {
 /// Where a decoded stream's samples land once the frame is widened to
 /// `total` channels.
 ///
-/// This is FFmpeg's default upmix, verified against MLT rather than assumed:
+/// This is `FFmpeg`'s default upmix, verified against MLT rather than assumed:
 /// a mono stream lands on front-centre (index 2) as soon as the layout has a
 /// centre channel, and a stereo stream stays on the front pair.
 fn source_positions(src_channels: u16, total: u16) -> Vec<u16> {
@@ -539,7 +539,7 @@ fn routing_filters(src_channels: u16, total: u16, start: u16) -> Vec<FilterSpec>
     let mut at = source_positions(src_channels, total);
     let mut out = Vec::new();
     for i in 0..at.len().min(CHANNELS_PER_TRACK as usize) {
-        let target = start + i as u16;
+        let target = start + u16::try_from(i).unwrap_or(u16::MAX);
         let from = at[i];
         if from == target {
             continue;
@@ -547,7 +547,7 @@ fn routing_filters(src_channels: u16, total: u16, start: u16) -> Vec<FilterSpec>
         out.push(channel_op(from, target, true));
         // The swap moves whatever was in `target` back to `from`, which
         // matters when a later channel of this same source lived there.
-        for slot in at.iter_mut() {
+        for slot in &mut at {
             if *slot == target {
                 *slot = from;
             } else if *slot == from {
@@ -839,7 +839,7 @@ mod tests {
                     };
                     let (from, to, swap) = (get("from"), get("to"), get("swap") == 1);
                     if swap {
-                        for slot in at.iter_mut() {
+                        for slot in &mut at {
                             if *slot == to {
                                 *slot = from;
                             } else if *slot == from {

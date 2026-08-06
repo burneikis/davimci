@@ -107,9 +107,8 @@ pub fn plan_proxy(
     let source = video.resolution?;
     // Preserve aspect, and keep both dimensions even for the encoder.
     let height = policy.height & !1;
-    let width = ((u64::from(source.width) * u64::from(height) / u64::from(source.height.max(1)))
-        as u32)
-        & !1;
+    let scaled = u64::from(source.width) * u64::from(height) / u64::from(source.height.max(1));
+    let width = u32::try_from(scaled).unwrap_or(u32::MAX) & !1;
     let fps = video.fps.unwrap_or(conformed.source_fps);
     Some(ProxySpec {
         source: info.path.clone(),

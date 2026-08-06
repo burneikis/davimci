@@ -96,9 +96,10 @@ impl VideoFrame {
             }
         }
         let n = (self.rgba.len() / 4) as u64;
+        // Each sum is at most 255 * n, so the mean is always a byte.
         let mut out = [0u8; 4];
         for (o, s) in out.iter_mut().zip(sums) {
-            *o = (s / n) as u8;
+            *o = u8::try_from(s / n).unwrap_or(u8::MAX);
         }
         out
     }

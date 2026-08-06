@@ -16,7 +16,9 @@ pub(crate) fn shift(frame: Frame, delta: i64) -> Result<Frame, CoreError> {
     if v < 0 {
         return Err(CoreError::NegativeTime);
     }
-    Ok(Frame(v as u64))
+    u64::try_from(v)
+        .map(Frame)
+        .map_err(|_| CoreError::TimeOverflow)
 }
 
 impl Timeline {
@@ -141,7 +143,9 @@ impl Timeline {
         if left.props.fade_out != Frame::ZERO || right.props.fade_in != Frame::ZERO {
             return Err(reject("there is a fade at the cut"));
         }
-        if left.props.gain_db != right.props.gain_db
+        // Bit equality, not tolerance: two halves of one clip carry the same
+        // gain, and any difference at all means the halves were edited apart.
+        if left.props.gain_db.to_bits() != right.props.gain_db.to_bits()
             || left.props.transform != right.props.transform
         {
             return Err(reject("the two clips have different properties"));
@@ -732,5 +736,16 @@ mod tests {
         assert!(shift(Frame(5), -10).is_err());
         assert_eq!(shift(Frame(5), -5), Ok(Frame::ZERO));
         assert_eq!(shift(Frame(5), 5), Ok(Frame(10)));
+    }
+
+    /// Regression: the sum was computed in `i128` and cast back to `u64`,
+    /// so a shift past the last addressable frame wrapped to a small one
+    /// instead of being rejected.
+    #[test]
+    fn a_shift_past_the_last_addressable_frame_is_rejected() {
+        assert_eq!(
+            shift(Frame(u64::MAX), i64::MAX),
+            Err(CoreError::TimeOverflow)
+        );
     }
 }

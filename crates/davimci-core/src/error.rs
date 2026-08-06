@@ -98,6 +98,9 @@ pub enum CoreError {
     #[error("the timeline has no time before frame zero")]
     NegativeTime,
 
+    #[error("that would put the edit past the last frame davimci can address")]
+    TimeOverflow,
+
     #[error("timeline has no framerate set")]
     NoFramerate,
 
@@ -135,6 +138,7 @@ impl Classify for CoreError {
             | Self::ZeroDuration
             | Self::EmptyRegister
             | Self::NegativeTime
+            | Self::TimeOverflow
             | Self::NoFramerate
             | Self::Unconformable { .. } => ErrorClass::User,
             Self::OfflineMedia { .. } => ErrorClass::OfflineMedia,
@@ -255,6 +259,7 @@ mod tests {
             CoreError::ZeroDuration,
             CoreError::EmptyRegister,
             CoreError::NegativeTime,
+            CoreError::TimeOverflow,
         ];
         for e in &all {
             let msg = e.user_message();

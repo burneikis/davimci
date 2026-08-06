@@ -81,7 +81,7 @@ pub fn analyse(
         analysis.scene_changes =
             decode::scene_changes(&request.path, decode::SCENE_THRESHOLD).unwrap_or_default();
     }
-    analysis.source_hash = hash.clone();
+    hash.clone_into(&mut analysis.source_hash);
     let _ = cache.store(&hash, &analysis);
     if let Some(ctx) = ctx {
         ctx.progress(2, 2);

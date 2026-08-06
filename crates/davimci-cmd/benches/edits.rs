@@ -34,7 +34,7 @@ fn big_timeline(n: u64) -> Timeline {
 }
 
 fn v1(tl: &Timeline) -> TrackId {
-    tl.track_by_name("V1").map(|t| t.id).unwrap_or(TrackId(0))
+    tl.track_by_name("V1").map_or(TrackId(0), |t| t.id)
 }
 
 fn ripple_delete(c: &mut Criterion) {

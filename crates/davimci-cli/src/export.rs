@@ -104,12 +104,20 @@ struct Running {
 /// tested with no render and no ffmpeg.
 #[must_use]
 pub fn cues(timeline: &Timeline, fps: Fps) -> Vec<Cue> {
+    // A cue time is a frame count scaled to milliseconds: far below the
+    // mantissa, and never negative.
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss,
+        reason = "a frame count is far below the f64 mantissa and never negative"
+    )]
     let ms = |f: Frame| (f.get() as f64 * 1000.0 / fps.as_f64()).round() as u64;
     let mut cues: Vec<Cue> = timeline
         .tracks()
         .iter()
         .filter(|t| t.kind == TrackKind::Text)
-        .flat_map(|t| t.clips())
+        .flat_map(davimci_core::Track::clips)
         .filter_map(|c| {
             let text = c.text.as_ref()?.trim();
             (!text.is_empty()).then(|| Cue {
@@ -138,8 +146,7 @@ fn mux_subtitles(output: &Path, srt: &Path) -> Result<(), String> {
         "muxing.{}",
         output
             .extension()
-            .map(|e| e.to_string_lossy().to_string())
-            .unwrap_or_else(|| "mkv".into())
+            .map_or_else(|| "mkv".into(), |e| e.to_string_lossy().to_string())
     ));
     let run = std::process::Command::new("ffmpeg")
         .args(["-y", "-i"])
@@ -193,7 +200,10 @@ impl Exporter {
     /// Lines for `:presets`.
     #[must_use]
     pub fn list_presets(&self) -> Vec<String> {
-        self.presets.all().map(|p| p.summary()).collect()
+        self.presets
+            .all()
+            .map(davimci_backend::Preset::summary)
+            .collect()
     }
 
     /// Start an export. `preset` of `None` infers one from the output file's
@@ -218,15 +228,14 @@ impl Exporter {
             return Err(CliError::NothingToExport);
         }
 
-        let preset = match preset {
-            Some(name) => self.presets.get(name)?,
-            None => {
-                let ext = output
-                    .extension()
-                    .map(|e| e.to_string_lossy().to_string())
-                    .unwrap_or_default();
-                self.presets.for_extension(&ext)
-            }
+        let preset = if let Some(name) = preset {
+            self.presets.get(name)?
+        } else {
+            let ext = output
+                .extension()
+                .map(|e| e.to_string_lossy().to_string())
+                .unwrap_or_default();
+            self.presets.for_extension(&ext)
         };
         // A path with no extension gets the preset's; a path that names a
         // different one is left alone, because the user was explicit.
@@ -396,10 +405,10 @@ fn with_extension_if_missing(path: &Path, container: Container) -> PathBuf {
 /// the preset's container extension.
 #[must_use]
 pub fn default_output(project: Option<&Path>, container: Container) -> PathBuf {
-    let stem = project
-        .and_then(|p| p.file_stem())
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| "untitled".to_string());
+    let stem = project.and_then(|p| p.file_stem()).map_or_else(
+        || "untitled".to_string(),
+        |s| s.to_string_lossy().to_string(),
+    );
     PathBuf::from(format!("{stem}.{}", container.extension()))
 }
 

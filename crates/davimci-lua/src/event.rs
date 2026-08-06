@@ -47,11 +47,7 @@ impl Event {
         let t = lua.create_table()?;
         t.set("event", self.name())?;
         match self {
-            Self::PlayheadMoved { frame, track } => {
-                t.set("frame", *frame)?;
-                t.set("track", track.as_str())?;
-            }
-            Self::SplitPerformed { frame, track } => {
+            Self::PlayheadMoved { frame, track } | Self::SplitPerformed { frame, track } => {
                 t.set("frame", *frame)?;
                 t.set("track", track.as_str())?;
             }

@@ -29,15 +29,14 @@ pub type TrackSpec<'a> = (&'a str, &'a [ClipSpec<'a>]);
 pub fn fixture(spec: &[TrackSpec<'_>]) -> Timeline {
     let mut tl = Timeline::default();
     for (name, clips) in spec {
-        let id = match tl.track_by_name(name).map(|t| t.id) {
-            Some(id) => id,
-            None => {
-                let id = tl.add_track(kind_of(name));
-                if let Some(t) = tl.track_mut(id) {
-                    t.name = (*name).to_string();
-                }
-                id
+        let id = if let Some(id) = tl.track_by_name(name).map(|t| t.id) {
+            id
+        } else {
+            let id = tl.add_track(kind_of(name));
+            if let Some(t) = tl.track_mut(id) {
+                t.name = (*name).to_string();
             }
+            id
         };
         for (start, dur, label) in *clips {
             let cid = tl.new_clip_id();
@@ -97,7 +96,7 @@ pub fn multi_audio_fixture(audio: usize, channels: Option<u16>) -> Timeline {
         let track = tl.add_track(TrackKind::Audio);
         let cid = tl.new_clip_id();
         let mut media = MediaRef::new("/media/multi.mkv", Fps::FPS_60, Frame(600));
-        media.stream = Some(n as u32 + 1);
+        media.stream = Some(u32::try_from(n).unwrap_or(0) + 1);
         media.channels = channels;
         let clip = Clip::from_media(
             cid,

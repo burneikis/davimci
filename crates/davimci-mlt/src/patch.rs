@@ -125,20 +125,17 @@ fn diff_entries(old: &[Entry], new: &[Entry]) -> Vec<TrackOp> {
                 .position(|e| key(e) == k)
                 .map(|p| p + i),
         };
-        match found {
-            Some(j) => {
-                for _ in i..j {
-                    ops.push(TrackOp::Remove { index: i });
-                    cur.remove(i);
-                }
+        if let Some(j) = found {
+            for _ in i..j {
+                ops.push(TrackOp::Remove { index: i });
+                cur.remove(i);
             }
-            None => {
-                ops.push(TrackOp::Insert {
-                    index: i,
-                    entry: new[i].clone(),
-                });
-                cur.insert(i, new[i].clone());
-            }
+        } else {
+            ops.push(TrackOp::Insert {
+                index: i,
+                entry: new[i].clone(),
+            });
+            cur.insert(i, new[i].clone());
         }
     }
     while cur.len() > new.len() {
@@ -154,7 +151,7 @@ pub fn apply_ops(entries: &mut Vec<Entry>, ops: &[TrackOp]) {
     for op in ops {
         match op {
             TrackOp::Insert { index, entry } => {
-                entries.insert((*index).min(entries.len()), entry.clone())
+                entries.insert((*index).min(entries.len()), entry.clone());
             }
             TrackOp::Remove { index } => {
                 if *index < entries.len() {

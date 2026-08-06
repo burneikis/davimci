@@ -2,6 +2,10 @@
 //! presented - driven through the headless frontend so none of it needs a
 //! window.
 
+#![allow(
+    clippy::float_cmp,
+    reason = "the values under test are set exactly, so exact equality is the assertion"
+)]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use davimci_app::{App, Event, Host, Surface};

@@ -144,10 +144,9 @@ proptest! {
         let before = tl.duration().get();
         let covered: u64 = tl
             .track(v1)
-            .map(|t| t.clips().iter()
+            .map_or(0, |t| t.clips().iter()
                 .map(|c| c.end().get().min(end).saturating_sub(c.start.get().max(start)))
-                .sum())
-            .unwrap_or(0);
+                .sum());
         tl.ripple_delete_range(v1, Frame(start), Frame(end)).map_err(|e| TestCaseError::fail(e.to_string()))?;
         // Removing content shortens the track by the covered frames plus any
         // gap inside the range that later clips slid across.
@@ -182,10 +181,10 @@ proptest! {
         let mut tl = base();
         let v1 = crate::testing::track_id(&tl, "V1");
         let covered = |t: &Timeline| -> u64 {
-            t.track(v1).map(|t| t.clips().iter().map(|c| c.duration.get()).sum()).unwrap_or(0)
+            t.track(v1).map_or(0, |t| t.clips().iter().map(|c| c.duration.get()).sum())
         };
         let before = covered(&tl);
-        let n = tl.track(v1).map(|t| t.clips().len()).unwrap_or(0);
+        let n = tl.track(v1).map_or(0, |t| t.clips().len());
         if tl.split_at(v1, Frame(frame)).is_ok() {
             prop_assert_eq!(covered(&tl), before);
             prop_assert_eq!(tl.track(v1).map(|t| t.clips().len()), Some(n + 1));

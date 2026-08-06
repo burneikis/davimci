@@ -156,7 +156,7 @@ pub fn parse_editor_command(rhs: &str) -> Option<Action> {
             };
             Action::Move {
                 motion,
-                count: n.unsigned_abs().min(u64::from(u32::MAX)) as u32,
+                count: u32::try_from(n.unsigned_abs()).unwrap_or(u32::MAX),
             }
         }
         _ => return None,

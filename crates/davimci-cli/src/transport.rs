@@ -161,7 +161,7 @@ impl Transport {
                 self.stop(backend, session)?;
                 Ok("paused".into())
             }
-            _ => {
+            TransportState::Stopped => {
                 self.start(backend, session, scale)?;
                 Ok("playing".into())
             }
@@ -358,23 +358,17 @@ impl Transport {
                 if let Some((start, end)) = self.loop_range
                     && at.is_some_and(|f| f >= end)
                 {
-                    return match self.restart(backend, start, scale) {
-                        Ok(()) => TickResult {
-                            playhead: Some(start),
-                            stopped: false,
-                            presentation,
-                        },
-                        // A wrap that will not start is not a reason to keep
-                        // pretending to play.
-                        Err(_) => {
-                            self.clear_loop();
-                            let _ = self.stop(backend, session);
-                            TickResult {
-                                playhead: Some(start),
-                                stopped: true,
-                                presentation,
-                            }
-                        }
+                    // A wrap that will not start is not a reason to keep
+                    // pretending to play.
+                    let stopped = self.restart(backend, start, scale).is_err();
+                    if stopped {
+                        self.clear_loop();
+                        let _ = self.stop(backend, session);
+                    }
+                    return TickResult {
+                        playhead: Some(start),
+                        stopped,
+                        presentation,
                     };
                 }
                 // Running off the end stops playback rather than wedging at
@@ -466,6 +460,14 @@ pub struct TickResult {
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(
+    clippy::many_single_char_names,
+    reason = "the fixtures are backend, presenter, session and transport, one letter each, in short tests"
+)]
+#[allow(
+    clippy::float_cmp,
+    reason = "the values under test are set exactly, so exact equality is the assertion"
+)]
 mod tests {
     use super::*;
     use davimci_backend::MockBackend;

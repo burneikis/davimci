@@ -239,10 +239,10 @@ fn source_of(track: &davimci_core::Track) -> Option<Source> {
 
 /// A cheap fingerprint of everything on a track that changes what is heard.
 fn audible_signature(track: &davimci_core::Track) -> u64 {
-    let mut h: u64 = 1469598103934665603;
+    let mut h: u64 = 14_695_981_039_346_656_037;
     let mut mix = |v: u64| {
         h ^= v;
-        h = h.wrapping_mul(1099511628211);
+        h = h.wrapping_mul(1_099_511_628_211);
     };
     for clip in track.clips() {
         mix(clip.id.0);

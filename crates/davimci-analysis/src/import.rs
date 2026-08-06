@@ -168,21 +168,10 @@ pub fn plan(
             .target
             .filter(|id| !taken.contains(id) && tl.track(*id).is_some_and(|t| t.kind == kind));
         let requested = requested.and_then(|id| tl.track(id).map(|t| (id, t.name.clone())));
-        let (track, track_name, add) = match requested.or_else(|| reusable(tl, kind, &taken)) {
-            Some(t) => (t.0, t.1, None),
-            None => {
-                let id = TrackId(next()?);
-                let name = names.next(kind);
-                (
-                    id,
-                    name.clone(),
-                    Some(EditCommand::AddTrack {
-                        kind,
-                        name: Some(name),
-                        new_id: Some(id),
-                    }),
-                )
-            }
+        let existing = requested.or_else(|| reusable(tl, kind, &taken));
+        let (track, track_name, add) = match existing {
+            Some((id, name)) => (id, name, None),
+            None => new_track(kind, TrackId(next()?), &mut names),
         };
         taken.push(track);
         if let Some(add) = add {
@@ -273,6 +262,21 @@ struct NameCursor {
     used: BTreeSet<String>,
 }
 
+/// A track the import has to create, with the command that creates it.
+fn new_track(
+    kind: TrackKind,
+    id: TrackId,
+    names: &mut NameCursor,
+) -> (TrackId, String, Option<EditCommand>) {
+    let name = names.next(kind);
+    let add = EditCommand::AddTrack {
+        kind,
+        name: Some(name.clone()),
+        new_id: Some(id),
+    };
+    (id, name, Some(add))
+}
+
 impl NameCursor {
     fn new(tl: &Timeline) -> Self {
         Self {
@@ -282,7 +286,8 @@ impl NameCursor {
 
     fn next(&mut self, kind: TrackKind) -> String {
         let prefix = kind.prefix();
-        let name = (1..)
+        // One more candidate than names in use, so a free one always exists.
+        let name = (1..=self.used.len() + 1)
             .map(|n| format!("{prefix}{n}"))
             .find(|name| !self.used.contains(name))
             .unwrap_or_else(|| format!("{prefix}1"));
@@ -303,7 +308,9 @@ fn media_clip(
     //.
     let media = MediaRef::new(&info.path, conformed.source_fps, conformed.length).on_stream(
         stream.index,
-        stream.channels.map(|c| c.min(u32::from(u16::MAX)) as u16),
+        stream
+            .channels
+            .map(|c| u16::try_from(c).unwrap_or(u16::MAX)),
     );
     Clip::from_media(id, stream.label(), media, at, Frame::ZERO, conformed.length)
 }

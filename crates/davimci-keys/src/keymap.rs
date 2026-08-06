@@ -122,6 +122,10 @@ fn standalone(a: Action) -> LeafAction {
 
 /// The default keymap.
 #[must_use]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the default keymap is one table, read as one"
+)]
 pub fn default_bindings() -> Vec<(Vec<Key>, LeafAction)> {
     use Direction::{Backward, Forward};
     vec![

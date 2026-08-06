@@ -205,6 +205,10 @@ impl Clip {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::float_cmp,
+    reason = "the values under test are set exactly, so exact equality is the assertion"
+)]
 mod tests {
     use super::*;
 

@@ -13,12 +13,13 @@
 //! Wrappers are `!Send` by construction (they hold raw pointers) because MLT
 //! services are not thread-safe without explicit locking.
 
-use std::ffi::{CStr, CString, c_char, c_int};
+use std::ffi::{CStr, CString, c_int};
 use std::ptr;
 use std::sync::OnceLock;
 
 use davimci_mlt_sys as sys;
 
+use crate::convert::{count, mlt_int, size};
 use crate::error::MltError;
 
 /// Process-wide MLT initialisation.
@@ -53,7 +54,7 @@ pub struct Properties<'a> {
     _owner: std::marker::PhantomData<&'a ()>,
 }
 
-impl<'a> Properties<'a> {
+impl Properties<'_> {
     /// # Safety
     /// `raw` must be non-null and outlive `'a`.
     unsafe fn from_raw(raw: sys::mlt_properties) -> Self {
@@ -87,7 +88,7 @@ impl<'a> Properties<'a> {
             return None;
         }
         Some(
-            unsafe { CStr::from_ptr(raw as *const c_char) }
+            unsafe { CStr::from_ptr(raw.cast_const()) }
                 .to_string_lossy()
                 .into_owned(),
         )
@@ -132,15 +133,15 @@ impl Profile {
         }
         // SAFETY: `raw` is a valid, uniquely owned profile.
         unsafe {
-            (*raw).width = width as c_int;
-            (*raw).height = height as c_int;
-            (*raw).frame_rate_num = fps_num as c_int;
-            (*raw).frame_rate_den = fps_den as c_int;
+            (*raw).width = mlt_int(width);
+            (*raw).height = mlt_int(height);
+            (*raw).frame_rate_num = mlt_int(fps_num);
+            (*raw).frame_rate_den = mlt_int(fps_den);
             (*raw).progressive = 1;
             (*raw).sample_aspect_num = 1;
             (*raw).sample_aspect_den = 1;
-            (*raw).display_aspect_num = width as c_int;
-            (*raw).display_aspect_den = height as c_int;
+            (*raw).display_aspect_num = mlt_int(width);
+            (*raw).display_aspect_den = mlt_int(height);
             (*raw).colorspace = 709;
             (*raw).is_explicit = 1;
         }
@@ -272,7 +273,7 @@ impl Producer {
         let mut raw: sys::mlt_frame = ptr::null_mut();
         // SAFETY: `raw` is written by MLT on success; the frame is then owned
         // by the returned wrapper.
-        let rc = unsafe { sys::mlt_service_get_frame(self.service(), &mut raw, 0) };
+        let rc = unsafe { sys::mlt_service_get_frame(self.service(), &raw mut raw, 0) };
         if rc != 0 || raw.is_null() {
             return Err(MltError::NoFrame);
         }
@@ -594,12 +595,20 @@ impl FrameRef {
     pub fn rgba(&mut self, width: u32, height: u32) -> Result<(Vec<u8>, u32, u32), MltError> {
         let mut buf: *mut u8 = ptr::null_mut();
         let mut fmt: c_int = sys::MLT_IMAGE_RGBA;
-        let mut w = width as c_int;
-        let mut h = height as c_int;
+        let mut w = mlt_int(width);
+        let mut h = mlt_int(height);
         // SAFETY: all out-parameters are initialised; MLT writes a buffer it
         // continues to own, so the bytes are copied before returning.
-        let rc =
-            unsafe { sys::mlt_frame_get_image(self.raw, &mut buf, &mut fmt, &mut w, &mut h, 0) };
+        let rc = unsafe {
+            sys::mlt_frame_get_image(
+                self.raw,
+                &raw mut buf,
+                &raw mut fmt,
+                &raw mut w,
+                &raw mut h,
+                0,
+            )
+        };
         if rc != 0 || buf.is_null() || w <= 0 || h <= 0 {
             return Err(MltError::NoImage);
         }
@@ -610,10 +619,10 @@ impl FrameRef {
             // turns that into an error instead of a segfault.
             return Err(MltError::WrongFormat { format: fmt });
         }
-        let len = (w as usize) * (h as usize) * 4;
+        let len = count(w) * count(h) * 4;
         // SAFETY: MLT guarantees an RGBA buffer of w*h*4 bytes on success.
         let bytes = unsafe { std::slice::from_raw_parts(buf, len) }.to_vec();
-        Ok((bytes, w as u32, h as u32))
+        Ok((bytes, size(w), size(h)))
     }
 }
 

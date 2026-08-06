@@ -273,15 +273,15 @@ impl Engine {
             };
         }
         match action {
-            Action::Move { motion, count } => self.do_move(motion, count, session),
+            Action::Move { motion, count } => self.do_move(&motion, count, session),
             Action::Verb {
                 op,
                 count,
                 register,
                 target,
-            } => or_error(self.do_verb(op, count, register, target, session)),
-            Action::SplitCurrent => self.do_split(false, session),
-            Action::SplitAll => self.do_split(true, session),
+            } => or_error(self.do_verb(op, count, register, &target, session)),
+            Action::SplitCurrent => Self::do_split(false, session),
+            Action::SplitAll => Self::do_split(true, session),
             Action::RippleDeleteClip => self.do_ripple_delete_clip(session),
             Action::Paste {
                 before,
@@ -304,7 +304,7 @@ impl Engine {
             },
             Action::MacroReplay(reg, count) => self.do_replay(reg, count, session),
             Action::SetMark(name) => do_set_mark(name, session),
-            Action::JumpMark(name) => self.do_jump_mark(name, session),
+            Action::JumpMark(name) => Self::do_jump_mark(name, session),
             Action::EnterVisual(kind) => {
                 let p = session.timeline().playhead();
                 let anchor = Anchor {
@@ -327,10 +327,10 @@ impl Engine {
                 or_error(self.do_trim_edge_step(forward, count, session))
             }
             Action::GainAdjust(step) => self.do_gain(step, session),
-            Action::ToggleMute => self.do_track_flags(session, true),
-            Action::ToggleSolo => self.do_track_flags(session, false),
-            Action::CreateTransition => self.do_transition(session, true),
-            Action::DeleteTransition => self.do_transition(session, false),
+            Action::ToggleMute => Self::do_track_flags(session, true),
+            Action::ToggleSolo => Self::do_track_flags(session, false),
+            Action::CreateTransition => Self::do_transition(session, true),
+            Action::DeleteTransition => Self::do_transition(session, false),
             Action::PlayPause => Outcome::Transport(TransportCmd::PlayPause),
             Action::Shuttle { forward } => Outcome::Transport(if forward {
                 TransportCmd::ShuttleForward
@@ -348,7 +348,7 @@ impl Engine {
         }
     }
 
-    fn do_move(&mut self, motion: BuiltinMotion, count: u32, session: &mut Session) -> Outcome {
+    fn do_move(&mut self, motion: &BuiltinMotion, count: u32, session: &mut Session) -> Outcome {
         let resolved = {
             let tl = session.timeline();
             let jumps = self.jump_points(tl);
@@ -406,8 +406,7 @@ impl Engine {
                 let ctx = MotionCtx::new(tl, &jumps);
                 match obj.resolve(&ctx)? {
                     Resolved::Range(r, s) => Ok(Some((r, s))),
-                    Resolved::Pending => Ok(None),
-                    Resolved::Position(_) => Ok(None),
+                    Resolved::Pending | Resolved::Position(_) => Ok(None),
                 }
             }
             Target::Motion(m, count) => {
@@ -437,18 +436,18 @@ impl Engine {
         op: Operator,
         _count: u32,
         register: Option<char>,
-        target: Target,
+        target: &Target,
         session: &mut Session,
     ) -> Result<Outcome, KeysError> {
         match op {
-            Operator::Yank => return self.do_yank(&target, register, session),
+            Operator::Yank => return self.do_yank(target, register, session),
             Operator::RippleTrim | Operator::Roll | Operator::Slip | Operator::Slide => {
-                return self.do_edge_op(op, &target, session);
+                return self.do_edge_op(op, target, session);
             }
-            Operator::Fade => return self.do_fade(&target, session),
+            Operator::Fade => return self.do_fade(target, session),
             _ => {}
         }
-        let Some((range, scope)) = self.target_range(&target, session)? else {
+        let Some((range, scope)) = self.target_range(target, session)? else {
             return Ok(Outcome::PredicatePending);
         };
         if scope.is_empty() || range.is_empty() {
@@ -540,7 +539,7 @@ impl Engine {
         }))
     }
 
-    fn do_split(&mut self, all_tracks: bool, session: &mut Session) -> Outcome {
+    fn do_split(all_tracks: bool, session: &mut Session) -> Outcome {
         let p = session.timeline().playhead();
         let tracks: Vec<TrackId> = if all_tracks {
             session
@@ -760,10 +759,11 @@ impl Engine {
     /// A selection spanning several clips is one `Sequence`, so one `u`
     /// undoes the whole adjustment rather than one clip of it.
     fn do_gain(&mut self, step_db: i32, session: &mut Session) -> Outcome {
-        let step = step_db as f32;
-        let cmds: Vec<EditCommand> = match self.selection() {
-            Some(sel) => sel
-                .clips(session.timeline())
+        // A gain step is a handful of dB; clamping first keeps the
+        // conversion exact instead of silently rounding a nonsense value.
+        let step = f32::from(i16::try_from(step_db).unwrap_or(i16::MAX));
+        let cmds: Vec<EditCommand> = if let Some(sel) = self.selection() {
+            sel.clips(session.timeline())
                 .into_iter()
                 .map(|(track, c)| EditCommand::SetProps {
                     track,
@@ -773,24 +773,23 @@ impl Engine {
                         ..c.props
                     },
                 })
-                .collect(),
-            None => {
-                let p = session.timeline().playhead();
-                let Some(clip) = clip_under(session.timeline(), p.track, p.frame) else {
-                    return Outcome::Error("no clip under the playhead".to_string());
-                };
-                let Some((_, c)) = session.timeline().find_clip(clip) else {
-                    return Outcome::Error("no such clip".to_string());
-                };
-                vec![EditCommand::SetProps {
-                    track: p.track,
-                    clip,
-                    props: ClipProps {
-                        gain_db: c.props.gain_db + step,
-                        ..c.props
-                    },
-                }]
-            }
+                .collect()
+        } else {
+            let p = session.timeline().playhead();
+            let Some(clip) = clip_under(session.timeline(), p.track, p.frame) else {
+                return Outcome::Error("no clip under the playhead".to_string());
+            };
+            let Some((_, c)) = session.timeline().find_clip(clip) else {
+                return Outcome::Error("no such clip".to_string());
+            };
+            vec![EditCommand::SetProps {
+                track: p.track,
+                clip,
+                props: ClipProps {
+                    gain_db: c.props.gain_db + step,
+                    ..c.props
+                },
+            }]
         };
         if cmds.is_empty() {
             return Outcome::Error("no clip in the selection".to_string());
@@ -803,7 +802,7 @@ impl Engine {
     /// Mute and solo are independent flags: soloing a muted track leaves it
     /// muted, because silencing something is a stronger statement than
     /// featuring it and undoing the solo must not unmute by accident.
-    fn do_track_flags(&mut self, session: &mut Session, mute: bool) -> Outcome {
+    fn do_track_flags(session: &mut Session, mute: bool) -> Outcome {
         let track = session.timeline().playhead().track;
         let Some(t) = session.timeline().track(track) else {
             return Outcome::Error("the playhead is not on a track".to_string());
@@ -840,7 +839,7 @@ impl Engine {
     /// "Nearest cut" rather than "the cut under the playhead": a transition
     /// straddles its cut, so demanding the playhead sit exactly on it would
     /// make `dax` unusable from inside the transition it deletes.
-    fn do_transition(&mut self, session: &mut Session, create: bool) -> Outcome {
+    fn do_transition(session: &mut Session, create: bool) -> Outcome {
         let playhead = session.timeline().playhead();
         let track = playhead.track;
         let found = if create {
@@ -866,15 +865,14 @@ impl Engine {
         };
         match run(session.exec(&cmd)) {
             Outcome::Applied(_) if create => Outcome::Applied(format!(
-                "{}-frame {DEFAULT_TRANSITION} added",
-                DEFAULT_TRANSITION_FRAMES
+                "{DEFAULT_TRANSITION_FRAMES}-frame {DEFAULT_TRANSITION} added"
             )),
             Outcome::Applied(_) => Outcome::Applied("transition removed".to_string()),
             other => other,
         }
     }
 
-    fn do_jump_mark(&mut self, name: char, session: &mut Session) -> Outcome {
+    fn do_jump_mark(name: char, session: &mut Session) -> Outcome {
         let Some(mark) = session.timeline().marks.get(&name).copied() else {
             return Outcome::Error(format!("mark '{name}' is not set"));
         };

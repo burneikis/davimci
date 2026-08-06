@@ -22,6 +22,7 @@ pub enum FadeEnd {
 }
 
 impl FadeEnd {
+    #[must_use]
     pub fn parse(word: &str) -> Option<Self> {
         match word {
             "in" => Some(Self::In),
@@ -135,8 +136,9 @@ pub fn fade(track: TrackId, clip: &Clip, end: FadeEnd, ms: u64, fps: Fps) -> Edi
 pub fn normalize_gain(clip: &Clip, analysis: &Analysis, fps: Fps, target_db: f32) -> Option<f32> {
     let (from, to) = source_ms_range(clip, fps);
     let hop = u64::from(analysis.params.hop_ms.max(1));
-    let first = (from / hop) as usize;
-    let last = ((to.saturating_sub(1)) / hop) as usize;
+    let index = |ms: u64| usize::try_from(ms / hop).unwrap_or(usize::MAX);
+    let first = index(from);
+    let last = index(to.saturating_sub(1));
     if first >= analysis.hops.len() {
         return None;
     }
@@ -253,16 +255,28 @@ pub fn duck_ids_needed(tl: &Timeline, track: TrackId, spans: &[(Frame, Frame)]) 
 
 /// The clip's window into its source, in milliseconds.
 fn source_ms_range(clip: &Clip, fps: Fps) -> (u64, u64) {
-    let ms = |f: Frame| (fps.frame_to_nanos(f) / 1_000_000) as u64;
+    let ms = |f: Frame| u64::try_from(fps.frame_to_nanos(f) / 1_000_000).unwrap_or(u64::MAX);
     let start = ms(clip.source_in);
     (start, start + ms(clip.duration).max(1))
 }
 
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    reason = "a duration in milliseconds is far below the f64 mantissa and never negative"
+)]
 pub(crate) fn frames_for_ms(ms: u64, fps: Fps) -> u64 {
     (ms as f64 * fps.as_f64() / 1000.0).round() as u64
 }
 
 /// The inverse, for reading a fade back as the milliseconds `:set` takes.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    reason = "a frame count is far below the f64 mantissa and never negative"
+)]
 pub(crate) fn ms_for_frames(frames: u64, fps: Fps) -> u64 {
     (frames as f64 * 1000.0 / fps.as_f64()).round() as u64
 }
@@ -298,6 +312,10 @@ fn push_merged(out: &mut Vec<(Frame, Frame)>, span: (Frame, Frame)) {
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#[allow(
+    clippy::float_cmp,
+    reason = "the values under test are set exactly, so exact equality is the assertion"
+)]
 mod tests {
     use super::*;
     use davimci_analysis::{AnalysisParams, Hop};
@@ -400,7 +418,7 @@ mod tests {
         let tl = media_fixture(&[(0, 100, 0, 600)]);
         let track = track_id(&tl, "V1");
         let spans = [(Frame(20), Frame(50))];
-        let mut ids = (100..).map(|n| n as u64);
+        let mut ids = 100u64..;
         let plan = duck_plan(&tl, track, &spans, -12.0, &mut ids).unwrap();
         let EditCommand::Sequence(cmds) = plan else {
             panic!("a duck is one undo step");
@@ -433,7 +451,7 @@ mod tests {
     fn a_span_covering_a_whole_clip_needs_no_cuts() {
         let tl = media_fixture(&[(0, 100, 0, 600)]);
         let track = track_id(&tl, "V1");
-        let mut ids = (100..).map(|n| n as u64);
+        let mut ids = 100u64..;
         let plan = duck_plan(&tl, track, &[(Frame(0), Frame(100))], -6.0, &mut ids).unwrap();
         let EditCommand::Sequence(cmds) = plan else {
             panic!("expected a sequence");
@@ -445,7 +463,7 @@ mod tests {
     fn a_duck_that_touches_nothing_is_refused_before_it_mutates() {
         let tl = media_fixture(&[(0, 100, 0, 600)]);
         let track = track_id(&tl, "V1");
-        let mut ids = (100..).map(|n| n as u64);
+        let mut ids = 100u64..;
         assert!(duck_plan(&tl, track, &[(Frame(200), Frame(300))], -6.0, &mut ids).is_err());
     }
 }

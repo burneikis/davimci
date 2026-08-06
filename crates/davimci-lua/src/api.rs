@@ -44,6 +44,12 @@ pub(crate) fn opts_from_table(t: &Table) -> mlua::Result<Opts> {
         let (k, v) = pair?;
         let value = match v {
             Value::String(s) => OptValue::Str(s.to_str()?.to_string()),
+            // A Lua option is a number either way; integers beyond the f64
+            // mantissa are not values an option carries.
+            #[allow(
+                clippy::cast_precision_loss,
+                reason = "a Lua number is an f64, so this is the type the value already had"
+            )]
             Value::Integer(i) => OptValue::Num(i as f64),
             Value::Number(n) => OptValue::Num(n),
             Value::Boolean(b) => OptValue::Bool(b),

@@ -108,8 +108,8 @@ pub fn waveform() -> ViewState {
     let mut waves = crate::waveform::Waveforms::default();
     // A ramp from silence to full scale over the analysed span, so a
     // renderer that drops or reorders columns fails visibly.
-    let peaks: Vec<f32> = (0..600)
-        .map(|i| -60.0 + (i as f32 / 600.0) * 60.0)
+    let peaks: Vec<f32> = (0..600u16)
+        .map(|i| -60.0 + (f32::from(i) / 600.0) * 60.0)
         .collect();
     waves.insert(a1, crate::waveform::Waveform::from_db(10, &peaks));
     let inputs = ViewInputs {

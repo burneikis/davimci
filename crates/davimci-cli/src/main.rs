@@ -38,10 +38,11 @@ enum Invocation {
 }
 
 impl Args {
-    fn parse(argv: impl Iterator<Item = String>) -> Result<Invocation> {
-        let mut argv = argv;
+    fn parse(command_line: impl Iterator<Item = String>) -> Result<Invocation> {
+        let mut words = command_line;
+
         let mut args = Self::default();
-        while let Some(arg) = argv.next() {
+        while let Some(arg) = words.next() {
             match arg.as_str() {
                 "-h" | "--help" => {
                     print_help();
@@ -53,11 +54,12 @@ impl Args {
                 }
                 "-c" => args
                     .commands
-                    .push(argv.next().context("-c needs a command")?),
-                "-k" => args.keys = Some(argv.next().context("-k needs a key sequence")?),
+                    .push(words.next().context("-c needs a command")?),
+                "-k" => args.keys = Some(words.next().context("-k needs a key sequence")?),
                 "--script" => {
-                    args.script =
-                        Some(PathBuf::from(argv.next().context("--script needs a path")?));
+                    args.script = Some(PathBuf::from(
+                        words.next().context("--script needs a path")?,
+                    ));
                 }
                 "--no-window" => args.no_window = true,
                 "--tui" => {
@@ -69,13 +71,13 @@ impl Args {
                     args.tui = true;
                 }
                 "--numbers" => {
-                    let value = argv.next().context("--numbers needs a mode")?;
+                    let value = words.next().context("--numbers needs a mode")?;
                     args.numbers = davimci_cli::Numbers::parse(&value).with_context(|| {
                         format!("--numbers takes none, absolute or relative, not {value}")
                     })?;
                 }
                 "--ticks" => {
-                    args.ticks = argv
+                    args.ticks = words
                         .next()
                         .context("--ticks needs a count")?
                         .parse()
@@ -111,7 +113,8 @@ fn run(args: Args) -> Result<()> {
     // real editor instead - that is what makes batch export from a script
     // possible.
     if args.commands.iter().any(|l| needs_backend(l)) {
-        return run_commands_with_editor(ws, &args.commands);
+        run_commands_with_editor(ws, &args.commands);
+        return Ok(());
     }
 
     for line in &args.commands {
@@ -187,7 +190,7 @@ fn needs_backend(line: &str) -> bool {
 /// Run `-c` lines through the assembled editor, so exporting works with no
 /// window. Ticks until any export finishes, because a script that returned
 /// before the file was written would be useless.
-fn run_commands_with_editor(ws: Workspace, commands: &[String]) -> Result<()> {
+fn run_commands_with_editor(ws: Workspace, commands: &[String]) {
     let (mut app, mut editor) = assemble(ws);
 
     for line in commands {
@@ -221,7 +224,6 @@ fn run_commands_with_editor(ws: Workspace, commands: &[String]) -> Result<()> {
     if let Some(m) = app.view().message {
         println!("\r{}   ", m.text);
     }
-    Ok(())
 }
 
 /// Open the editor window.

@@ -33,8 +33,7 @@ impl Classify for KeysError {
         match self {
             Self::Motion(e) => e.class(),
             Self::Cmd(e) => e.class(),
-            Self::EmptyTarget => ErrorClass::User,
-            Self::NotImplemented(_) => ErrorClass::User,
+            Self::EmptyTarget | Self::NotImplemented(_) => ErrorClass::User,
             Self::Internal(_) => ErrorClass::Recoverable,
         }
     }

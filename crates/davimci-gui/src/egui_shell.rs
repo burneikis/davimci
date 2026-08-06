@@ -7,6 +7,14 @@
 //! Nothing here may consult a `Timeline`, choose a layout, or interpret a
 //! key beyond naming its token.
 
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    reason = "egui measures in f32 pixels; window-sized values are far below the mantissa"
+)]
+
 use egui::{
     Align2, Color32, CornerRadius, FontId, Pos2, Rect as EguiRect, Sense, Stroke, StrokeKind, Ui,
     Vec2,
@@ -19,6 +27,10 @@ use davimci_app::Severity;
 
 /// Colours for every [`Fill`]. One function, so a theme is one edit.
 #[must_use]
+#[allow(
+    clippy::match_same_arms,
+    reason = "a theme table lists one arm per variant so a colour can be changed alone"
+)]
 pub fn fill_color(fill: Fill) -> Color32 {
     match fill {
         Fill::Background => Color32::from_rgb(24, 24, 28),
@@ -48,6 +60,10 @@ pub fn fill_color(fill: Fill) -> Color32 {
 
 /// Text colour and size for every [`TextRole`].
 #[must_use]
+#[allow(
+    clippy::match_same_arms,
+    reason = "a theme table lists one arm per variant so a colour can be changed alone"
+)]
 pub fn text_style(role: TextRole) -> (Color32, f32) {
     match role {
         TextRole::TrackName => (Color32::from_rgb(200, 200, 210), 12.0),

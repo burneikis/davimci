@@ -271,13 +271,12 @@ impl Workspace {
     ) -> Result<usize, CliError> {
         let path = path.as_ref().to_path_buf();
         let recovery = self.pending_recovery(&path);
-        let (session, recovered) = match (recovery, on_recovery) {
-            (Some(r), OnRecovery::Recover) => (autosave::replay(&r.log)?, true),
-            _ => {
-                let text = std::fs::read_to_string(&path)
-                    .map_err(|e| CliError::io("read", path.display(), &e))?;
-                (ProjectFile::from_json(&text)?.into_session()?, false)
-            }
+        let (session, recovered) = if let (Some(r), OnRecovery::Recover) = (recovery, on_recovery) {
+            (autosave::replay(&r.log)?, true)
+        } else {
+            let text = std::fs::read_to_string(&path)
+                .map_err(|e| CliError::io("read", path.display(), &e))?;
+            (ProjectFile::from_json(&text)?.into_session()?, false)
         };
         self.harvest_globals();
         let id = self.push_buffer(session, Some(path));

@@ -100,6 +100,10 @@ impl RenderProgress {
     /// Completion in `0.0..=1.0`. An unknown total reports zero rather than
     /// dividing by it.
     #[must_use]
+    #[allow(
+        clippy::cast_precision_loss,
+        reason = "a progress fraction is wanted to a percent, not to a frame"
+    )]
     pub fn fraction(&self) -> f32 {
         if self.total == 0 {
             return match self.state {
@@ -107,12 +111,20 @@ impl RenderProgress {
                 _ => 0.0,
             };
         }
-        (self.rendered as f32 / self.total as f32).clamp(0.0, 1.0)
+        // Frame counts far below the f32 mantissa in any real render, and a
+        // fraction is wanted to a percent, not to a frame.
+        let done = u32::try_from(self.rendered).unwrap_or(u32::MAX);
+        let total = u32::try_from(self.total).unwrap_or(u32::MAX);
+        (done as f32 / total as f32).clamp(0.0, 1.0)
     }
 }
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
+#[allow(
+    clippy::float_cmp,
+    reason = "the values under test are set exactly, so exact equality is the assertion"
+)]
 mod tests {
     use super::*;
 

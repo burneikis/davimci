@@ -70,11 +70,13 @@ pub fn fit(source: Resolution, target: Resolution, policy: FitPolicy) -> FitRect
         FitPolicy::Letterbox => sx.min(sy),
         FitPolicy::Crop => sx.max(sy),
     };
-    let width = (f64::from(source.width) * scale).round().max(1.0) as u32;
-    let height = (f64::from(source.height) * scale).round().max(1.0) as u32;
+    // Scaling never grows a frame past the target, so both fit a u32, and
+    // the offsets fit an i32 for any resolution a codec can carry.
+    let width = scaled(source.width, scale);
+    let height = scaled(source.height, scale);
     FitRect {
-        x: (i64::from(target.width) - i64::from(width)) as i32 / 2,
-        y: (i64::from(target.height) - i64::from(height)) as i32 / 2,
+        x: offset(target.width, width),
+        y: offset(target.height, height),
         width,
         height,
     }
@@ -123,20 +125,39 @@ pub fn conform(info: &MediaInfo, props: TimelineProps, opts: ConformOptions) -> 
 ///
 /// Analysis works in milliseconds because a hop is a property of the audio,
 /// not of the timeline; this is the single conversion point back. Nearest
+/// One side of a frame scaled to fit, never smaller than a pixel.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "the value is rounded and clamped into u32 before the conversion"
+)]
+fn scaled(side: u32, scale: f64) -> u32 {
+    let v = (f64::from(side) * scale)
+        .round()
+        .clamp(1.0, f64::from(u32::MAX));
+    v as u32
+}
+
+/// Where a scaled frame sits inside the target, centred.
+fn offset(target: u32, scaled: u32) -> i32 {
+    let delta = i64::from(target) - i64::from(scaled);
+    i32::try_from(delta / 2).unwrap_or(0)
+}
+
 /// rather than containing, so that a frame's own start time maps back to it:
 /// the truncation in [`ms_at_frame`] would otherwise land a frame early.
 #[must_use]
 pub fn frame_at_ms(ms: u64, fps: Fps) -> Frame {
     let num = u128::from(ms) * u128::from(fps.num);
     let den = u128::from(fps.den) * 1000;
-    Frame(((num + den / 2) / den) as u64)
+    Frame(u64::try_from((num + den / 2) / den).unwrap_or(u64::MAX))
 }
 
 /// The inverse of [`frame_at_ms`]: the start of `frame`, in milliseconds.
 #[must_use]
 pub fn ms_at_frame(frame: Frame, fps: Fps) -> u64 {
     let num = u128::from(frame.get()) * u128::from(fps.den) * 1000;
-    (num / u128::from(fps.num)) as u64
+    u64::try_from(num / u128::from(fps.num)).unwrap_or(u64::MAX)
 }
 
 /// Timeline properties defaulted from the first import.
@@ -256,6 +277,10 @@ mod tests {
     }
 
     #[test]
+    #[allow(
+        clippy::cast_precision_loss,
+        reason = "an hour of frames is far below the f64 mantissa"
+    )]
     fn a_long_source_does_not_accumulate_drift() {
         // An hour of 23.976 into 60fps. The mapping is computed once from the
         // source frame count, so the error is bounded at half a frame after

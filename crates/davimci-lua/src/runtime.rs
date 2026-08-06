@@ -63,7 +63,7 @@ impl fmt::Debug for Runtime {
             .field("state", &self.state.borrow())
             .field("disabled", &self.disabled.borrow())
             .field("notices", &self.notices.borrow())
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -358,8 +358,8 @@ impl Runtime {
                     return Ok(MotionAnswer::Pending);
                 }
                 Ok(match v {
-                    Value::Integer(i) if i >= 0 => MotionAnswer::Found(i as u64),
-                    Value::Number(n) if n >= 0.0 => MotionAnswer::Found(n as u64),
+                    Value::Integer(i) if i >= 0 => MotionAnswer::Found(i.unsigned_abs()),
+                    Value::Number(n) if n >= 0.0 => MotionAnswer::Found(frame_from_lua(n)),
                     Value::Table(t) => match t.get::<Option<u64>>("frame") {
                         Ok(Some(f)) => MotionAnswer::Found(f),
                         _ => MotionAnswer::NoMatch,
@@ -544,10 +544,22 @@ fn find_next(
             }
         };
         if matched {
-            return Ok(Value::Integer(s.frame as i64));
+            return Ok(Value::Integer(i64::try_from(s.frame).unwrap_or(i64::MAX)));
         }
     }
     Ok(Value::Nil)
+}
+
+/// A frame a Lua motion returned as a number. Lua has one numeric type, so a
+/// whole frame arrives as an `f64`; anything past the exactly representable
+/// range is not a frame a timeline can hold and is clamped there.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "the value is floored and clamped to the exact integer range of an f64"
+)]
+fn frame_from_lua(n: f64) -> u64 {
+    n.floor().clamp(0.0, 9_007_199_254_740_992.0) as u64
 }
 
 /// Did a handler veto a cancellable event? `false` or `nil, "reason"` do;

@@ -1,6 +1,10 @@
 //! Acceptance suite for the Lua API: every documented config snippet
 //! appears here verbatim and must load and behave as documented.
 
+#![allow(
+    clippy::float_cmp,
+    reason = "the values under test are set exactly, so exact equality is the assertion"
+)]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::path::{Path, PathBuf};

@@ -280,11 +280,19 @@ fn blit(frame: &VideoFrame, quad: Quad, surface: Resolution, out: &mut [u8]) {
         return;
     }
     for row in 0..quad.height {
-        let sy = (u64::from(row) * u64::from(frame.height) / u64::from(quad.height))
-            .min(u64::from(frame.height) - 1) as u32;
+        // Clamped to the source row/column below the frame size, so the
+        // result always fits the u32 the frame is measured in.
+        let sy = u32::try_from(
+            (u64::from(row) * u64::from(frame.height) / u64::from(quad.height))
+                .min(u64::from(frame.height) - 1),
+        )
+        .unwrap_or(0);
         for col in 0..quad.width {
-            let sx = (u64::from(col) * u64::from(frame.width) / u64::from(quad.width))
-                .min(u64::from(frame.width) - 1) as u32;
+            let sx = u32::try_from(
+                (u64::from(col) * u64::from(frame.width) / u64::from(quad.width))
+                    .min(u64::from(frame.width) - 1),
+            )
+            .unwrap_or(0);
             let si = ((sy as usize) * (frame.width as usize) + (sx as usize)) * 4;
             let di = (((quad.y + row) as usize) * (surface.width as usize)
                 + ((quad.x + col) as usize))

@@ -1,6 +1,13 @@
 //! Rendering tests driven by the Phase 9a golden view states, so a
 //! view-state regression fails in `davimci-app` *and* here.
 
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    reason = "the assertions are integer pixel arithmetic on window-sized values"
+)]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use davimci_app::Frontend;
@@ -375,11 +382,13 @@ fn a_clip_thumbnail_tiles_across_the_clip_and_stays_inside_it() {
     let thumb = davimci_app::Thumbnail::new(2, 8, vec![255u8; 2 * 8 * 4], davimci_core::Frame(0));
     let clip = view.tracks[0].clips[1].clone();
     // Two sample points across the clip, as the app would place them.
-    let (first, last) = clip.columns;
-    view.tracks[0].clips[1].thumbnails =
-        vec![(first, thumb.clone()), (first + (last - first) / 2, thumb)];
-    let l = layout(800, 600);
-    let list = paint_view(&view, &l, &Chrome::default());
+    let (first_col, last_col) = clip.columns;
+    view.tracks[0].clips[1].thumbnails = vec![
+        (first_col, thumb.clone()),
+        (first_col + (last_col - first_col) / 2, thumb),
+    ];
+    let win = layout(800, 600);
+    let list = paint_view(&view, &win, &Chrome::default());
     let images = list.images();
     assert!(
         images.len() > 1,
@@ -390,9 +399,9 @@ fn a_clip_thumbnail_tiles_across_the_clip_and_stays_inside_it() {
         images.iter().all(|(_, id, _)| *id == clip.id),
         "a tile belongs to a clip that is not the one it pictures"
     );
-    let (first, last) = clip.columns;
-    let left = l.tracks.x + first as i32;
-    let right = l.tracks.x + last as i32 + 1;
+    let (first_col, last_col) = clip.columns;
+    let left = win.tracks.x + first_col as i32;
+    let right = win.tracks.x + last_col as i32 + 1;
     for (rect, _, _) in &images {
         assert!(rect.x >= left, "a tile started left of its clip: {rect:?}");
         assert!(
@@ -404,7 +413,7 @@ fn a_clip_thumbnail_tiles_across_the_clip_and_stays_inside_it() {
     let want: Vec<i32> = view.tracks[0].clips[1]
         .thumbnails
         .iter()
-        .map(|(c, _)| l.tracks.x + *c as i32)
+        .map(|(c, _)| win.tracks.x + *c as i32)
         .collect();
     let got: Vec<i32> = images.iter().map(|(r, _, _)| r.x).collect();
     assert_eq!(got, want, "a picture drifted from its sample point");

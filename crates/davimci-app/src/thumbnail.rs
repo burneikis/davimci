@@ -37,7 +37,7 @@ impl std::fmt::Debug for Thumbnail {
             .field("width", &self.width)
             .field("height", &self.height)
             .field("source", &self.source)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 

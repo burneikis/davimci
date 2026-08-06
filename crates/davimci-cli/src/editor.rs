@@ -792,7 +792,7 @@ impl Editor {
                 }));
             }
             Request::Motion { name, opts } => {
-                self.move_by_plugin_motion(&name, &opts, session, out)
+                self.move_by_plugin_motion(&name, &opts, session, out);
             }
         }
     }

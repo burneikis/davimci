@@ -79,7 +79,7 @@ impl fmt::Debug for Autocmd {
             .field("id", &self.id)
             .field("event", &self.event)
             .field("enabled", &self.enabled)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -109,7 +109,7 @@ impl fmt::Debug for State {
             .field("timeline", &self.timeline)
             .field("autocmds", &self.autocmds)
             .field("requests", &self.requests)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 

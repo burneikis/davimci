@@ -127,11 +127,11 @@ pub fn labels(view: &ViewState, numbers: Numbers, metrics: LabelMetrics) -> Vec<
         let text = match numbers {
             Numbers::Off => return Vec::new(),
             Numbers::Absolute => tick.frame.get().to_string(),
-            Numbers::Relative => tick.relative.unsigned_abs().to_string(),
             Numbers::Both if tick.relative == 0 => tick.frame.get().to_string(),
-            Numbers::Both => tick.relative.unsigned_abs().to_string(),
+            Numbers::Relative | Numbers::Both => tick.relative.unsigned_abs().to_string(),
         };
-        let width = text.chars().count() as u32 * metrics.digit + metrics.padding;
+        let digits = u32::try_from(text.chars().count()).unwrap_or(u32::MAX);
+        let width = digits.saturating_mul(metrics.digit) + metrics.padding;
         let offset = tick.column.saturating_add(metrics.gap);
         let end = offset
             .saturating_add(width)

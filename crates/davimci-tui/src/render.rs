@@ -10,6 +10,8 @@
 //! track, one cell per timeline column, no filmstrips and no in-video
 //! overlays.
 
+use std::fmt::Write as _;
+
 use davimci_app::{
     LabelMetrics, MediaPicker, Numbers, PickerIntent, SubtitleEdit, Surface, ViewState,
 };
@@ -275,10 +277,10 @@ fn level_char(level: u8) -> char {
 fn status(view: &ViewState, width: u16) -> Line<'static> {
     let mut left = view.mode_line.clone();
     if let Some(r) = view.recording {
-        left.push_str(&format!(" recording @{r}"));
+        let _ = write!(left, " recording @{r}");
     }
     if let Some(job) = &view.job {
-        left.push_str(&format!(" [{} {}%]", job.label, job.percent()));
+        let _ = write!(left, " [{} {}%]", job.label, job.percent());
     }
     if let Some(m) = &view.message {
         left.push(' ');

@@ -49,7 +49,7 @@ fn through_tui_with_preview(
     }
     let view = app.view();
     tui.render(&view).expect("the tui draws");
-    (view.dump(), tui.last_rows().to_vec())
+    (view.dump(), tui.last_rows().clone())
 }
 
 #[test]

@@ -19,6 +19,7 @@ use davimci_core::{ClipId, Fps, Frame, Resolution, Timeline, TimelineProps};
 use davimci_mlt_sys as sys;
 
 use crate::cache::FrameCache;
+use crate::convert::{count, frames, mlt_int, size};
 use crate::ffi::{
     Consumer, EventHandle, Filter, Playlist, Producer, Profile, Tractor, Transition, attach_filter,
 };
@@ -193,7 +194,7 @@ impl MltBackend {
             let (pl, ns) = self.build_playlist(track)?;
             nested.extend(ns);
             tractor
-                .set_track(i as i32, &pl.as_producer())
+                .set_track(mlt_int(i), &pl.as_producer())
                 .map_err(BackendError::from)?;
             // `hide` lives on the planted track, not on the playlist: it is
             // what mute and "audio tracks carry no video" both come down to.
@@ -221,7 +222,7 @@ impl MltBackend {
                 p.set_int("sum", 1).map_err(BackendError::from)?;
             }
             tractor
-                .plant(&mix, 0, b as i32)
+                .plant(&mix, 0, mlt_int(b))
                 .map_err(BackendError::from)?;
             mixes.push(mix);
         }
@@ -255,19 +256,23 @@ impl MltBackend {
     fn append_entry(&self, pl: &mut Playlist, entry: &Entry) -> Result<Option<Nested>> {
         match entry {
             Entry::Blank { length } => {
-                pl.append_blank(length.get() as i32)
+                pl.append_blank(mlt_int(length.get()))
                     .map_err(BackendError::from)?;
                 Ok(None)
             }
             Entry::Clip(c) => {
                 let producer = self.build_producer(c)?;
-                pl.append(&producer, c.in_point.get() as i32, c.out_point.get() as i32)
-                    .map_err(BackendError::from)?;
+                pl.append(
+                    &producer,
+                    mlt_int(c.in_point.get()),
+                    mlt_int(c.out_point.get()),
+                )
+                .map_err(BackendError::from)?;
                 Ok(None)
             }
             Entry::Transition(t) => {
                 let (producer, nested) = self.build_transition(t)?;
-                pl.append(&producer, 0, t.length().saturating_sub(1) as i32)
+                pl.append(&producer, 0, mlt_int(t.length().saturating_sub(1)))
                     .map_err(BackendError::from)?;
                 Ok(Some(nested))
             }
@@ -346,11 +351,11 @@ impl MltBackend {
             // off one file would all play the first stream.
             match entry.stream {
                 Some(StreamSelect::Audio(s)) => {
-                    props.set_int("audio_index", s as i32)?;
+                    props.set_int("audio_index", mlt_int(s))?;
                     props.set_int("video_index", -1)?;
                 }
                 Some(StreamSelect::Video(s)) => {
-                    props.set_int("video_index", s as i32)?;
+                    props.set_int("video_index", mlt_int(s))?;
                     props.set_int("audio_index", -1)?;
                 }
                 None => {}
@@ -452,7 +457,7 @@ impl MltBackend {
             })?;
         match op {
             TrackOp::Remove { index } => {
-                pl.remove(*index as i32).map_err(BackendError::from)?;
+                pl.remove(mlt_int(*index)).map_err(BackendError::from)?;
                 if *index < live.len() {
                     live.remove(*index);
                 }
@@ -466,13 +471,13 @@ impl MltBackend {
                     if a.clip == b.clip && a.filters == b.filters);
                 if resizable && let Entry::Clip(c) = entry {
                     pl.resize_clip(
-                        *index as i32,
-                        c.in_point.get() as i32,
-                        c.out_point.get() as i32,
+                        mlt_int(*index),
+                        mlt_int(c.in_point.get()),
+                        mlt_int(c.out_point.get()),
                     )
                     .map_err(BackendError::from)?;
                 } else {
-                    pl.remove(*index as i32).map_err(BackendError::from)?;
+                    pl.remove(mlt_int(*index)).map_err(BackendError::from)?;
                     insert_entry(pl, *index, entry, built.as_ref())?;
                 }
                 if let Some(slot) = live.get_mut(*index) {
@@ -492,19 +497,19 @@ fn insert_entry(
 ) -> Result<()> {
     match (entry, producer) {
         (Entry::Blank { length }, _) => {
-            pl.insert_blank(index as i32, length.get() as i32);
+            pl.insert_blank(mlt_int(index), mlt_int(length.get()));
             Ok(())
         }
         (Entry::Clip(c), Some(p)) => pl
             .insert(
-                index as i32,
+                mlt_int(index),
                 p,
-                c.in_point.get() as i32,
-                c.out_point.get() as i32,
+                mlt_int(c.in_point.get()),
+                mlt_int(c.out_point.get()),
             )
             .map_err(BackendError::from),
         (Entry::Transition(t), Some(p)) => pl
-            .insert(index as i32, p, 0, t.length().saturating_sub(1) as i32)
+            .insert(mlt_int(index), p, 0, mlt_int(t.length().saturating_sub(1)))
             .map_err(BackendError::from),
         (Entry::Clip(_) | Entry::Transition(_), None) => Err(BackendError::Projection {
             reason: "a clip entry reached the graph without a producer".into(),
@@ -517,20 +522,28 @@ fn insert_entry(
 /// NTSC rates are 1000/1001 of an integer, and a project has exactly one
 /// framerate, so guessing a float here would poison every
 /// conform downstream.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "the rate is rounded and clamped to a sane framerate before the conversion"
+)]
 fn rational_fps(rate: f64) -> Option<Fps> {
     if rate <= 0.0 {
         return None;
     }
+    // A framerate MLT reports is a small positive number, so rounding it and
+    // clamping to the sane range makes each conversion below exact.
+    let whole = |v: f64| v.clamp(0.0, 1_000_000.0) as u32;
     let nearest = rate.round();
     if (rate - nearest).abs() < 0.001 {
-        return Fps::new(nearest as u32, 1).ok();
+        return Fps::new(whole(nearest), 1).ok();
     }
     let ntsc = nearest * 1000.0 / 1001.0;
     if (rate - ntsc).abs() < 0.01 {
-        return Fps::new((nearest as u32) * 1000, 1001).ok();
+        return Fps::new(whole(nearest) * 1000, 1001).ok();
     }
     // Fall back to thousandths, still exact and still rational.
-    Fps::new((rate * 1000.0).round() as u32, 1000).ok()
+    Fps::new(whole((rate * 1000.0).round()), 1000).ok()
 }
 
 /// `consumer-frame-show` listener: copies the shown frame's image out.
@@ -559,15 +572,17 @@ unsafe extern "C" fn on_frame_show(
         let position = unsafe { sys::mlt_frame_get_position(raw) };
         let mut buf: *mut u8 = std::ptr::null_mut();
         let mut fmt = sys::MLT_IMAGE_RGBA;
-        let mut w = shared.width as i32;
-        let mut h = shared.height as i32;
+        let mut w = mlt_int(shared.width);
+        let mut h = mlt_int(shared.height);
         // SAFETY: all out-parameters are initialised; MLT owns the buffer.
-        let rc = unsafe { sys::mlt_frame_get_image(raw, &mut buf, &mut fmt, &mut w, &mut h, 0) };
+        let rc = unsafe {
+            sys::mlt_frame_get_image(raw, &raw mut buf, &raw mut fmt, &raw mut w, &raw mut h, 0)
+        };
         if rc != 0 || buf.is_null() || w <= 0 || h <= 0 {
             return;
         }
         // SAFETY: an RGBA buffer of w*h*4 bytes on success.
-        let bytes = unsafe { std::slice::from_raw_parts(buf, (w * h * 4) as usize) }.to_vec();
+        let bytes = unsafe { std::slice::from_raw_parts(buf, count(w * h * 4)) }.to_vec();
         if let Ok(mut q) = shared.frames.lock() {
             // Bounded: a presenter that stops pulling must not grow the queue
             // without limit. Dropping the oldest keeps playback current.
@@ -575,9 +590,9 @@ unsafe extern "C" fn on_frame_show(
                 q.pop_front();
             }
             q.push_back(VideoFrame {
-                position: Frame(position.max(0) as u64),
-                width: w as u32,
-                height: h as u32,
+                position: Frame(frames(position.max(0))),
+                width: size(w),
+                height: size(h),
                 rgba: bytes,
             });
         }
@@ -605,7 +620,7 @@ impl RenderBackend for MltBackend {
                     audio_streams += 1;
                     if sample_rate.is_none() {
                         let r = props.get_int(&format!("meta.media.{i}.codec.sample_rate"));
-                        sample_rate = (r > 0).then_some(r as u32);
+                        sample_rate = (r > 0).then_some(size(r));
                     }
                 }
                 Some("video") if resolution.is_none() => {
@@ -613,8 +628,8 @@ impl RenderBackend for MltBackend {
                     let h = props.get_int(&format!("meta.media.{i}.codec.height"));
                     if w > 0 && h > 0 {
                         resolution = Some(Resolution {
-                            width: w as u32,
-                            height: h as u32,
+                            width: size(w),
+                            height: size(h),
                         });
                     }
                     // MLT reports the rate as a decimal; recover the exact
@@ -633,7 +648,7 @@ impl RenderBackend for MltBackend {
             has_video: resolution.is_some(),
             resolution,
             fps,
-            frames: producer.length().max(0) as u64,
+            frames: frames(producer.length().max(0)),
             audio_streams,
             sample_rate,
         })
@@ -670,7 +685,7 @@ impl RenderBackend for MltBackend {
 
     fn seek(&mut self, frame: Frame) -> Result<()> {
         let graph = self.require_graph()?;
-        graph.root.seek(frame.get() as i32);
+        graph.root.seek(mlt_int(frame.get()));
         Ok(())
     }
 
@@ -700,7 +715,7 @@ impl RenderBackend for MltBackend {
         let count = frame.get().saturating_sub(start).saturating_add(1);
         let mut run: Vec<VideoFrame> = Vec::new();
         let graph = self.require_graph()?;
-        graph.root.seek(start as i32);
+        graph.root.seek(mlt_int(start));
         for i in 0..count {
             let at = Frame(start.saturating_add(i));
             let decoded = match graph.root.next_frame() {
@@ -837,7 +852,7 @@ impl RenderBackend for MltBackend {
     fn audio_clock_position(&self) -> Option<Frame> {
         let p = self.preview.as_ref()?;
         let pos = p.consumer.position();
-        (pos >= 0).then_some(Frame(pos as u64))
+        (pos >= 0).then_some(Frame(frames(pos)))
     }
 
     fn register_transition(&mut self, def: davimci_backend::TransitionDef) -> Result<()> {
@@ -872,7 +887,7 @@ impl RenderBackend for MltBackend {
             Frame(
                 self.graph
                     .as_ref()
-                    .map_or(0, |g| g.root.length().max(0) as u64),
+                    .map_or(0, |g| frames(g.root.length().max(0))),
             ),
         ));
         if end < start {
@@ -905,8 +920,8 @@ impl RenderBackend for MltBackend {
             Some(g) => g.root.clone_ref(),
             None => self.require_graph()?.root.clone_ref(),
         };
-        root.set_in_and_out(start.get() as i32, end.get().saturating_sub(1) as i32);
-        root.seek(start.get() as i32);
+        root.set_in_and_out(mlt_int(start.get()), mlt_int(end.get().saturating_sub(1)));
+        root.seek(mlt_int(start.get()));
 
         let mut consumer = Consumer::new(&self.profile, "avformat", Some(&output))?;
         {
@@ -922,10 +937,10 @@ impl RenderBackend for MltBackend {
             props.set_int("terminate_on_pause", 1)?;
             props.set("vcodec", &job.settings.video_codec)?;
             props.set("acodec", &job.settings.audio_codec)?;
-            props.set_int("width", job.settings.resolution.width as i32)?;
-            props.set_int("height", job.settings.resolution.height as i32)?;
-            props.set_int("frame_rate_num", job.settings.fps.num as i32)?;
-            props.set_int("frame_rate_den", job.settings.fps.den as i32)?;
+            props.set_int("width", mlt_int(job.settings.resolution.width))?;
+            props.set_int("height", mlt_int(job.settings.resolution.height))?;
+            props.set_int("frame_rate_num", mlt_int(job.settings.fps.num))?;
+            props.set_int("frame_rate_den", mlt_int(job.settings.fps.den))?;
             for (k, v) in &job.settings.extra {
                 props.set(k, v)?;
             }
@@ -944,7 +959,7 @@ impl RenderBackend for MltBackend {
 
     fn progress(&self) -> RenderProgress {
         if let Some(r) = &self.render {
-            let rendered = (r.consumer.position().max(0) as u64).min(r.total);
+            let rendered = frames(r.consumer.position().max(0)).min(r.total);
             let state = if r.cancelled {
                 RenderState::Cancelled
             } else if r.consumer.is_stopped() {

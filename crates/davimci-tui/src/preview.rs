@@ -11,6 +11,14 @@
 //! when a newer one arrives is dropped, never queued, and the loop never
 //! waits for either.
 
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    reason = "terminal cell and pixel indices are bounded by the surface being encoded"
+)]
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
@@ -372,7 +380,7 @@ fn sixel(image: &Image) -> Vec<u8> {
     // a register selected and then its whole row written.
     let mut mask = vec![0u8; width * palette.len()];
     for band in 0..image.height.div_ceil(6) {
-        mask.iter_mut().for_each(|b| *b = 0);
+        mask.fill(0);
         let mut used = vec![false; palette.len()];
         for x in 0..image.width {
             for dy in 0..6u32 {
@@ -723,6 +731,7 @@ impl Drop for Encoder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use davimci_present::Overlay;
 
     fn presentation(width: u32, height: u32, fill: [u8; 4]) -> Presentation {
         let surface = Resolution { width, height };
@@ -736,7 +745,7 @@ mod tests {
             pixels_id: 1,
             quad: letterbox(surface, surface),
             position: None,
-            overlay: Default::default(),
+            overlay: Overlay::default(),
             pace: davimci_present::Pace::Empty,
         }
     }

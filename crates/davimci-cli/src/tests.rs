@@ -4,6 +4,10 @@
 //! dir; no fixture media is needed, because the lifecycle layer only ever
 //! sees timelines and files.
 
+#![allow(
+    clippy::float_cmp,
+    reason = "the values under test are set exactly, so exact equality is the assertion"
+)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::path::{Path, PathBuf};
@@ -16,6 +20,7 @@ use crate::autosave::{self, OnRecovery};
 use crate::error::CliError;
 use crate::excmd::{ExCommand, ExOutcome, parse};
 use crate::workspace::Workspace;
+use davimci_core::{Classify, ErrorClass};
 
 /// A scratch directory that removes itself.
 struct Scratch(PathBuf);
@@ -117,7 +122,6 @@ fn the_ex_grammar_covers_the_spec_12_table() {
 
 #[test]
 fn unknown_and_misused_commands_are_user_errors_with_a_sentence() {
-    use davimci_core::{Classify, ErrorClass};
     for line in [":wat", ":e", ":b", ":relink"] {
         let err = parse(line).unwrap_err();
         assert_eq!(err.class(), ErrorClass::User, "{line}");
@@ -215,7 +219,7 @@ fn undoing_back_to_the_saved_state_is_clean_again() {
     let cmd = split(ws.current().timeline(), 100);
     ws.exec(&cmd).unwrap();
     assert!(ws.current().is_dirty());
-    ws.with_session(|s| s.undo()).unwrap();
+    ws.with_session(davimci_cmd::Session::undo).unwrap();
     assert!(
         !ws.current().is_dirty(),
         "dirty is a comparison with the saved state, not a sticky flag"
@@ -423,7 +427,7 @@ fn the_autosave_describes_the_state_after_an_undo() {
         let cmd = split(ws.current().timeline(), frame);
         ws.exec(&cmd).unwrap();
     }
-    ws.with_session(|s| s.undo()).unwrap();
+    ws.with_session(davimci_cmd::Session::undo).unwrap();
 
     let log = ws.autosave_path_for(&file);
     let recovered = autosave::replay(&log).unwrap();
@@ -440,7 +444,6 @@ fn a_corrupt_autosave_is_reported_rather_than_partially_applied() {
     let log = dir.join("broken.log");
     std::fs::write(&log, "not json at all\n").unwrap();
     let err = autosave::replay(&log).unwrap_err();
-    use davimci_core::{Classify, ErrorClass};
     assert_eq!(err.class(), ErrorClass::Corruption);
     assert!(autosave::inspect(&log).is_none());
 }
@@ -490,7 +493,7 @@ fn relink_brings_offline_media_back_and_is_undoable() {
     }
 
     // One undo step, because the relink was one Sequence.
-    ws.with_session(|s| s.undo()).unwrap();
+    ws.with_session(davimci_cmd::Session::undo).unwrap();
     for c in &clips {
         let (_, clip) = ws.current().timeline().find_clip(*c).unwrap();
         assert_eq!(clip.media.as_ref().unwrap().path, old_path);
@@ -802,7 +805,7 @@ fn recovery_restores_the_undo_tree_with_its_branches() {
             ws.exec(&cmd).unwrap();
         }
         // ...then back up and start another, which is what makes a tree.
-        ws.with_session(|s| s.undo()).unwrap();
+        ws.with_session(davimci_cmd::Session::undo).unwrap();
         let cmd = split(ws.current().timeline(), 250);
         ws.exec(&cmd).unwrap();
         (

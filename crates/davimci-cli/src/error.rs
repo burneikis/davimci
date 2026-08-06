@@ -132,11 +132,10 @@ impl Classify for CliError {
             | Self::NoExportRunning
             | Self::ExportRefused { .. }
             | Self::Preset(_) => ErrorClass::User,
-            // A failed export leaves the timeline untouched and editable.
-            Self::ExportFailed { .. } => ErrorClass::Recoverable,
-            // A file we cannot read or write is recoverable: the session
-            // keeps running and the user can pick another path.
-            Self::Io { .. } => ErrorClass::Recoverable,
+            // A failed export leaves the timeline untouched and editable, and
+            // a file we cannot read or write leaves the session running with
+            // another path still available.
+            Self::ExportFailed { .. } | Self::Io { .. } => ErrorClass::Recoverable,
             Self::Project(e) => e.class(),
             Self::Command(e) => e.class(),
             Self::Core(e) => e.class(),

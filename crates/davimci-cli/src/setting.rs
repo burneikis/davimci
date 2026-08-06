@@ -383,9 +383,17 @@ fn parse_fps(value: &str) -> Option<Fps> {
         }
     }
     let whole = rate.round();
-    ((whole - rate).abs() < f64::EPSILON && whole <= f64::from(u32::MAX))
-        .then(|| Fps::new(whole as u32, 1).ok())
-        .flatten()
+    if (whole - rate).abs() >= f64::EPSILON || whole < 1.0 || whole > f64::from(u32::MAX) {
+        return None;
+    }
+    // Whole, positive and inside u32 by the check above.
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "the value is checked to be a whole number inside the u32 range"
+    )]
+    let whole = whole as u32;
+    Fps::new(whole, 1).ok()
 }
 
 /// `1920x1080`, with either `x` or `X` between the two.

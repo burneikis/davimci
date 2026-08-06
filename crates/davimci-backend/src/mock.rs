@@ -236,6 +236,7 @@ impl RenderBackend for MockBackend {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use crate::RenderSettings;
     use davimci_core::testing::fixture;
 
     #[test]
@@ -322,7 +323,7 @@ mod tests {
         let tl = fixture(&[("V1", &[(0, 100, "a")])]);
         b.set_timeline(&tl).unwrap();
         b.manual_render = true;
-        b.render(RenderJob::new("/tmp/out.mkv", Default::default()))
+        b.render(RenderJob::new("/tmp/out.mkv", RenderSettings::default()))
             .unwrap();
         assert_eq!(b.progress().total, 100);
         b.advance_render(50);

@@ -9,6 +9,14 @@
 //! It decides nothing. Layout, painting, key meaning, and what the status
 //! line says were all settled before this file runs.
 
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    reason = "winit and egui measure in f32 pixels; window-sized values convert exactly"
+)]
+
 use davimci_app::{App, Event, Frontend, Host, Surface};
 use davimci_core::Resolution;
 use davimci_gui::egui_shell;
@@ -132,7 +140,7 @@ impl eframe::App for Window {
     /// forbids drawing here - which suits the split this codebase already
     /// has: decisions first, pixels second.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let screen = ctx.input(|i| i.viewport_rect());
+        let screen = ctx.input(egui::InputState::viewport_rect);
         self.gui.push(GuiEvent::Resized {
             width: screen.width() as u32,
             height: screen.height() as u32,

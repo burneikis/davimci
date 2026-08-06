@@ -9,6 +9,13 @@
 //! The generator is a seeded xorshift rather than a dependency, so a failure
 //! reproduces from the seed printed with it.
 
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    reason = "the scripted session works in small whole counts"
+)]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use davimci_app::{App, Event, NullHost};

@@ -5,6 +5,16 @@
 //! never stored, so an extreme window size produces a small layout rather
 //! than an inconsistent one.
 
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    reason = "layout is integer pixel arithmetic on window-sized values: every coordinate here is bounded by the window, so a wrap is not reachable"
+)]
+
+use std::fmt::Write as _;
+
 use davimci_app::{LabelMetrics, Surface, ViewState};
 
 use crate::paint::{Chrome, DrawList, Fill, PickerView, Rect, TextRole, status_text};
@@ -572,7 +582,7 @@ fn fit_completions(completions: &[String], width: u32, char_width: u32) -> Strin
         if !out.is_empty() {
             out.push_str("  ");
         }
-        out.push_str(&format!("+{} more", completions.len() - shown));
+        let _ = write!(out, "+{} more", completions.len() - shown);
     }
     out
 }

@@ -345,8 +345,7 @@ textobj.register("c", {
         app.session().timeline().tracks()[0]
             .clips()
             .last()
-            .map(|c| c.end().get())
-            .unwrap_or(0)
+            .map_or(0, |c| c.end().get())
     };
     let before = v1_end(&app);
     feed(&mut app, &mut editor, "dic");

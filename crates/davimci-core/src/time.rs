@@ -84,7 +84,7 @@ impl Fps {
     #[must_use]
     pub fn frame_to_nanos(self, frame: Frame) -> u128 {
         // frame * den / num * 1e9, ordered to avoid precision loss.
-        frame.0 as u128 * u128::from(self.den) * 1_000_000_000 / u128::from(self.num)
+        u128::from(frame.0) * u128::from(self.den) * 1_000_000_000 / u128::from(self.num)
     }
 
     /// Nearest-frame mapping of a source frame at `from` onto this rate.
@@ -98,9 +98,12 @@ impl Fps {
             return source_frame;
         }
         // round(source_frame * (self / from))
-        let num = source_frame.0 as u128 * u128::from(self.num) * u128::from(from.den);
+        let num = u128::from(source_frame.0) * u128::from(self.num) * u128::from(from.den);
         let den = u128::from(self.den) * u128::from(from.num);
-        Frame(((num + den / 2) / den) as u64)
+        // Conforming cannot invent time: the result is bounded by the source
+        // frame scaled by the ratio, which stays inside `u64` for any frame
+        // count a timeline can hold. Saturate rather than wrap if it ever does.
+        Frame(u64::try_from((num + den / 2) / den).unwrap_or(u64::MAX))
     }
 }
 
@@ -208,6 +211,10 @@ mod tests {
     }
 
     #[test]
+    #[allow(
+        clippy::cast_precision_loss,
+        reason = "the frame numbers under test are far below the f64 mantissa"
+    )]
     fn ntsc_conform_stays_within_half_a_frame() {
         // Nearest-frame mapping is computed independently per frame, so error
         // is bounded at half a frame no matter how far into the timeline we
@@ -215,7 +222,8 @@ mod tests {
         // than a hand-rounded frame number.
         for src in [Frame(1), Frame(1_000), Frame(86_313), Frame(863_130)] {
             let out = Fps::FPS_60.conform_frame(src, Fps::FPS_23_976);
-            let exact = src.0 as f64 * Fps::FPS_23_976.den as f64 / Fps::FPS_23_976.num as f64
+            let exact = src.0 as f64 * f64::from(Fps::FPS_23_976.den)
+                / f64::from(Fps::FPS_23_976.num)
                 * Fps::FPS_60.as_f64();
             let drift = (out.0 as f64 - exact).abs();
             assert!(

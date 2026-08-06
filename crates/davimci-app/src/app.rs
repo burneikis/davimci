@@ -530,13 +530,13 @@ impl App {
                 Response::Continue
             }
             Event::CommandKey(key) => self.command_key(key, host),
-            Event::Command(line) => self.run_command_line(line, host),
+            Event::Command(line) => self.run_command_line(&line, host),
             Event::CommandCancelled => {
                 self.close_command_line();
                 self.pending_selection = None;
                 Response::Continue
             }
-            Event::MediaChosen(path) => self.import_chosen_media(path, host),
+            Event::MediaChosen(path) => self.import_chosen_media(&path, host),
             Event::PickerCancelled => {
                 self.pending_pick = None;
                 Response::Continue
@@ -556,7 +556,7 @@ impl App {
     }
 
     /// Run a submitted `:` line against the host's ex vocabulary.
-    fn run_command_line(&mut self, line: String, host: &mut dyn Host) -> Response {
+    fn run_command_line(&mut self, line: &str, host: &mut dyn Host) -> Response {
         self.close_command_line();
         // A `:` line may edit or swap the timeline, neither of which
         // is survivable mid-playback, and the ex vocabulary lives in
@@ -572,7 +572,7 @@ impl App {
             .pending_selection
             .take()
             .or_else(|| self.engine.selection());
-        match host.command(&line, &mut self.session, selection.as_ref()) {
+        match host.command(line, &mut self.session, selection.as_ref()) {
             Ok(Some(msg)) => self.say(msg),
             Ok(None) => {}
             Err(e) => self.fail(e.to_string()),
@@ -591,7 +591,7 @@ impl App {
     }
 
     /// Import the file a media picker returned, for the intent that opened it.
-    fn import_chosen_media(&mut self, path: std::path::PathBuf, host: &mut dyn Host) -> Response {
+    fn import_chosen_media(&mut self, path: &std::path::Path, host: &mut dyn Host) -> Response {
         let Some(intent) = self.pending_pick.take() else {
             // No picker was open, so nothing asked for this file. Silently
             // importing it would be a write the user never requested.
@@ -602,7 +602,7 @@ impl App {
         // on its own: the default zoom would show a clip as a couple of
         // columns, which reads as "nothing happened".
         let was_empty = self.session.timeline().duration() == Frame::ZERO;
-        match host.import_media(&path, intent, &mut self.session) {
+        match host.import_media(path, intent, &mut self.session) {
             Ok(msg) => {
                 if was_empty {
                     self.viewport.fit(self.session.timeline().duration());
@@ -703,7 +703,7 @@ impl App {
         let edited = matches!(outcome, Outcome::Applied(_));
         let moved = edited || matches!(outcome, Outcome::Moved);
         match outcome {
-            Outcome::Pending | Outcome::Cancelled => {}
+            Outcome::Pending | Outcome::Cancelled | Outcome::Moved => {}
             // `:` is a mode change in `davimci-keys`, not a distinct outcome:
             // the grammar knows only that COMMAND was entered. The app owns
             // the line itself; the frontend is told to route keys to it.
@@ -719,10 +719,9 @@ impl App {
                 host.mode_changed(change.from, change.to);
             }
             Outcome::Invalid => {
-                self.warn("That key sequence is not bound to anything.".to_string())
+                self.warn("That key sequence is not bound to anything.".to_string());
             }
             Outcome::Applied(label) => self.say(label),
-            Outcome::Moved => {}
             Outcome::PredicatePending => self
                 .warn("Analysis is still running; that motion cannot be resolved yet.".to_string()),
             Outcome::MacroStarted(r) => self
@@ -776,7 +775,7 @@ impl App {
                         return self.apply_outcome(outcome, host);
                     }
                     Ok(None) => {
-                        self.warn(format!("The text object '{name}' matched nothing here."))
+                        self.warn(format!("The text object '{name}' matched nothing here."));
                     }
                     Err(e) => self.fail(e.to_string()),
                 }

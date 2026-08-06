@@ -131,8 +131,8 @@ impl Viewport {
     /// off screen, such as a clip's filmstrip.
     #[must_use]
     pub fn column_of_unclamped(&self, frame: Frame) -> i64 {
-        let fpc = self.frames_per_column() as i64;
-        let delta = frame.get() as i64 - self.start.get() as i64;
+        let fpc = signed(self.frames_per_column());
+        let delta = signed(frame.get()) - signed(self.start.get());
         delta.div_euclid(fpc.max(1))
     }
 
@@ -140,9 +140,9 @@ impl Viewport {
     /// at zero, since there are no frames before the timeline starts.
     #[must_use]
     pub fn frame_at_column_signed(&self, column: i64) -> Frame {
-        let fpc = self.frames_per_column() as i64;
-        let at = self.start.get() as i64 + column.saturating_mul(fpc);
-        Frame(at.max(0) as u64)
+        let fpc = signed(self.frames_per_column());
+        let at = signed(self.start.get()).saturating_add(column.saturating_mul(fpc));
+        Frame(at.max(0).unsigned_abs())
     }
 
     /// First frame shown in `column`. The inverse of [`Viewport::column_of`]
@@ -261,6 +261,12 @@ impl Viewport {
             self.start = duration;
         }
     }
+}
+
+/// A frame count as a signed offset. Frame numbers never reach `i64::MAX`, so
+/// saturating there is a bound that cannot be hit rather than a silent wrap.
+fn signed(frames: u64) -> i64 {
+    i64::try_from(frames).unwrap_or(i64::MAX)
 }
 
 #[cfg(test)]

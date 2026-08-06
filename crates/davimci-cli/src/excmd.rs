@@ -729,10 +729,10 @@ impl Workspace {
         };
         let transition =
             kind.map(|k| Transition::new(k, Frame(frames.unwrap_or(DEFAULT_TRANSITION_FRAMES))));
-        let described = transition
-            .as_ref()
-            .map(|t| format!("{}-frame {} added", t.duration.get(), t.kind))
-            .unwrap_or_else(|| "transition removed".to_string());
+        let described = transition.as_ref().map_or_else(
+            || "transition removed".to_string(),
+            |t| format!("{}-frame {} added", t.duration.get(), t.kind),
+        );
         self.exec(&EditCommand::SetTransition {
             track: head.track,
             clip,
@@ -745,26 +745,24 @@ impl Workspace {
         // The new file's existence decides the offline flag - this is the
         // only layer that may ask the filesystem.
         let offline = !std::path::Path::new(new).exists();
-        let targets: Vec<_> = match old {
-            Some(old) => self
-                .current()
+        let targets: Vec<_> = if let Some(old) = old {
+            self.current()
                 .timeline()
                 .tracks()
                 .iter()
-                .flat_map(|t| t.clips())
+                .flat_map(davimci_core::Track::clips)
                 .filter(|c| c.media.as_ref().is_some_and(|m| m.path == old))
                 .map(|c| c.id)
-                .collect(),
-            None => {
-                let tl = self.current().timeline();
-                let head = tl.playhead();
-                let clip = tl
-                    .track(head.track)
-                    .and_then(|t| t.clip_at(head.frame))
-                    .filter(|c| c.media.is_some())
-                    .ok_or(CliError::NothingToRelink)?;
-                vec![clip.id]
-            }
+                .collect()
+        } else {
+            let tl = self.current().timeline();
+            let head = tl.playhead();
+            let clip = tl
+                .track(head.track)
+                .and_then(|t| t.clip_at(head.frame))
+                .filter(|c| c.media.is_some())
+                .ok_or(CliError::NothingToRelink)?;
+            vec![clip.id]
         };
         if targets.is_empty() {
             return Err(CliError::NoClipUsesPath(old.unwrap_or(new).to_string()));

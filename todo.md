@@ -1,5 +1,4 @@
 # Human
-- use clippy on pedantic / nursery
 - backwards shuttle audio?
 - different speed shuttle audio
 - backwards shuttle lag, we can skip a lot of frames when going backwards shuttling speed

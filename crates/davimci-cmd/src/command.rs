@@ -374,6 +374,10 @@ impl Command for EditCommand {
         }
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one arm per command variant; splitting the match hides which commands exist"
+    )]
     fn apply(&self, tl: &mut Timeline) -> Result<Effect, CmdError> {
         match self {
             Self::Split {
@@ -869,7 +873,9 @@ fn plus_signed(a: Frame, delta: i64) -> Result<Frame, CmdError> {
     if v < 0 {
         return Err(CoreError::NegativeTime.into());
     }
-    Ok(Frame(v.max(0) as u64))
+    u64::try_from(v)
+        .map(Frame)
+        .map_err(|_| CoreError::TimeOverflow.into())
 }
 
 fn negate(delta: i64) -> Result<i64, CmdError> {
@@ -1006,6 +1012,16 @@ mod tests {
     use super::*;
     use davimci_core::testing::{clip_ids, fixture, media_fixture, track_id};
     use davimci_core::{ClipProps, MediaRef, TimelineProps};
+
+    /// Regression: the sum was computed in `i128` and cast back to `u64`, so
+    /// a roll past the last addressable frame wrapped instead of failing.
+    #[test]
+    fn a_frame_past_the_last_addressable_one_is_rejected() {
+        assert!(matches!(
+            plus_signed(Frame(u64::MAX), i64::MAX),
+            Err(CmdError::Core(CoreError::TimeOverflow))
+        ));
+    }
 
     /// Apply, undo, and redo `cmd`, asserting the two properties the whole
     /// phase rests on: undo restores byte-identical state, and redo of the
@@ -1482,6 +1498,10 @@ mod tests {
     /// Every variant must have a sample here. The exhaustive match in
     /// `variant_name` means a new variant will not compile until it is named,
     /// and this assertion means it will not pass until it is covered.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one entry per command variant, by design"
+    )]
     fn one_of_each() -> Vec<EditCommand> {
         let track = TrackId(1);
         let clip = ClipId(3);
@@ -1706,7 +1726,7 @@ mod tests {
     #[test]
     fn media_clips_survive_a_delete_and_restore_unchanged() {
         let mut tl = Timeline::new(TimelineProps::default());
-        let v1 = tl.tracks().first().map(|t| t.id).unwrap_or(TrackId(0));
+        let v1 = tl.tracks().first().map_or(TrackId(0), |t| t.id);
         let id = tl.new_clip_id();
         let media = MediaRef::new("/m.mkv", davimci_core::Fps::FPS_60, Frame(600));
         let clip = Clip::from_media(id, "m", media, Frame::ZERO, Frame(30), Frame(120));

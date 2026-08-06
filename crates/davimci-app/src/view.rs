@@ -380,7 +380,9 @@ fn track_waveform(
 ) -> Vec<u8> {
     let columns = viewport.columns();
     let mut out = vec![0u8; columns as usize];
-    let ms = |frame: Frame| -> u64 { (fps.frame_to_nanos(frame) / 1_000_000) as u64 };
+    let ms = |frame: Frame| -> u64 {
+        u64::try_from(fps.frame_to_nanos(frame) / 1_000_000).unwrap_or(u64::MAX)
+    };
     for column in 0..columns {
         let start = viewport.frame_at_column(column);
         let end = viewport
@@ -422,7 +424,7 @@ pub fn strip_samples(
     // screen, so a sample keeps its frame as the view scrolls.
     let head = viewport.column_of_unclamped(clip.start);
     let mut column = head;
-    while column + (every as i64) <= i64::from(first) {
+    while column + i64::from(every) <= i64::from(first) {
         column += i64::from(every);
     }
     while column <= i64::from(last) {
@@ -430,7 +432,7 @@ pub fn strip_samples(
             let at = viewport.frame_at_column_signed(column);
             let at = at.max(clip.start).min(Frame(clip.end().get() - 1));
             let source = Frame(clip.source_in.get() + (at.get() - clip.start.get()));
-            out.push((column as u32, source));
+            out.push((u32::try_from(column).unwrap_or(u32::MAX), source));
         }
         column += i64::from(every);
     }
@@ -462,10 +464,11 @@ fn ruler_ticks(tl: &davimci_core::Timeline, viewport: Viewport, cfg: &JumpConfig
     // screen is numbered relative to it, so the number on a tick is the
     // count that lands there: `3l` goes to the tick labelled 3.
     let points = all.points();
+    let index = |i: usize| i64::try_from(i).unwrap_or(i64::MAX);
     let here = match points.binary_search(&tl.playhead().frame) {
-        Ok(i) => i as i64,
+        Ok(i) => index(i),
         // Between two points: the one behind is 0, so the one ahead is 1.
-        Err(i) => i as i64 - 1,
+        Err(i) => index(i) - 1,
     };
     let mut ticks: Vec<Tick> = Vec::new();
     for (i, f) in points.iter().enumerate() {
@@ -476,7 +479,7 @@ fn ruler_ticks(tl: &davimci_core::Timeline, viewport: Viewport, cfg: &JumpConfig
             frame: *f,
             column,
             major: major.binary_search(f).is_ok(),
-            relative: i32::try_from(i as i64 - here).unwrap_or(i32::MAX),
+            relative: i32::try_from(index(i) - here).unwrap_or(i32::MAX),
         };
         // Two jump points can quantise onto one column when zoomed out; the
         // taller tick wins so a clip boundary never disappears behind a

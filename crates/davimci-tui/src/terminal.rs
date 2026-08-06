@@ -124,6 +124,7 @@ impl Terminal {
     /// A terminal that will not say falls back to [`Cell::default`] rather
     /// than refusing to preview: being wrong by a little skews a graphics
     /// preview's aspect, and the layout is counted in cells either way.
+    #[must_use]
     pub fn cell(&self) -> Cell {
         let Ok(size) = crossterm::terminal::window_size() else {
             return Cell::default();

@@ -110,10 +110,10 @@ impl Timeline {
         candidate.props = state.props;
         for (id, clips) in &state.tracks {
             let t = candidate.require_track_mut(*id)?;
-            *t.clips_mut() = clips.clone();
+            clips.clone_into(t.clips_mut());
         }
         candidate.set_playhead_frame(state.playhead);
-        candidate.markers = state.markers.clone();
+        state.markers.clone_into(&mut candidate.markers);
         candidate.marks = state.marks.clone();
         candidate.registers = state.registers.clone();
         candidate.check_invariants()?;

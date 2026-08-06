@@ -41,7 +41,7 @@ pub fn content_hash(path: &Path) -> Result<String, AnalysisError> {
     let name = path.display().to_string();
     let mut file = fs::File::open(path).map_err(|e| AnalysisError::io(&name, &e))?;
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    let mut buf = [0u8; 64 * 1024];
+    let mut buf = vec![0u8; 64 * 1024];
     let mut len: u64 = 0;
     loop {
         let n = file
@@ -138,7 +138,7 @@ mod tests {
     }
 
     fn sample() -> Analysis {
-        analyze_samples(&[0.0; 4800], 48_000, AnalysisParams::default())
+        analyze_samples(&vec![0.0; 4800], 48_000, AnalysisParams::default())
     }
 
     #[test]

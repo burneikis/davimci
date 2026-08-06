@@ -31,7 +31,9 @@ fn new_duration(clip: &Clip, edge: Edge, delta: i64) -> Result<Frame, CoreError>
     if d <= 0 {
         return Err(CoreError::ZeroDuration);
     }
-    Ok(Frame(d as u64))
+    u64::try_from(d)
+        .map(Frame)
+        .map_err(|_| CoreError::TimeOverflow)
 }
 
 /// Check the source has enough frames for the requested edge movement.
@@ -339,5 +341,17 @@ mod tests {
         assert!(tl.slide(v1, a, 0).is_ok());
         assert!(tl.roll(v1, Frame(100), 0).is_ok());
         assert_eq!(tl, before);
+    }
+
+    /// Regression: the new duration was computed in `i128` and cast back to
+    /// `u64`, so a trim past the last addressable frame wrapped to a short
+    /// clip instead of being rejected.
+    #[test]
+    fn a_trim_past_the_last_addressable_frame_is_rejected() {
+        let clip = Clip::generated(ClipId(1), "bars", Frame::ZERO, Frame(u64::MAX));
+        assert_eq!(
+            new_duration(&clip, Edge::Tail, i64::MAX),
+            Err(CoreError::TimeOverflow)
+        );
     }
 }

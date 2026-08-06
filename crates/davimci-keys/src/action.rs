@@ -44,7 +44,7 @@ impl Operator {
 /// What an operator acts on, once the grammar has resolved it.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Target {
-    /// The verb ran with a motion after it (`dw`, `t\``a\```, ...); the
+    /// The verb ran with a motion after it (`dw`, <code>t\`</code>, <code>a\`</code>, ...); the
     /// range/delta is `[playhead, motion target)`.
     Motion(BuiltinMotion, u32),
     /// A text object (`ic`/`ac`/`it`/`at`/`is`).

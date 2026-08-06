@@ -9,6 +9,14 @@
 //! The windowing layer (not yet written, see the crate docs) does exactly two
 //! things: push [`GuiEvent`]s in, and rasterise the [`DrawList`] out.
 
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    reason = "pointer coordinates are window-sized, so a wrap is not reachable"
+)]
+
 use davimci_app::{AppError, Event, Frontend, Response, Surface, ViewState};
 use davimci_app::{MediaPicker, ModalKey, Modals, PickerIntent, SubtitleEdit};
 
@@ -172,22 +180,22 @@ impl Gui {
                     });
                 }
             }
-            GuiEvent::Key(raw, mods) => self.handle_key(raw, mods),
+            GuiEvent::Key(raw, mods) => self.handle_key(&raw, mods),
         }
     }
 
-    fn handle_key(&mut self, raw: RawKey, mods: Modifiers) {
+    fn handle_key(&mut self, raw: &RawKey, mods: Modifiers) {
         // A modal owns the keyboard while it is open, and which one owns it
         // is the app's decision, not the shell's.
         if self.modals.is_open()
-            && let Some(modal) = modal_key(&raw)
+            && let Some(modal) = modal_key(raw)
             && let Some(events) = self.modals.handle(modal)
         {
             self.out.extend(events);
             return;
         }
 
-        if let Some(key) = translate(&raw, mods) {
+        if let Some(key) = translate(raw, mods) {
             self.out.push(Event::Key(key));
         }
     }

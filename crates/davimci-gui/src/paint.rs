@@ -5,6 +5,16 @@
 //! the part a rendering regression actually lives in. The shell that uploads
 //! these to `egui`/`wgpu` adds nothing that could change *what* is drawn.
 
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    reason = "a draw list is integer pixel arithmetic on window-sized values"
+)]
+
+use std::fmt::Write as _;
+
 use davimci_app::{Severity, Thumbnail, ViewState};
 
 /// A rectangle in window pixels.
@@ -284,10 +294,10 @@ pub fn summarise(list: &DrawList) -> String {
 pub fn status_text(view: &ViewState) -> String {
     let mut s = view.mode_line.clone();
     if let Some(job) = &view.job {
-        s.push_str(&format!("  [{} {}%]", job.label, job.percent()));
+        let _ = write!(s, "  [{} {}%]", job.label, job.percent());
     }
     if let Some(reg) = view.recording {
-        s.push_str(&format!("  recording @{reg}"));
+        let _ = write!(s, "  recording @{reg}");
     }
     if let Some(msg) = &view.message {
         s.push_str("  ");

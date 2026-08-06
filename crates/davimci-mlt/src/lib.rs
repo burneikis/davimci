@@ -20,6 +20,7 @@
 
 pub mod backend;
 mod cache;
+mod convert;
 pub mod error;
 pub mod ffi;
 pub mod patch;

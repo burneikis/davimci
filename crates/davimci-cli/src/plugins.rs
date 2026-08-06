@@ -218,13 +218,14 @@ fn convert_preset(p: &davimci_lua::ExportPreset) -> Result<Preset, LuaError> {
         davimci_lua::TrackSelection::Named(n) => TrackSelection::Named(n.clone()),
     };
     preset.subtitles = match &p.subtitle_tracks {
-        davimci_lua::SubtitleSelection::Burned => SubtitleMode::Burned,
+        // Named subtitle tracks are a selection, not a mode; burning them is
+        // what naming one has always meant in a preset.
+        davimci_lua::SubtitleSelection::Burned | davimci_lua::SubtitleSelection::Named(_) => {
+            SubtitleMode::Burned
+        }
         davimci_lua::SubtitleSelection::Sidecar => SubtitleMode::Sidecar,
         davimci_lua::SubtitleSelection::Embedded => SubtitleMode::Embedded,
         davimci_lua::SubtitleSelection::None => SubtitleMode::None,
-        // Named subtitle tracks are a selection, not a mode; burning them is
-        // what naming one has always meant in a preset.
-        davimci_lua::SubtitleSelection::Named(_) => SubtitleMode::Burned,
     };
     Ok(preset)
 }

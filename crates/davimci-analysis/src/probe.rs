@@ -91,13 +91,21 @@ impl MediaInfo {
     /// Source length in its own frames at `fps`, from the container's frame
     /// count where it has one and from the duration otherwise.
     #[must_use]
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "the value is rounded and floored at zero before the conversion"
+    )]
     pub fn source_frames(&self, fps: Fps) -> u64 {
         if let Some(n) = self.video().and_then(|v| v.frames)
             && n > 0
         {
             return n;
         }
-        (self.duration_seconds * fps.as_f64()).round().max(0.0) as u64
+        // Duration times rate, floored at zero: a media file long enough to
+        // overflow this cannot be opened in the first place.
+        let frames = (self.duration_seconds * fps.as_f64()).round().max(0.0);
+        frames as u64
     }
 }
 
@@ -191,7 +199,7 @@ pub fn parse_ffprobe(path: &str, json: &str) -> Result<MediaInfo, AnalysisError>
             })
         };
         streams.push(StreamInfo {
-            index: num("index").unwrap_or(0) as u32,
+            index: to_u32(num("index").unwrap_or(0)),
             kind,
             codec: s
                 .get("codec_name")
@@ -207,15 +215,15 @@ pub fn parse_ffprobe(path: &str, json: &str) -> Result<MediaInfo, AnalysisError>
             },
             resolution: match (num("width"), num("height")) {
                 (Some(w), Some(h)) if w > 0 && h > 0 => Some(Resolution {
-                    width: w as u32,
-                    height: h as u32,
+                    width: to_u32(w),
+                    height: to_u32(h),
                 }),
                 _ => None,
             },
-            sample_rate: num("sample_rate").map(|v| v as u32),
-            channels: num("channels").map(|v| v as u32),
+            sample_rate: num("sample_rate").map(to_u32),
+            channels: num("channels").map(to_u32),
             frames: num("nb_frames").filter(|n| *n > 0),
-            bit_depth: num("bits_per_raw_sample").map(|v| v as u32),
+            bit_depth: num("bits_per_raw_sample").map(to_u32),
         });
     }
 
@@ -229,6 +237,12 @@ pub fn parse_ffprobe(path: &str, json: &str) -> Result<MediaInfo, AnalysisError>
         duration_seconds,
         streams,
     })
+}
+
+/// A number ffprobe reported, as the `u32` the model stores. Out of range
+/// means a field we cannot use, so it saturates rather than wrapping.
+fn to_u32(v: u64) -> u32 {
+    u32::try_from(v).unwrap_or(u32::MAX)
 }
 
 /// `"24000/1001"` -> exact [`Fps`]. Never a float.

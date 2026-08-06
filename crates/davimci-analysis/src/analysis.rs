@@ -109,6 +109,10 @@ fn to_db(linear: f32) -> f32 {
 /// Callers downmix first: analysis answers "is there sound here", which is a
 /// property of the take, not of the channel layout.
 #[must_use]
+#[allow(
+    clippy::cast_possible_truncation,
+    reason = "an RMS is accumulated in f64 for accuracy and stored as the f32 a level is"
+)]
 pub fn analyze_samples(samples: &[f32], sample_rate: u32, params: AnalysisParams) -> Analysis {
     let hop = (u64::from(sample_rate) * u64::from(params.hop_ms) / 1000).max(1) as usize;
     let mut hops = Vec::with_capacity(samples.len() / hop + 1);
@@ -119,7 +123,9 @@ pub fn analyze_samples(samples: &[f32], sample_rate: u32, params: AnalysisParams
             peak = peak.max(s.abs());
             sum_sq += f64::from(*s) * f64::from(*s);
         }
-        let rms = (sum_sq / chunk.len().max(1) as f64).sqrt() as f32;
+        let n = u32::try_from(chunk.len()).unwrap_or(u32::MAX).max(1);
+        let rms = (sum_sq / f64::from(n)).sqrt();
+        let rms = rms as f32;
         hops.push(Hop {
             peak_db: to_db(peak),
             rms_db: to_db(rms),
@@ -176,12 +182,20 @@ pub fn silence_spans(hops: &[Hop], params: AnalysisParams) -> Vec<Span> {
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::panic)]
+#[allow(
+    clippy::float_cmp,
+    reason = "the values under test are set exactly, so exact equality is the assertion"
+)]
 pub(crate) mod tests {
     use super::*;
     use std::f32::consts::PI;
 
     /// The `tone_gaps.wav` fixture, synthesised: a 1 kHz tone at half scale
     /// during 1-2s and 3-4s, silence elsewhere, 5s at 48 kHz.
+    #[allow(
+        clippy::cast_precision_loss,
+        reason = "a sample index in a five-second fixture is far below the f32 mantissa"
+    )]
     pub(crate) fn tone_gaps(sample_rate: u32) -> Vec<f32> {
         (0..sample_rate * 5)
             .map(|n| {
