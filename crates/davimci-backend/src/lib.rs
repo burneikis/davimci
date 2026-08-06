@@ -82,6 +82,16 @@ pub trait RenderBackend {
         false
     }
 
+    /// Whether a *negative* rate plays rather than stalls.
+    ///
+    /// Separate from [`RenderBackend::supports_varispeed`] because running a
+    /// graph backwards is a different capability from running it fast: a
+    /// backend that cannot do it must be stepped instead, since a stalled
+    /// reverse preview freezes the picture and strands the playhead.
+    fn supports_reverse_varispeed(&self) -> bool {
+        false
+    }
+
     /// Set the playback rate: `1.0` is normal, `2.0` double speed, negative
     /// plays backwards. Only meaningful while previewing.
     fn set_rate(&mut self, rate: f64) -> Result<()> {

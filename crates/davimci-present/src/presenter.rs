@@ -184,6 +184,11 @@ impl Presenter {
         self.cache = None;
     }
 
+    /// Which way the clock now runs, so pacing knows which frames are late.
+    pub fn set_direction(&mut self, direction: crate::Direction) {
+        self.pacer.set_direction(direction);
+    }
+
     /// Present one tick of playback: pace against the clock, then compose.
     pub fn present(
         &mut self,

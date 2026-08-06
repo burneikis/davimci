@@ -767,7 +767,9 @@ impl RenderBackend for MltBackend {
         let root = graph.root.clone_ref();
 
         // Audio-only consumers, in preference order: MLT must never own a
-        // video window here.
+        // video window here. `sdl2_audio` leads because it is the only one
+        // that honours `scrub_audio`, and so the only one that can be heard
+        // while shuttling.
         let mut consumer = ["sdl2_audio", "rtaudio", "null"]
             .iter()
             .find_map(|s| Consumer::new(&self.profile, s, None).ok())
@@ -778,6 +780,11 @@ impl RenderBackend for MltBackend {
             let mut props = consumer.properties();
             props.set_int("real_time", 1)?;
             let _ = props.set("terminate_on_pause", "0");
+            // Without this the consumer queues audio only at exactly 1x, so
+            // every shuttle - fast, slow or backwards - would be silent. The
+            // consumer reads it once, when it starts, so it is set here
+            // rather than per rate change.
+            let _ = props.set_int("scrub_audio", 1);
         }
         let shared = Arc::new(PreviewShared {
             frames: Mutex::new(VecDeque::new()),
@@ -814,6 +821,10 @@ impl RenderBackend for MltBackend {
     }
 
     fn supports_varispeed(&self) -> bool {
+        true
+    }
+
+    fn supports_reverse_varispeed(&self) -> bool {
         true
     }
 

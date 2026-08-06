@@ -22,6 +22,38 @@ use davimci_core::Frame;
 
 use crate::error::PresentError;
 
+/// Which way the clock is running.
+///
+/// Every pacing comparison is relative to it: playing backwards, a frame
+/// *ahead* of the clock is the late one and the picture has to walk down
+/// rather than up. Without this a reverse shuttle drops every frame it
+/// pulls as "already overtaken" and the picture freezes over moving audio.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Direction {
+    #[default]
+    Forward,
+    Reverse,
+}
+
+impl Direction {
+    /// Whether `position` is still in the future for a clock at `clock`.
+    fn is_future(self, position: Frame, clock: Frame) -> bool {
+        match self {
+            Self::Forward => position > clock,
+            Self::Reverse => position < clock,
+        }
+    }
+
+    /// Whether `position` is at or behind what is already on screen, and so
+    /// a late arrival the picture has passed.
+    fn is_overtaken(self, position: Frame, current: Frame) -> bool {
+        match self {
+            Self::Forward => position <= current,
+            Self::Reverse => position >= current,
+        }
+    }
+}
+
 /// What the pacer decided for one tick.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pace {
@@ -55,6 +87,7 @@ pub struct Pacer {
     /// Cap on frames pulled per tick, so a backend that is far ahead cannot
     /// stall the event loop draining its queue.
     max_pulls_per_tick: u32,
+    direction: Direction,
 }
 
 impl Pacer {
@@ -65,6 +98,16 @@ impl Pacer {
             pending: None,
             stats: PaceStats::default(),
             max_pulls_per_tick: 8,
+            direction: Direction::Forward,
+        }
+    }
+
+    /// Tell the pacer which way the clock now runs. A held frame belongs to
+    /// the old direction and is dropped rather than shown out of order.
+    pub fn set_direction(&mut self, direction: Direction) {
+        if self.direction != direction {
+            self.direction = direction;
+            self.pending = None;
         }
     }
 
@@ -109,7 +152,7 @@ impl Pacer {
         // A frame held back from an earlier tick comes first, so ordering is
         // preserved: it is older than anything still in the backend's queue.
         let mut fresh: Option<VideoFrame> = match self.pending.take() {
-            Some(f) if f.position <= clock => Some(f),
+            Some(f) if !self.direction.is_future(f.position, clock) => Some(f),
             Some(f) => {
                 // Still in the future. Hold it and pull nothing: the queue
                 // behind it is further ahead again.
@@ -123,7 +166,7 @@ impl Pacer {
                 .next_preview_frame()
                 .map_err(|e| PresentError::Pull(e.to_string()))?;
             let Some(frame) = pulled else { break };
-            if frame.position > clock {
+            if self.direction.is_future(frame.position, clock) {
                 // Ahead of the clock: not due yet. Hold it for a later tick
                 // and stop - the rest of the queue is further ahead again.
                 self.pending = Some(frame);
@@ -147,7 +190,7 @@ impl Pacer {
         // Never go backwards: a frame older than what is on screen is a late
         // arrival we have already overtaken.
         if let (Some(f), Some(cur)) = (&fresh, &self.current)
-            && f.position <= cur.position
+            && self.direction.is_overtaken(f.position, cur.position)
         {
             self.stats.dropped_late = self.stats.dropped_late.saturating_add(1);
             fresh = None;
@@ -190,6 +233,129 @@ mod tests {
         b.preview_start(Frame::ZERO, davimci_backend::PreviewScale::Full)
             .unwrap();
         b
+    }
+
+    /// A backend that hands out exactly the frames a test lists, in order -
+    /// which is the only way to feed the pacer a descending pass.
+    #[derive(Debug)]
+    struct ScriptedBackend {
+        inner: MockBackend,
+        queue: std::collections::VecDeque<Frame>,
+    }
+
+    impl ScriptedBackend {
+        fn new(positions: &[u64]) -> Self {
+            Self {
+                inner: backend(),
+                queue: positions.iter().map(|p| Frame(*p)).collect(),
+            }
+        }
+    }
+
+    impl RenderBackend for ScriptedBackend {
+        fn probe(
+            &mut self,
+            p: &std::path::Path,
+        ) -> davimci_backend::Result<davimci_backend::SourceInfo> {
+            self.inner.probe(p)
+        }
+        fn set_timeline(&mut self, tl: &davimci_core::Timeline) -> davimci_backend::Result<()> {
+            self.inner.set_timeline(tl)
+        }
+        fn seek(&mut self, f: Frame) -> davimci_backend::Result<()> {
+            self.inner.seek(f)
+        }
+        fn frame_at(
+            &mut self,
+            f: Frame,
+            s: davimci_backend::PreviewScale,
+        ) -> davimci_backend::Result<VideoFrame> {
+            self.inner.frame_at(f, s)
+        }
+        fn preview_start(
+            &mut self,
+            f: Frame,
+            s: davimci_backend::PreviewScale,
+        ) -> davimci_backend::Result<()> {
+            self.inner.preview_start(f, s)
+        }
+        fn preview_stop(&mut self) -> davimci_backend::Result<()> {
+            self.inner.preview_stop()
+        }
+        fn is_previewing(&self) -> bool {
+            self.inner.is_previewing()
+        }
+        fn next_preview_frame(&mut self) -> davimci_backend::Result<Option<VideoFrame>> {
+            match self.queue.pop_front() {
+                Some(at) => self
+                    .inner
+                    .frame_at(at, davimci_backend::PreviewScale::Full)
+                    .map(Some),
+                None => Ok(None),
+            }
+        }
+        fn audio_clock_position(&self) -> Option<Frame> {
+            self.inner.audio_clock_position()
+        }
+        fn render(&mut self, job: davimci_backend::RenderJob) -> davimci_backend::Result<()> {
+            self.inner.render(job)
+        }
+        fn progress(&self) -> davimci_backend::RenderProgress {
+            self.inner.progress()
+        }
+        fn cancel_render(&mut self) -> davimci_backend::Result<()> {
+            self.inner.cancel_render()
+        }
+    }
+
+    /// Regression: playing backwards, every pulled frame is behind the one on
+    /// screen, so a forward-only pacer dropped the lot as late arrivals and
+    /// the picture froze over moving audio.
+    #[test]
+    fn a_reverse_pass_presents_descending_frames_instead_of_dropping_them() {
+        let mut b = ScriptedBackend::new(&[5, 4, 3, 2, 1]);
+        let mut p = Pacer::new();
+        p.set_direction(Direction::Reverse);
+        for i in (1..=5).rev() {
+            assert_eq!(
+                p.tick(Some(Frame(i)), &mut b).unwrap(),
+                Pace::Presented(Frame(i)),
+                "a reverse pass dropped the frame the clock asked for"
+            );
+        }
+        assert_eq!(p.stats().dropped_late, 0);
+    }
+
+    /// Backwards, "late" is a frame *ahead* of the clock: it is dropped only
+    /// when a nearer one is behind it in the queue.
+    #[test]
+    fn a_fast_reverse_source_drops_frames_ahead_of_the_clock() {
+        let mut b = ScriptedBackend::new(&[9, 8, 7, 6]);
+        let mut p = Pacer::new();
+        p.set_direction(Direction::Reverse);
+        assert_eq!(
+            p.tick(Some(Frame(6)), &mut b).unwrap(),
+            Pace::Presented(Frame(6))
+        );
+        assert_eq!(
+            p.stats().dropped_late,
+            3,
+            "it did not skip down to the clock"
+        );
+    }
+
+    /// A frame further back than the clock is not due yet: it is held, not
+    /// thrown away, because the backend hands each frame over once.
+    #[test]
+    fn a_reverse_frame_behind_the_clock_is_held_until_it_is_due() {
+        let mut b = ScriptedBackend::new(&[4]);
+        let mut p = Pacer::new();
+        p.set_direction(Direction::Reverse);
+        assert_eq!(p.tick(Some(Frame(6)), &mut b).unwrap(), Pace::Empty);
+        assert_eq!(
+            p.tick(Some(Frame(4)), &mut b).unwrap(),
+            Pace::Presented(Frame(4))
+        );
     }
 
     #[test]

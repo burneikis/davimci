@@ -27,5 +27,5 @@ pub use error::PresentError;
 pub use fit::{Quad, letterbox};
 pub use headless::HeadlessPresenter;
 pub use overlay::{Overlay, OverlayConfig, OverlayRect, OverlayRectKind, timecode};
-pub use pacing::{Pace, PaceStats, Pacer};
+pub use pacing::{Direction, Pace, PaceStats, Pacer};
 pub use presenter::{Host, Presentation, Presenter};

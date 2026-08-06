@@ -1,6 +1,4 @@
 # Human
-- backwards shuttle audio?
-- different speed shuttle audio
 - backwards shuttle lag, we can skip a lot of frames when going backwards shuttling speed
 - figure out how davinci resolve can cleanly step framewise backwards
 - figure out whats causing playback to break after doing a few seeks, or shuttles to the end or fast backwards etc
