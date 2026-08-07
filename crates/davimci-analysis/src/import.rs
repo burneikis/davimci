@@ -14,7 +14,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use davimci_cmd::{EditCommand, Session};
-use davimci_core::{Clip, ClipId, Frame, MediaRef, Timeline, TrackId, TrackKind};
+use davimci_core::{Clip, ClipId, Frame, GroupId, MediaRef, Timeline, TrackId, TrackKind};
 
 use crate::conform::{self, ConformOptions, Conformed};
 use crate::error::AnalysisError;
@@ -107,7 +107,7 @@ pub fn import(
 /// not, so this counts the worst case: a new track per stream.
 #[must_use]
 pub fn ids_needed(info: &MediaInfo, opts: &ImportOptions) -> usize {
-    let mut n = 0;
+    let mut n = 1; // the link group holding the file's video and audio
     for s in &info.streams {
         n += 1; // the track
         n += match s.kind {
@@ -159,6 +159,10 @@ pub fn plan(
     let mut names = NameCursor::new(tl);
     let mut taken: Vec<TrackId> = Vec::new();
     let mut mapping = Vec::new();
+    // One file's video and audio move, trim and split as one until the user
+    // ungroups them. Subtitles stay loose: a cue is its own object, and a
+    // whole subtitle stream cannot be frame-aligned with a shot.
+    let mut linked: Vec<ClipId> = Vec::new();
 
     for stream in &info.streams {
         let kind = track_kind(stream.kind);
@@ -204,21 +208,18 @@ pub fn plan(
             clips: clips.len(),
         });
         for clip in clips {
-            cmds.push(match opts.placement {
-                Placement::Overwrite => EditCommand::Overwrite {
-                    track,
-                    at: clip.start,
-                    new_id: Some(clip.id),
-                    clip,
-                },
-                Placement::Insert => EditCommand::Insert {
-                    track,
-                    at: clip.start,
-                    new_id: Some(clip.id),
-                    clip,
-                },
-            });
+            if stream.kind != StreamKind::Subtitle {
+                linked.push(clip.id);
+            }
+            cmds.push(place(track, clip, opts.placement));
         }
+    }
+
+    if linked.len() > 1 {
+        cmds.push(EditCommand::Link {
+            clips: linked,
+            group: Some(GroupId(next()?)),
+        });
     }
 
     Ok(ImportPlan {
@@ -230,6 +231,25 @@ pub fn plan(
             set_timeline_props,
         },
     })
+}
+
+/// The command that lands one imported clip on its track.
+fn place(track: TrackId, clip: Clip, placement: Placement) -> EditCommand {
+    let (at, new_id) = (clip.start, Some(clip.id));
+    match placement {
+        Placement::Overwrite => EditCommand::Overwrite {
+            track,
+            at,
+            new_id,
+            clip,
+        },
+        Placement::Insert => EditCommand::Insert {
+            track,
+            at,
+            new_id,
+            clip,
+        },
+    }
 }
 
 fn track_kind(kind: StreamKind) -> TrackKind {
@@ -398,6 +418,51 @@ mod tests {
             assert_eq!(t.clips().len(), m.clips, "{} clip count", m.track_name);
         }
         s.timeline().assert_invariants();
+    }
+
+    #[test]
+    fn an_imported_files_video_and_audio_arrive_as_one_group() {
+        let mut s = session();
+        let mut opts = ImportOptions::default();
+        with_subs(&mut opts);
+        let imported = import(&mut s, &multitrack(), &opts).unwrap();
+
+        let group = |m: &StreamMapping| s.timeline().track(m.track).unwrap().clips()[0].group;
+        let video = group(imported.tracks_of(StreamKind::Video)[0]);
+        assert!(video.is_some(), "the video clip is grouped");
+        for m in imported.tracks_of(StreamKind::Audio) {
+            assert_eq!(group(m), video, "{} joins the file's group", m.track_name);
+        }
+        // A cue is its own object and cannot be aligned with a shot.
+        for m in imported.tracks_of(StreamKind::Subtitle) {
+            assert_eq!(group(m), None, "{} stays loose", m.track_name);
+        }
+        s.timeline().assert_invariants();
+    }
+
+    /// Two files imported one after the other are two groups, not one.
+    #[test]
+    fn each_import_gets_its_own_group() {
+        let mut s = session();
+        import(&mut s, &multitrack(), &ImportOptions::default()).unwrap();
+        let mut second = multitrack();
+        second.path = "/fixtures/other.mkv".into();
+        let opts = ImportOptions {
+            at: Frame(600),
+            ..ImportOptions::default()
+        };
+        let second = import(&mut s, &second, &opts).unwrap();
+
+        let groups: Vec<_> = s
+            .timeline()
+            .tracks()
+            .iter()
+            .flat_map(davimci_core::Track::clips)
+            .filter_map(|c| c.group)
+            .collect();
+        let distinct: std::collections::BTreeSet<_> = groups.iter().collect();
+        assert_eq!(distinct.len(), 2, "one group per import");
+        assert!(second.mapping.len() > 1);
     }
 
     #[test]

@@ -8,6 +8,7 @@
 
 pub mod command;
 pub mod error;
+mod link;
 pub mod macros;
 pub mod project;
 #[cfg(test)]

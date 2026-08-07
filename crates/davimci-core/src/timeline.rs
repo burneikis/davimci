@@ -584,23 +584,20 @@ impl Timeline {
         for t in &self.tracks {
             t.check_invariants()?;
         }
-        // Group members stay frame-aligned.
-        let mut groups: BTreeMap<GroupId, (Frame, Frame)> = BTreeMap::new();
+        // A group is one object seen on several tracks, so it holds at most
+        // one clip per track. Alignment is not an invariant: an edit that
+        // moves a group reaches its members one at a time, and the states in
+        // between are legal even though only the last one is aligned.
+        let mut members: BTreeSet<(GroupId, TrackId)> = BTreeSet::new();
         for t in &self.tracks {
             for c in t.clips() {
-                if let Some(g) = c.group {
-                    match groups.get(&g) {
-                        None => {
-                            groups.insert(g, (c.start, c.end()));
-                        }
-                        Some(&(s, e)) if s == c.start && e == c.end() => {}
-                        Some(_) => {
-                            return Err(CoreError::InvariantViolation(format!(
-                                "group {g} is not frame-aligned at clip {}",
-                                c.id
-                            )));
-                        }
-                    }
+                if let Some(g) = c.group
+                    && !members.insert((g, t.id))
+                {
+                    return Err(CoreError::InvariantViolation(format!(
+                        "group {g} has two clips on track {}",
+                        t.name
+                    )));
                 }
             }
         }

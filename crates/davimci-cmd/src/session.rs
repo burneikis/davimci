@@ -8,6 +8,7 @@ use davimci_core::{Frame, Mark, Register, Timeline, TrackId};
 
 use crate::command::{Command, EditCommand};
 use crate::error::CmdError;
+use crate::link;
 use crate::macros::MacroRecorder;
 use crate::undo::{NodeId, SavedHistory, UndoEntry, UndoTree};
 
@@ -110,8 +111,21 @@ impl Session {
 
     /// Run a command and record it. A rejected command mutates nothing and
     /// never enters the log.
+    ///
+    /// This is the one place link groups are expanded, so the log holds the
+    /// edit as it reached every member and undo and redo replay it verbatim.
     pub fn exec(&mut self, command: &EditCommand) -> Result<String, CmdError> {
-        let effect = command.apply(&mut self.timeline)?;
+        let cursor = self.timeline.id_cursor();
+        let expanded = link::expand(&mut self.timeline, command);
+        let effect = match expanded.apply(&mut self.timeline) {
+            Ok(effect) => effect,
+            Err(e) => {
+                // Expanding a split reserves ids for the halves it would
+                // create; a rejected command hands them back.
+                self.timeline.set_id_cursor(cursor);
+                return Err(e);
+            }
+        };
         let label = effect.applied.describe();
         self.history
             .record(effect.applied, effect.inverse, &self.timeline);

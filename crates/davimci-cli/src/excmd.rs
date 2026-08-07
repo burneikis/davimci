@@ -42,6 +42,10 @@ pub enum ExCommand {
     Buffer(usize),
     /// `:relink [old] <new>`
     Relink { old: Option<String>, new: String },
+    /// `:group` - link the clips under the playhead into one group.
+    Group,
+    /// `:ungroup` - break the group holding the clip under the playhead.
+    Ungroup,
     /// `:export <path> [--preset <name>]` - render to an explicit file.
     Export {
         path: PathBuf,
@@ -198,6 +202,8 @@ pub fn parse(line: &str) -> Result<ExCommand, CliError> {
                 .map_err(|_| CliError::NoSuchBuffer(n))
         }
         "relink" => parse_relink(&line),
+        "group" => Ok(ExCommand::Group),
+        "ungroup" => Ok(ExCommand::Ungroup),
         other => Err(CliError::UnknownCommand(other.to_string())),
     }
 }
@@ -388,6 +394,8 @@ fn command_names() -> Vec<String> {
         "b",
         "buffer",
         "relink",
+        "group",
+        "ungroup",
     ]
     .iter()
     .map(|s| (*s).to_string())
@@ -537,6 +545,8 @@ impl Workspace {
             }),
             ExCommand::Set(setting) => self.set(setting, selection),
             ExCommand::Relink { old, new } => self.relink(old.as_deref(), new),
+            ExCommand::Group => self.group(),
+            ExCommand::Ungroup => self.ungroup(),
         }
     }
 
@@ -739,6 +749,47 @@ impl Workspace {
             transition,
         })?;
         Ok(ExOutcome::msg(described))
+    }
+
+    /// `:group`: link every clip the playhead stands in, across all tracks.
+    ///
+    /// The clips have to be frame-aligned, which is the model's rule for a
+    /// group and the reason this takes the whole column rather than a range.
+    fn group(&mut self) -> Result<ExOutcome, CliError> {
+        let tl = self.current().timeline();
+        let frame = tl.playhead().frame;
+        let clips: Vec<_> = tl
+            .tracks()
+            .iter()
+            .filter_map(|t| t.clip_at(frame))
+            .map(|c| c.id)
+            .collect();
+        if clips.len() < 2 {
+            return Err(CliError::NoClipUnderPlayhead("group with another"));
+        }
+        let n = clips.len();
+        self.exec(&EditCommand::Link { clips, group: None })?;
+        Ok(ExOutcome::msg(format!("{n} clips grouped")))
+    }
+
+    /// `:ungroup`: every member leaves, not just the one under the playhead -
+    /// a group of one is a group in name only.
+    fn ungroup(&mut self) -> Result<ExOutcome, CliError> {
+        let tl = self.current().timeline();
+        let head = tl.playhead();
+        let group = tl
+            .track(head.track)
+            .and_then(|t| t.clip_at(head.frame))
+            .and_then(|c| c.group)
+            .ok_or(CliError::NoClipUnderPlayhead("ungroup"))?;
+        let members = tl.group_members(group);
+        let n = members.len();
+        let cmds = members
+            .into_iter()
+            .map(|(_, clip)| EditCommand::SetGroup { clip, group: None })
+            .collect();
+        self.exec(&EditCommand::Sequence(cmds))?;
+        Ok(ExOutcome::msg(format!("{n} clips ungrouped")))
     }
 
     fn relink(&mut self, old: Option<&str>, new: &str) -> Result<ExOutcome, CliError> {

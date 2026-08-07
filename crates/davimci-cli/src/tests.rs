@@ -105,6 +105,8 @@ fn the_ex_grammar_covers_the_spec_12_table() {
                 new: "/new/a.mkv".into(),
             },
         ),
+        (":group", ExCommand::Group),
+        (":ungroup", ExCommand::Ungroup),
         (
             ":relink /old/a.mkv /new/a.mkv",
             ExCommand::Relink {
@@ -865,4 +867,51 @@ fn a_truncated_final_record_recovers_everything_before_it() {
         expected,
         "the complete records before the torn one must still replay"
     );
+}
+
+// grouping
+
+/// `:group` links the column under the playhead; `:ungroup` breaks the group
+/// again, so a member can be edited on its own.
+#[test]
+fn group_and_ungroup_bracket_a_link() {
+    let dir = Scratch::new("group");
+    let mut ws = Workspace::new(dir.path()).without_autosave();
+    seeded(
+        &mut ws,
+        fixture(&[("V1", &[(0, 300, "a")]), ("A1", &[(0, 300, "a")])]),
+    );
+
+    assert_eq!(
+        ws.run("group", OnRecovery::Discard).unwrap(),
+        ExOutcome::Message("2 clips grouped".into())
+    );
+    let groups = |ws: &Workspace| -> Vec<Option<davimci_core::GroupId>> {
+        ws.current()
+            .timeline()
+            .tracks()
+            .iter()
+            .flat_map(davimci_core::Track::clips)
+            .map(|c| c.group)
+            .collect()
+    };
+    let linked = groups(&ws);
+    assert_eq!(linked.len(), 2);
+    assert!(linked[0].is_some() && linked[0] == linked[1]);
+
+    assert_eq!(
+        ws.run("ungroup", OnRecovery::Discard).unwrap(),
+        ExOutcome::Message("2 clips ungrouped".into())
+    );
+    assert_eq!(groups(&ws), vec![None, None]);
+}
+
+#[test]
+fn ungrouping_where_nothing_is_grouped_is_a_user_error() {
+    let dir = Scratch::new("ungroup");
+    let mut ws = Workspace::new(dir.path()).without_autosave();
+    seeded(&mut ws, fixture(&[("V1", &[(0, 300, "a")])]));
+    let err = ws.run("ungroup", OnRecovery::Discard).unwrap_err();
+    assert_eq!(err.class(), ErrorClass::User);
+    assert!(!err.user_message().is_empty());
 }
