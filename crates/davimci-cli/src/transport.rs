@@ -270,12 +270,12 @@ impl Transport {
         if self.state == TransportState::Stopped {
             return Ok(false);
         }
+        if backend.is_previewing() {
+            backend.preview_stop().map_err(|e| e.to_string())?;
+        }
         if self.varispeed {
             let _ = backend.set_rate(1.0);
             self.varispeed = false;
-        }
-        if backend.is_previewing() {
-            backend.preview_stop().map_err(|e| e.to_string())?;
         }
         self.state = TransportState::Stopped;
         self.return_to = None;
@@ -357,14 +357,17 @@ impl Transport {
         session: &Session,
     ) -> Result<Option<Frame>, String> {
         let _ = session;
+        // The preview goes first: resetting the rate on a running backwards
+        // preview would have it reopen itself forwards, for the one tick
+        // before it is stopped anyway.
+        if backend.is_previewing() {
+            backend.preview_stop().map_err(|e| e.to_string())?;
+        }
         if self.varispeed {
             // Leave the graph at normal speed: the next play must not
             // inherit the last shuttle's rate.
             let _ = backend.set_rate(1.0);
             self.varispeed = false;
-        }
-        if backend.is_previewing() {
-            backend.preview_stop().map_err(|e| e.to_string())?;
         }
         self.state = TransportState::Stopped;
         Ok(self.return_to.take())
@@ -427,6 +430,12 @@ impl Transport {
             TransportState::Stopped => TickResult::default(),
             TransportState::Playing => {
                 presenter.set_direction(Direction::Forward);
+                // Until the clock has caught up with where this pass began,
+                // the frame on screen belongs to the last one and must not
+                // veto the frames of this one.
+                if !self.clock_locked {
+                    presenter.restart();
+                }
                 // Exactly one pull per tick: the pacer's drop/repeat counts
                 // are only meaningful if a tick means one presentation, so
                 // the presentation is handed back rather than left for the
@@ -478,6 +487,9 @@ impl Transport {
                 } else {
                     Direction::Forward
                 });
+                if !self.clock_locked {
+                    presenter.restart();
+                }
                 let presentation = presenter.present(backend).ok();
                 let at = self.follow_clock(backend.audio_clock_position());
                 let reverse = self.state_is_reverse();

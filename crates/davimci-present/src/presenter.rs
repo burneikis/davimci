@@ -189,6 +189,11 @@ impl Presenter {
         self.pacer.set_direction(direction);
     }
 
+    /// A new pass is starting: keep the picture, but let anything replace it.
+    pub fn restart(&mut self) {
+        self.pacer.restart();
+    }
+
     /// Present one tick of playback: pace against the clock, then compose.
     pub fn present(
         &mut self,

@@ -88,6 +88,9 @@ pub struct Pacer {
     /// stall the event loop draining its queue.
     max_pulls_per_tick: u32,
     direction: Direction,
+    /// Set when the frame on screen belongs to a pass that has ended, so the
+    /// first frame of the next one is taken wherever it starts.
+    restarting: bool,
 }
 
 impl Pacer {
@@ -99,6 +102,7 @@ impl Pacer {
             stats: PaceStats::default(),
             max_pulls_per_tick: 8,
             direction: Direction::Forward,
+            restarting: false,
         }
     }
 
@@ -108,7 +112,21 @@ impl Pacer {
         if self.direction != direction {
             self.direction = direction;
             self.pending = None;
+            self.restart();
         }
+    }
+
+    /// A new pass is starting, from anywhere.
+    ///
+    /// "Never go backwards" only holds within one pass: after a backwards
+    /// shuttle the frame on screen is ahead of everything the next play will
+    /// produce, and treating those as late arrivals leaves the picture frozen
+    /// until playback climbs past where the shuttle stopped. The frame stays
+    /// up - a restart is not a black flash - but it no longer vetoes the one
+    /// that replaces it.
+    pub fn restart(&mut self) {
+        self.pending = None;
+        self.restarting = true;
     }
 
     pub fn set_max_pulls_per_tick(&mut self, n: u32) {
@@ -188,12 +206,17 @@ impl Pacer {
         }
 
         // Never go backwards: a frame older than what is on screen is a late
-        // arrival we have already overtaken.
+        // arrival we have already overtaken. Within one pass - the first
+        // frame of a new one is wherever it says it is.
         if let (Some(f), Some(cur)) = (&fresh, &self.current)
             && self.direction.is_overtaken(f.position, cur.position)
         {
-            self.stats.dropped_late = self.stats.dropped_late.saturating_add(1);
-            fresh = None;
+            if self.restarting {
+                self.restarting = false;
+            } else {
+                self.stats.dropped_late = self.stats.dropped_late.saturating_add(1);
+                fresh = None;
+            }
         }
 
         match fresh {
@@ -341,6 +364,58 @@ mod tests {
             p.stats().dropped_late,
             3,
             "it did not skip down to the clock"
+        );
+    }
+
+    /// Regression: after a backwards shuttle the frame on screen is ahead of
+    /// everything the next forward pass produces, and "never go backwards"
+    /// dropped all of it. The preview stayed frozen on the shuttle's last
+    /// picture until playback climbed past it - or until a seek put a frame
+    /// up by hand.
+    #[test]
+    fn a_new_pass_is_not_vetoed_by_the_picture_the_last_one_left() {
+        let mut b = ScriptedBackend::new(&[9, 8, 7]);
+        let mut p = Pacer::new();
+        p.set_direction(Direction::Reverse);
+        for i in (7..=9).rev() {
+            assert_eq!(
+                p.tick(Some(Frame(i)), &mut b).unwrap(),
+                Pace::Presented(Frame(i))
+            );
+        }
+        // Playback resumes from well before where the shuttle stopped.
+        let mut b = ScriptedBackend::new(&[2, 3, 4]);
+        p.set_direction(Direction::Forward);
+        assert_eq!(
+            p.tick(Some(Frame(2)), &mut b).unwrap(),
+            Pace::Presented(Frame(2)),
+            "the first frame of the new pass was dropped as a late arrival"
+        );
+        assert_eq!(
+            p.tick(Some(Frame(3)), &mut b).unwrap(),
+            Pace::Presented(Frame(3))
+        );
+    }
+
+    /// The veto still holds inside one pass: a frame behind the picture is a
+    /// late arrival, and only the first frame after a restart is exempt.
+    #[test]
+    fn a_restart_excuses_one_frame_and_not_the_pass_behind_it() {
+        let mut b = ScriptedBackend::new(&[4, 2, 3]);
+        let mut p = Pacer::new();
+        assert_eq!(
+            p.tick(Some(Frame(4)), &mut b).unwrap(),
+            Pace::Presented(Frame(4))
+        );
+        p.restart();
+        assert_eq!(
+            p.tick(Some(Frame(2)), &mut b).unwrap(),
+            Pace::Presented(Frame(2))
+        );
+        assert_eq!(
+            p.tick(Some(Frame(2)), &mut b).unwrap(),
+            Pace::Repeated(Frame(2)),
+            "a frame behind the picture was taken a second time"
         );
     }
 

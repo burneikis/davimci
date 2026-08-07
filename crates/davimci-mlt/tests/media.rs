@@ -244,6 +244,97 @@ fn preview_pulls_frames_and_advances_the_clock() {
     );
 }
 
+/// Regression: a backwards pass used to be MLT's own, which decodes every
+/// frame with a seek and drops none of it, so the picture fell further behind
+/// the sound the longer the shuttle ran. The clock has to keep real time and
+/// the pictures have to arrive descending with it.
+#[test]
+fn a_backwards_shuttle_keeps_up_with_its_own_clock() {
+    let res = Resolution {
+        width: 640,
+        height: 480,
+    };
+    let tl = timeline_of("scene_cut.mkv", 240, res);
+    let mut b = MltBackend::new(tl.props).unwrap();
+    b.set_timeline(&tl).unwrap();
+
+    b.preview_start(Frame(200), PreviewScale::Half).unwrap();
+    b.set_rate(-1.0).unwrap();
+    let (got, travelled) = drain_backwards(&mut b, Duration::from_secs(2));
+    b.preview_stop().unwrap();
+
+    assert!(
+        travelled >= 60,
+        "the clock covered {travelled} frames in two seconds of backwards play"
+    );
+    assert!(
+        got.len() >= travelled as usize / 2,
+        "{} pictures for {travelled} frames of sound: the picture is not keeping up",
+        got.len()
+    );
+    assert!(
+        got.windows(2).all(|w| w[1] <= w[0]),
+        "a backwards pass handed over ascending frames: {got:?}"
+    );
+}
+
+/// Regression: a fast backwards shuttle decoded runs it could never catch up
+/// with, so every one of them was stale before it was ready and the preview
+/// froze outright. Skipping frames is fine; showing none is not.
+#[test]
+fn a_fast_backwards_shuttle_keeps_showing_pictures() {
+    let res = Resolution {
+        width: 640,
+        height: 480,
+    };
+    let tl = timeline_of("scene_cut.mkv", 240, res);
+    let mut b = MltBackend::new(tl.props).unwrap();
+    b.set_timeline(&tl).unwrap();
+
+    for rate in [-2.0, -4.0, -8.0] {
+        b.preview_start(Frame(239), PreviewScale::Half).unwrap();
+        b.set_rate(rate).unwrap();
+        let (got, travelled) = drain_backwards(&mut b, Duration::from_secs(1));
+        b.preview_stop().unwrap();
+        assert!(
+            travelled > 0,
+            "the clock did not run backwards at {rate:+}x"
+        );
+        assert!(
+            got.len() >= 4,
+            "{rate:+}x handed over {} pictures in a second: the preview is frozen",
+            got.len()
+        );
+        assert!(
+            got.windows(2).all(|w| w[1] <= w[0]),
+            "{rate:+}x handed over ascending frames: {got:?}"
+        );
+    }
+}
+
+/// Pull frames for `window`, returning them and how far the clock travelled.
+fn drain_backwards(b: &mut MltBackend, window: Duration) -> (Vec<Frame>, u64) {
+    let started = Instant::now();
+    let mut got: Vec<Frame> = Vec::new();
+    let mut clock: Vec<Frame> = Vec::new();
+    while started.elapsed() < window {
+        while let Some(f) = b.next_preview_frame().unwrap() {
+            assert!(f.is_well_formed());
+            got.push(f.position);
+        }
+        if let Some(at) = b.audio_clock_position() {
+            clock.push(at);
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    let travelled = clock
+        .iter()
+        .max()
+        .zip(clock.iter().min())
+        .map_or(0, |(hi, lo)| hi.get().saturating_sub(lo.get()));
+    (got, travelled)
+}
+
 #[test]
 fn a_render_produces_a_file_with_the_requested_streams() {
     let res = Resolution {

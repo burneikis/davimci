@@ -1,5 +1,6 @@
 # Human
-- backwards shuttle lag, we can skip a lot of frames when going backwards shuttling speed
+- `just test-slow` aborts when its cases run in parallel (ffmpeg's
+  `fctx->async_lock` assertion); passes with `--test-threads=1`
 - figure out how davinci resolve can cleanly step framewise backwards
 - figure out whats causing playback to break after doing a few seeks, or shuttles to the end or fast backwards etc
 - allow plugins that render smth / a window. e.g. something like which-key

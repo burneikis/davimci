@@ -5,11 +5,20 @@
 //! consumer as RGBA and handed to `davimci-present`. MLT never opens a window
 //!, which is what lets the GUI draw overlays on the video
 //! and lets the TUI reuse the same path.
+//!
+//! Playing backwards is the exception. MLT decodes a backwards pass one seek
+//! per frame and drops none of it, so the picture falls further behind the
+//! sound the longer it runs. Instead the consumer plays sound only and
+//! [`Scrub`] decodes the picture from a graph of its own, chasing the clock
+//! and skipping what it cannot keep up with, so the speed stays honest.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::ffi::c_void;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
+use std::time::Duration;
 
 use davimci_backend::{
     BackendError, PreviewScale, RenderBackend, RenderJob, RenderProgress, RenderState, SourceInfo,
@@ -60,6 +69,10 @@ struct PreviewShared {
     frames: Mutex<VecDeque<VideoFrame>>,
     width: u32,
     height: u32,
+    /// Whether the listener should image the frames it is shown. False for a
+    /// backwards pass, where the picture comes from [`Preview::scrub`]
+    /// instead and imaging here would decode every frame twice.
+    image: bool,
 }
 
 /// A running preview: an audio consumer plus the listener stealing its video.
@@ -69,6 +82,237 @@ struct Preview {
     shared: Arc<PreviewShared>,
     // Dropped before the consumer, so no callback can fire into freed state.
     _event: EventHandle,
+    scale: PreviewScale,
+    /// Set while the consumer runs backwards. MLT decodes a backwards pass
+    /// one seek per frame and never drops any of it, so the picture falls
+    /// further behind the sound the longer the shuttle runs. Instead the
+    /// consumer plays audio only and the picture is decoded by this worker,
+    /// in runs, at whatever position the clock has reached.
+    scrub: Option<Scrub>,
+}
+
+impl Preview {
+    fn is_reverse(&self) -> bool {
+        self.scrub.is_some()
+    }
+}
+
+/// Backwards preview pictures, decoded off the caller's thread.
+///
+/// Decoding backwards costs a seek and a run of frames, tens of milliseconds
+/// at a time; doing that inline would stall the frontend's event loop for
+/// longer than the frame it is trying to draw. The worker chases the audio
+/// clock instead: it decodes the run leading up to wherever the clock has
+/// reached and skips whatever the clock passed while it was busy, so the
+/// picture tracks the sound rather than falling further behind it.
+#[derive(Debug)]
+struct Scrub {
+    /// The frame the clock is on, written by the caller and read by the
+    /// worker. Negative means "nothing wanted yet".
+    target: Arc<AtomicI64>,
+    stop: Arc<AtomicBool>,
+    worker: Option<JoinHandle<()>>,
+}
+
+/// A graph moved to the worker that will own it from then on.
+struct Handoff(Graph);
+
+// SAFETY: MLT services are owned by one thread at a time, and this is the
+// hand-over: the graph is built on the caller's thread and from the moment it
+// is sent it is touched only by the worker. It is not shared, and the graph
+// the consumer pulls from is a different one.
+unsafe impl Send for Handoff {}
+
+/// Hand `low..=high` from `window` to the preview queue, newest position
+/// first, which is the order a backwards pass presents them in.
+fn push_range(
+    shared: &Arc<PreviewShared>,
+    window: &VecDeque<VideoFrame>,
+    low: i64,
+    high: i64,
+) -> Option<u64> {
+    let mut lowest = None;
+    let Ok(mut q) = shared.frames.lock() else {
+        return lowest;
+    };
+    for p in (low..=high).rev() {
+        #[allow(
+            clippy::cast_sign_loss,
+            reason = "both ends are positions, which are never negative"
+        )]
+        let at = Frame(p.max(0) as u64);
+        if let Some(f) = window.iter().find(|f| f.position == at) {
+            // Full means the pass is queueing pictures faster than they are
+            // being shown, so the one thrown away is the furthest from being
+            // due. Dropping from the front would throw away the picture the
+            // clock is on and leave only frames it has not reached yet.
+            while q.len() >= 16 {
+                q.pop_back();
+            }
+            lowest = Some(f.position.get());
+            q.push_back(f.clone());
+        }
+    }
+    lowest
+}
+
+impl Scrub {
+    fn spawn(graph: Graph, shared: &Arc<PreviewShared>, res: Resolution, run: u64) -> Self {
+        let target = Arc::new(AtomicI64::new(-1));
+        let stop = Arc::new(AtomicBool::new(false));
+        let handoff = Handoff(graph);
+        let (want, halt, out) = (Arc::clone(&target), Arc::clone(&stop), Arc::clone(shared));
+        let worker = std::thread::spawn(move || {
+            // The whole wrapper moves, not its field: the wrapper is what
+            // carries the promise that only this thread will touch it.
+            let handoff = handoff;
+            let mut graph = handoff.0;
+            // Frames already decoded, ascending, covering a window that ends
+            // where the clock is and reaches down to where it is going.
+            let mut window: VecDeque<VideoFrame> = VecDeque::new();
+            let mut served = -1_i64;
+            let run = run.max(1);
+            let gap = i64::try_from(run).unwrap_or(i64::MAX);
+            let keep = usize::try_from(run.saturating_mul(4)).unwrap_or(usize::MAX);
+            // Clock frames that go by per frame decoded, which is the one
+            // measure that says whether a run can keep up at this speed and
+            // how far ahead to aim when it cannot.
+            let mut cost = 1_u64;
+            // The lowest picture handed over so far: a backwards pass only
+            // ever goes down.
+            let mut published: Option<u64> = None;
+            // The consumer reports position zero until it has played its
+            // first frame. Decoding for that would open every backwards
+            // shuttle by flashing the first frame of the timeline.
+            let mut running = false;
+            while !halt.load(Ordering::Relaxed) {
+                let target = want.load(Ordering::Relaxed);
+                if target <= 0 && !running {
+                    std::thread::sleep(Duration::from_millis(2));
+                    continue;
+                }
+                running = true;
+                #[allow(
+                    clippy::cast_sign_loss,
+                    reason = "the sentinel is negative and was returned above"
+                )]
+                let at = Frame(target as u64);
+                let held = window.iter().any(|f| f.position == at);
+                if target != served && held {
+                    // The clock is reported in steps of more than a frame, so
+                    // the frames it passed between two readings are handed
+                    // over too: pacing puts each one up when the sound
+                    // reaches it, which is the difference between a backwards
+                    // pass that moves and one that jerks.
+                    let from = match served {
+                        s if s > target && s - target <= gap => s - 1,
+                        _ => target,
+                    };
+                    served = target;
+                    // A backwards pass only ever goes down, whatever the
+                    // clock says: a picture at or above the last one handed
+                    // over is one pacing would throw away.
+                    let ceiling = published.map_or(i64::MAX, |p| p.cast_signed().saturating_sub(1));
+                    if target <= ceiling {
+                        published =
+                            push_range(&out, &window, target, from.min(ceiling)).or(published);
+                    }
+                }
+
+                let bottom = window.front().map(|f| f.position.get());
+                // Faster than a run can be decoded, the pass stops trying to
+                // show every frame: it decodes one picture at a time, aimed
+                // at where the clock will have got to by the time that
+                // picture is ready. Decoding runs it will never catch up with
+                // is what leaves the preview frozen at speed.
+                let chasing = cost > 1;
+                let plan = if chasing {
+                    // One picture at a time, one decode's worth below the
+                    // clock, and never above the last picture handed over: a
+                    // backwards pass that goes back up is a picture pacing
+                    // throws away.
+                    let ceiling = published.map_or(u64::MAX, |p| p.saturating_sub(1));
+                    let aim = Frame(at.get().saturating_sub(cost).min(ceiling));
+                    (published != Some(0)).then_some((aim, aim))
+                } else if !held {
+                    // Nothing for where the clock is: re-acquire there.
+                    Some((Frame(at.get().saturating_sub(run - 1)), at))
+                } else {
+                    // Decode below the clock so the frames it is about to
+                    // reach are already there when it arrives.
+                    match bottom {
+                        Some(0) => None,
+                        Some(lo) if at.get().saturating_sub(lo) < run => {
+                            Some((Frame(lo.saturating_sub(run)), Frame(lo.saturating_sub(1))))
+                        }
+                        _ => None,
+                    }
+                };
+                let Some((start, end)) = plan else {
+                    std::thread::sleep(Duration::from_millis(2));
+                    continue;
+                };
+
+                let before = want.load(Ordering::Relaxed);
+                let Ok(fresh) = decode_run(&mut graph, start, end, res) else {
+                    // A picture that will not decode leaves the last one up
+                    // rather than ending the shuttle.
+                    std::thread::sleep(Duration::from_millis(2));
+                    continue;
+                };
+                let travel = before
+                    .saturating_sub(want.load(Ordering::Relaxed))
+                    .unsigned_abs();
+                let decoded = end.get().saturating_sub(start.get()).saturating_add(1);
+                cost = travel.div_ceil(decoded.max(1)).max(1);
+                let adjacent = bottom.is_some_and(|lo| end.get().saturating_add(1) == lo);
+                if !adjacent {
+                    window.clear();
+                }
+                for f in fresh.into_iter().rev() {
+                    window.push_front(f);
+                }
+                if chasing {
+                    // The clock has moved on while this was decoding, so it
+                    // will never be asked for by position: hand it over now.
+                    // It is below the clock, which is where pacing expects
+                    // the next backwards picture to be.
+                    served = want.load(Ordering::Relaxed);
+                    let at = end.get().cast_signed();
+                    published = push_range(&out, &window, at, at).or(published);
+                }
+                // Only frames the pass has already gone by are forgotten:
+                // trimming the top would throw away the picture the clock is
+                // about to ask for and put the window straight back into a
+                // miss.
+                while window.len() > keep && window.back().is_some_and(|f| f.position > at) {
+                    window.pop_back();
+                }
+            }
+        });
+        Self {
+            target,
+            stop,
+            worker: Some(worker),
+        }
+    }
+
+    /// Tell the worker which frame the clock is on.
+    fn track(&self, at: Frame) {
+        self.target.store(
+            i64::try_from(at.get()).unwrap_or(i64::MAX),
+            Ordering::Relaxed,
+        );
+    }
+}
+
+impl Drop for Scrub {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(w) = self.worker.take() {
+            let _ = w.join();
+        }
+    }
 }
 
 /// An export in flight.
@@ -546,6 +790,65 @@ fn rational_fps(rate: f64) -> Option<Fps> {
     Fps::new(whole((rate * 1000.0).round()), 1000).ok()
 }
 
+/// Decode `start..=target` from `graph` in one pass.
+///
+/// One seek then sequential decodes: seeking per frame is what makes a
+/// backwards walk cost a whole GOP per picture. A frame short of the target
+/// that will not decode ends the run; only the target itself is an error.
+fn decode_run(
+    graph: &mut Graph,
+    start: Frame,
+    target: Frame,
+    res: Resolution,
+) -> Result<Vec<VideoFrame>> {
+    let count = target.get().saturating_sub(start.get()).saturating_add(1);
+    let mut run = Vec::with_capacity(usize::try_from(count).unwrap_or(0));
+    graph.root.seek(mlt_int(start.get()));
+    for i in 0..count {
+        let at = Frame(start.get().saturating_add(i));
+        let decoded = match graph.root.next_frame() {
+            Ok(mut pulled) => match pulled.rgba(res.width, res.height) {
+                Ok((rgba, width, height)) => VideoFrame {
+                    position: at,
+                    width,
+                    height,
+                    rgba,
+                },
+                // Phase 0: one bad frame degrades to black, it does not end
+                // the session.
+                Err(_) => VideoFrame::black(at, res),
+            },
+            Err(_) if at != target => break,
+            Err(_) => {
+                return Err(BackendError::Seek {
+                    frame: target.get(),
+                });
+            }
+        };
+        run.push(decoded);
+    }
+    Ok(run)
+}
+
+/// Cache a decoded run and hand back the frame that was asked for.
+fn keep_run(
+    cache: &mut FrameCache,
+    decodes: &mut usize,
+    scale: PreviewScale,
+    target: Frame,
+    run: Vec<VideoFrame>,
+) -> Option<VideoFrame> {
+    let mut wanted = None;
+    for decoded in run {
+        *decodes = decodes.saturating_add(1);
+        if decoded.position == target {
+            wanted = Some(decoded.clone());
+        }
+        cache.insert(scale, decoded);
+    }
+    wanted
+}
+
 /// `consumer-frame-show` listener: copies the shown frame's image out.
 ///
 /// Runs on the consumer's own thread, so it catches unwinds: a panic must
@@ -562,6 +865,9 @@ unsafe extern "C" fn on_frame_show(
         // SAFETY: `data` is the `Arc<PreviewShared>` registered alongside this
         // listener, kept alive by `Preview` until the event handle is dropped.
         let shared = unsafe { &*(data as *const PreviewShared) };
+        if !shared.image {
+            return;
+        }
         // SAFETY: the event carries a frame for `consumer-frame-show`.
         let raw = unsafe { sys::mlt_event_data_to_frame(event) };
         if raw.is_null() {
@@ -597,6 +903,105 @@ unsafe extern "C" fn on_frame_show(
             });
         }
     });
+}
+
+impl MltBackend {
+    /// Open the preview consumer at `from`, running at `rate`.
+    ///
+    /// A backwards pass is a different shape of preview, not a property of
+    /// this one: the consumer plays audio only and the picture comes from a
+    /// scrub graph of its own. MLT reads `video_off` once, when the consumer
+    /// thread starts, so changing direction reopens the consumer.
+    fn open_preview(&mut self, from: Frame, scale: PreviewScale, rate: f64) -> Result<()> {
+        let reverse = rate < 0.0;
+        let res = scale.apply(self.props.resolution);
+        self.seek(from)?;
+        // A graph of its own: seeking the one the consumer is pulling from
+        // would move the sound with the picture.
+        let scrub_graph = if reverse {
+            let projection = self.projection.clone().ok_or(BackendError::Projection {
+                reason: "no timeline has been given to the render backend yet".into(),
+            })?;
+            Some(self.build_graph(&projection)?)
+        } else {
+            None
+        };
+        let graph = self.require_graph()?;
+        // Reaching the end of a producer leaves MLT with its speed at zero,
+        // and a seek does not undo that. Without this, the *second* play
+        // after playback once ran off the end reports "playing" and never
+        // advances a frame.
+        graph.root.set_speed(rate);
+        let root = graph.root.clone_ref();
+
+        // Audio-only consumers, in preference order: MLT must never own a
+        // video window here. `sdl2_audio` leads because it is the only one
+        // that honours `scrub_audio`, and so the only one that can be heard
+        // while shuttling.
+        let mut consumer = ["sdl2_audio", "rtaudio", "null"]
+            .iter()
+            .find_map(|s| Consumer::new(&self.profile, s, None).ok())
+            .ok_or(BackendError::Unavailable {
+                reason: "no audio output is available for preview".into(),
+            })?;
+        {
+            let mut props = consumer.properties();
+            props.set_int("real_time", 1)?;
+            let _ = props.set("terminate_on_pause", "0");
+            // Without this the consumer queues audio only at exactly 1x, so
+            // every shuttle - fast, slow or backwards - would be silent. The
+            // consumer reads it once, when it starts, so it is set here
+            // rather than per rate change.
+            let _ = props.set_int("scrub_audio", 1);
+            if reverse {
+                // The consumer plays the sound and keeps the clock; the
+                // picture is decoded from the scrub graph instead. Read once
+                // at start, which is why a change of direction reopens the
+                // consumer rather than setting it live.
+                let _ = props.set_int("video_off", 1);
+            }
+        }
+        let shared = Arc::new(PreviewShared {
+            frames: Mutex::new(VecDeque::new()),
+            width: res.width,
+            height: res.height,
+            image: !reverse,
+        });
+        // SAFETY: the pointer is an `Arc` this struct keeps alive for exactly
+        // as long as the event handle, which is dropped before the consumer.
+        let event = unsafe {
+            consumer.listen_frame_show(Arc::as_ptr(&shared) as *mut c_void, Some(on_frame_show))
+        }?;
+        consumer.connect(&root)?;
+        consumer.start()?;
+        let scrub = scrub_graph.map(|g| Scrub::spawn(g, &shared, res, self.backstep_run));
+        self.preview = Some(Preview {
+            consumer,
+            shared,
+            _event: event,
+            scale,
+            scrub,
+        });
+        Ok(())
+    }
+
+    /// Where the preview has reached, for reopening it in the other
+    /// direction.
+    ///
+    /// The consumer reports zero until it has played its first frame, and a
+    /// reopen that believed it would restart every shuttle at the start of
+    /// the timeline, so before the clock runs the graph's own position is
+    /// the honest answer.
+    fn preview_position(&self) -> Frame {
+        self.audio_clock_position()
+            .filter(|at| *at != Frame::ZERO)
+            .or_else(|| {
+                self.graph
+                    .as_ref()
+                    .map(|g| Frame(frames(g.root.position().max(0))))
+            })
+            .unwrap_or(Frame::ZERO)
+    }
 }
 
 impl RenderBackend for MltBackend {
@@ -712,98 +1117,19 @@ impl RenderBackend for MltBackend {
         };
 
         let res = scale.apply(self.props.resolution);
-        let count = frame.get().saturating_sub(start).saturating_add(1);
-        let mut run: Vec<VideoFrame> = Vec::new();
-        let graph = self.require_graph()?;
-        graph.root.seek(mlt_int(start));
-        for i in 0..count {
-            let at = Frame(start.saturating_add(i));
-            let decoded = match graph.root.next_frame() {
-                Ok(mut pulled) => match pulled.rgba(res.width, res.height) {
-                    Ok((rgba, width, height)) => VideoFrame {
-                        position: at,
-                        width,
-                        height,
-                        rgba,
-                    },
-                    // Phase 0: one bad frame degrades to black, it does not
-                    // end the session.
-                    Err(_) => VideoFrame::black(at, res),
-                },
-                // The run is an optimisation: only failing on the frame that
-                // was actually asked for is an error.
-                Err(_) if at != frame => break,
-                Err(_) => return Err(BackendError::Seek { frame: frame.get() }),
-            };
-            run.push(decoded);
-        }
-
-        let mut wanted: Option<VideoFrame> = None;
-        for decoded in run {
-            self.decodes = self.decodes.saturating_add(1);
-            if decoded.position == frame {
-                wanted = Some(decoded.clone());
-            }
-            self.frames.insert(scale, decoded);
-        }
-        match wanted {
-            Some(f) => Ok(f),
-            None => Err(BackendError::Seek { frame: frame.get() }),
-        }
+        let graph = self.graph.as_mut().ok_or(BackendError::Projection {
+            reason: "no timeline has been given to the render backend yet".into(),
+        })?;
+        let run = decode_run(graph, Frame(start), frame, res)?;
+        keep_run(&mut self.frames, &mut self.decodes, scale, frame, run)
+            .ok_or(BackendError::Seek { frame: frame.get() })
     }
 
     fn preview_start(&mut self, from: Frame, scale: PreviewScale) -> Result<()> {
         if self.preview.is_some() {
             return Err(BackendError::PreviewAlreadyRunning);
         }
-        let res = scale.apply(self.props.resolution);
-        self.seek(from)?;
-        let graph = self.require_graph()?;
-        // Reaching the end of a producer leaves MLT with its speed at zero,
-        // and a seek does not undo that. Without this, the *second* play
-        // after playback once ran off the end reports "playing" and never
-        // advances a frame.
-        graph.root.set_speed(1.0);
-        let root = graph.root.clone_ref();
-
-        // Audio-only consumers, in preference order: MLT must never own a
-        // video window here. `sdl2_audio` leads because it is the only one
-        // that honours `scrub_audio`, and so the only one that can be heard
-        // while shuttling.
-        let mut consumer = ["sdl2_audio", "rtaudio", "null"]
-            .iter()
-            .find_map(|s| Consumer::new(&self.profile, s, None).ok())
-            .ok_or(BackendError::Unavailable {
-                reason: "no audio output is available for preview".into(),
-            })?;
-        {
-            let mut props = consumer.properties();
-            props.set_int("real_time", 1)?;
-            let _ = props.set("terminate_on_pause", "0");
-            // Without this the consumer queues audio only at exactly 1x, so
-            // every shuttle - fast, slow or backwards - would be silent. The
-            // consumer reads it once, when it starts, so it is set here
-            // rather than per rate change.
-            let _ = props.set_int("scrub_audio", 1);
-        }
-        let shared = Arc::new(PreviewShared {
-            frames: Mutex::new(VecDeque::new()),
-            width: res.width,
-            height: res.height,
-        });
-        // SAFETY: the pointer is an `Arc` this struct keeps alive for exactly
-        // as long as the event handle, which is dropped before the consumer.
-        let event = unsafe {
-            consumer.listen_frame_show(Arc::as_ptr(&shared) as *mut c_void, Some(on_frame_show))
-        }?;
-        consumer.connect(&root)?;
-        consumer.start()?;
-        self.preview = Some(Preview {
-            consumer,
-            shared,
-            _event: event,
-        });
-        Ok(())
+        self.open_preview(from, scale, 1.0)
     }
 
     fn preview_stop(&mut self) -> Result<()> {
@@ -834,6 +1160,17 @@ impl RenderBackend for MltBackend {
                 reason: "a playback rate must be a finite number".into(),
             });
         }
+        // Forwards and backwards are two different previews, so crossing
+        // between them reopens the consumer at wherever the clock has
+        // reached rather than changing a property on the running one.
+        if let Some(p) = self.preview.as_ref()
+            && p.is_reverse() != (rate < 0.0)
+        {
+            let scale = p.scale;
+            let at = self.preview_position();
+            self.preview_stop()?;
+            return self.open_preview(at, scale, rate);
+        }
         // Speed lives on the producer, not the consumer: the consumer keeps
         // pulling at wall-clock rate and the producer decides which frame
         // that is, which is what makes the audio clock stay the master.
@@ -846,6 +1183,15 @@ impl RenderBackend for MltBackend {
     }
 
     fn next_preview_frame(&mut self) -> Result<Option<VideoFrame>> {
+        // Backwards, the queue is filled by the scrub worker rather than by
+        // the consumer, and it is told where the clock has reached here -
+        // the one place that is called every tick of the frontend's loop.
+        let clock = self.audio_clock_position();
+        if let (Some(p), Some(at)) = (self.preview.as_ref(), clock)
+            && let Some(scrub) = p.scrub.as_ref()
+        {
+            scrub.track(at);
+        }
         let preview = self
             .preview
             .as_ref()
