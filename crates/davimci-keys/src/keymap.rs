@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use crate::action::{Action, ArgKind, LeafAction, Operator, ZoomIntent};
+use crate::action::{Action, ArgKind, CenterIntent, LeafAction, Operator, ZoomIntent};
 use crate::key::Key;
 use crate::mode::Mode;
 use davimci_motion::{BuiltinMotion, Direction};
@@ -251,6 +251,9 @@ pub fn default_bindings() -> Vec<(Vec<Key>, LeafAction)> {
         (k("zi"), standalone(Action::Zoom(ZoomIntent::In))),
         (k("zo"), standalone(Action::Zoom(ZoomIntent::Out))),
         (k("z0"), standalone(Action::Zoom(ZoomIntent::Reset))),
+        // -- centring --
+        (k("zz"), standalone(Action::Center(CenterIntent::Once))),
+        (k("zZ"), standalone(Action::Center(CenterIntent::Toggle))),
         // -- command mode / escape --
         (k(":"), standalone(Action::EnterCommandMode)),
         (k("<Esc>"), standalone(Action::Escape)),

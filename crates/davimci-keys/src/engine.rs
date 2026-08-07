@@ -18,7 +18,7 @@ use davimci_motion::{
     Scope, TextObject, TimeRange, Zoom,
 };
 
-use crate::action::{Action, Operator, Target, TransportPolicy, ZoomIntent};
+use crate::action::{Action, CenterIntent, Operator, Target, TransportPolicy, ZoomIntent};
 use crate::error::KeysError;
 use crate::key::Key;
 use crate::keymap::Keymap;
@@ -77,6 +77,9 @@ pub enum Outcome {
     /// `zi`/`zo`/`z0`: the host owns the viewport, so zoom is reported
     /// rather than applied. Not an edit and never undoable.
     Zoom(ZoomIntent),
+    /// `zz`/`zZ`: the host owns the viewport, so centring is reported rather
+    /// than applied. Not an edit and never undoable.
+    Center(CenterIntent),
     /// `:` was pressed; the caller now owns command-line input.
     EnterCommandMode,
     /// `i`/`a`/`r`: the caller should open the media picker. The grammar has
@@ -341,6 +344,7 @@ impl Engine {
             Action::PreviewAndReturn => Outcome::Transport(TransportCmd::PreviewAndReturn),
             Action::LoopSelection => Outcome::Transport(TransportCmd::LoopSelection),
             Action::Zoom(intent) => Outcome::Zoom(intent),
+            Action::Center(intent) => Outcome::Center(intent),
             Action::Plugin { id, .. } => Outcome::Plugin(id),
             Action::InterruptTransport => Outcome::Transport(TransportCmd::Interrupt),
             Action::EnterCommandMode => Outcome::Mode(self.mode.enter(Mode::Command)),

@@ -700,3 +700,50 @@ fn unsolicited_text_is_refused() {
     let msg = app.view().message.expect("a message");
     assert_eq!(msg.severity, Severity::Error);
 }
+
+/// Columns and zoom that make one column one frame, so a centred playhead
+/// lands on an exactly predictable column.
+fn centred_app() -> App {
+    let mut app = App::new(Session::new(timeline()));
+    app.resize(Surface {
+        columns: 20,
+        rows: 4,
+        ..Surface::default()
+    });
+    app.set_zoom(davimci_motion::Zoom::MAX);
+    app
+}
+
+#[test]
+fn zz_centres_the_view_without_moving_the_playhead() {
+    let mut app = centred_app();
+    let mut host = NullHost;
+    for k in Key::parse_str("150lzz") {
+        app.key(k, &mut host);
+    }
+    let ph = app.session().timeline().playhead().frame;
+    assert_eq!(ph, Frame(150));
+    assert_eq!(app.viewport().column_of(ph), Some(10));
+    assert!(!app.center_follow());
+}
+
+#[test]
+fn shift_z_keeps_the_playhead_centred_as_it_moves() {
+    let mut app = centred_app();
+    let mut host = NullHost;
+    for k in Key::parse_str("zZ") {
+        app.key(k, &mut host);
+    }
+    assert!(app.center_follow());
+
+    for k in Key::parse_str("150l") {
+        app.key(k, &mut host);
+    }
+    let ph = app.session().timeline().playhead().frame;
+    assert_eq!(app.viewport().column_of(ph), Some(10));
+
+    for k in Key::parse_str("zZ") {
+        app.key(k, &mut host);
+    }
+    assert!(!app.center_follow());
+}

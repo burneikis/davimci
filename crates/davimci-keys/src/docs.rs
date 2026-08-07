@@ -6,7 +6,7 @@
 //! description of each action is an exhaustive match: a new [`LeafAction`]
 //! stops compiling here until it has a sentence.
 
-use crate::action::{Action, ArgKind, LeafAction, Operator, ZoomIntent};
+use crate::action::{Action, ArgKind, CenterIntent, LeafAction, Operator, ZoomIntent};
 use crate::key::{Key, Named};
 use crate::keymap::default_bindings;
 use davimci_motion::{BuiltinMotion, Direction};
@@ -193,6 +193,13 @@ fn standalone(a: &Action) -> (&'static str, String) {
                 ZoomIntent::In => "zoom in one level".into(),
                 ZoomIntent::Out => "zoom out one level".into(),
                 ZoomIntent::Reset => "reset the zoom level".into(),
+            },
+        ),
+        Action::Center(c) => (
+            view,
+            match c {
+                CenterIntent::Once => "centre the view on the playhead".into(),
+                CenterIntent::Toggle => "keep the playhead centred".into(),
             },
         ),
         Action::EnterCommandMode => (view, "open the `:` line".into()),

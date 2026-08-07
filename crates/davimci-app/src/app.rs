@@ -8,7 +8,7 @@
 use davimci_cmd::Session;
 use davimci_core::{ClipId, Frame, Selection, TrackId};
 use davimci_keys::engine::{Outcome, TransportCmd};
-use davimci_keys::{Engine, Key, Keymap, MediaIntent, Mode, ZoomIntent};
+use davimci_keys::{CenterIntent, Engine, Key, Keymap, MediaIntent, Mode, ZoomIntent};
 use davimci_motion::{JumpConfig, TimeRange, Zoom};
 
 use crate::cmdline::{CommandKey, CommandLine, CommandLineEvent};
@@ -251,6 +251,9 @@ pub struct App {
     command_open: bool,
     /// What an `i`/`a`/`r` picker, if one is open, will do with its answer.
     pending_pick: Option<MediaIntent>,
+    /// `zZ`: keep the playhead in the middle column instead of scrolling only
+    /// when it reaches an edge.
+    center_follow: bool,
     /// The subtitle clip a frontend is editing the text of, if any.
     editing_text: Option<ClipId>,
     /// The selection at the moment `:` was pressed, for the `:` line that
@@ -285,6 +288,7 @@ impl App {
             command: CommandLine::new(crate::cmdline::default_vocabulary()),
             command_open: false,
             pending_pick: None,
+            center_follow: false,
             editing_text: None,
             pending_selection: None,
             batching: false,
@@ -381,6 +385,30 @@ impl App {
         self.viewport
             .set_zoom(zoom, ph, self.session.timeline().duration());
         self.engine.set_zoom(zoom);
+    }
+
+    /// Scroll so the playhead sits in the middle column. The playhead itself
+    /// does not move, so this is view state only and never an edit.
+    pub fn center_playhead(&mut self) {
+        let ph = self.session.timeline().playhead().frame;
+        self.viewport
+            .center_on(ph, self.session.timeline().duration());
+    }
+
+    /// Whether the view re-centres on the playhead after every move, rather
+    /// than scrolling only at the edges.
+    #[must_use]
+    pub fn center_follow(&self) -> bool {
+        self.center_follow
+    }
+
+    /// Turn permanent centring on or off. Turning it on centres immediately,
+    /// so the setting and the view never disagree.
+    pub fn set_center_follow(&mut self, on: bool) {
+        self.center_follow = on;
+        if on {
+            self.center_playhead();
+        }
     }
 
     pub fn scroll_columns(&mut self, delta: i64) {
@@ -744,6 +772,18 @@ impl App {
                 ZoomIntent::Out => self.zoom_out(),
                 ZoomIntent::Reset => self.set_zoom(Zoom::default()),
             },
+            Outcome::Center(intent) => match intent {
+                CenterIntent::Once => self.center_playhead(),
+                CenterIntent::Toggle => {
+                    let on = !self.center_follow;
+                    self.set_center_follow(on);
+                    self.say(if on {
+                        "playhead centred".to_string()
+                    } else {
+                        "playhead centring off".to_string()
+                    });
+                }
+            },
             Outcome::PickMedia(intent) => {
                 self.pending_pick = Some(intent);
                 self.follow();
@@ -969,7 +1009,11 @@ impl App {
             .position(|t| t.id == ph.track)
             .unwrap_or(0);
         let count = tl.tracks().len();
-        self.viewport.follow_playhead(ph.frame, duration);
+        if self.center_follow {
+            self.viewport.center_on(ph.frame, duration);
+        } else {
+            self.viewport.follow_playhead(ph.frame, duration);
+        }
         self.viewport.follow_track(index, count);
     }
 

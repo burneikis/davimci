@@ -101,6 +101,8 @@ Counts, registers, marks and text objects are grammar, not bindings:
 | `z0` | reset the zoom level |
 | `zi` | zoom in one level |
 | `zo` | zoom out one level |
+| `zz` | centre the view on the playhead |
+| `zZ` | keep the playhead centred |
 | `<Esc>` | leave the current mode |
 
 ## Visual mode

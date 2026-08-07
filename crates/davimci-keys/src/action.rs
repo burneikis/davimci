@@ -103,6 +103,16 @@ pub enum ZoomIntent {
     Reset,
 }
 
+/// A request to centre the view on the playhead. The playhead does not move;
+/// only the scroll position does, so this never reaches the undo log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CenterIntent {
+    /// `zz`: centre once, leaving scroll-follow as it was.
+    Once,
+    /// `zZ`: turn permanent centring on or off.
+    Toggle,
+}
+
 /// What an action does to a running preview.
 ///
 /// Playback owns the playhead while it runs, so an action that reads or
@@ -221,6 +231,8 @@ pub enum Action {
     LoopSelection,
     /// `zi` / `zo` / `z0`: change the zoom level.
     Zoom(ZoomIntent),
+    /// `zz` / `zZ`: centre the view on the playhead.
+    Center(CenterIntent),
     /// A host-owned callback, bound by a Lua `map(mode, lhs, function)`
     ///. The id is opaque here on purpose: `davimci-keys` must not
     /// depend on `davimci-lua`, so the engine reports it back and the host
@@ -280,6 +292,7 @@ impl Action {
             | Self::PreviewAndReturn
             | Self::LoopSelection
             | Self::Zoom(_)
+            | Self::Center(_)
             | Self::SetMark(_)
             | Self::MacroStart(_)
             | Self::MacroStop

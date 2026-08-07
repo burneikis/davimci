@@ -175,6 +175,17 @@ impl Viewport {
         self.clamp(frame, duration);
     }
 
+    /// Scroll so `frame` sits in the middle column, without moving the
+    /// playhead itself. Near the timeline start the view stays pinned at
+    /// zero, since there are no frames before it to scroll in.
+    pub fn center_on(&mut self, frame: Frame, duration: Frame) {
+        let fpc = self.frames_per_column();
+        let half = Frame(fpc.saturating_mul(u64::from(self.columns() / 2)));
+        let want = frame.saturating_sub(half);
+        self.start = Frame(want.get() / fpc * fpc);
+        self.clamp(frame, duration);
+    }
+
     /// Scroll vertically so `index` is visible.
     pub fn follow_track(&mut self, index: usize, track_count: usize) {
         let rows = self.rows();
@@ -323,6 +334,31 @@ mod tests {
         assert_eq!(v.column_of(Frame(4_000)), Some(before));
         v.zoom_out(Frame(4_000), Frame(100_000));
         assert_eq!(v.column_of(Frame(4_000)), Some(before));
+    }
+
+    #[test]
+    fn center_puts_the_playhead_in_the_middle_column() {
+        let mut v = vp();
+        v.center_on(Frame(5_000), Frame(10_000));
+        assert_eq!(v.column_of(Frame(5_000)), Some(50));
+    }
+
+    #[test]
+    fn center_near_the_start_pins_to_zero_and_keeps_the_playhead_visible() {
+        let mut v = vp();
+        v.center_on(Frame(5_000), Frame(10_000));
+        v.center_on(Frame(3), Frame(10_000));
+        assert_eq!(v.start(), Frame::ZERO);
+        assert!(v.contains(Frame(3)));
+    }
+
+    #[test]
+    fn center_is_idempotent() {
+        let mut v = vp();
+        v.center_on(Frame(5_000), Frame(10_000));
+        let once = v;
+        v.center_on(Frame(5_000), Frame(10_000));
+        assert_eq!(v, once);
     }
 
     #[test]
