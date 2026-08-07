@@ -367,6 +367,41 @@ impl MltBackend {
         self.graph.as_ref().map(|g| g.root.speed())
     }
 
+    /// Serve one still from the cache, or decode it.
+    ///
+    /// Decoding backwards one frame at a time is the pathological case: a
+    /// seek to `n - 1` discards the decoder state and re-decodes from the
+    /// preceding keyframe, so each step costs a whole GOP. When the request
+    /// is a step backwards, decode the run *leading up to* the target
+    /// instead - one seek, then sequential decodes - so the steps that follow
+    /// are cache hits.
+    fn pull(
+        &mut self,
+        frame: Frame,
+        scale: PreviewScale,
+        stepping_back: bool,
+    ) -> Result<VideoFrame> {
+        if let Some(hit) = self.frames.get(frame, scale) {
+            self.cache_hits = self.cache_hits.saturating_add(1);
+            return Ok(hit.clone());
+        }
+        let start = if stepping_back {
+            frame
+                .get()
+                .saturating_sub(self.backstep_run.saturating_sub(1))
+        } else {
+            frame.get()
+        };
+
+        let res = scale.apply(self.props.resolution);
+        let graph = self.graph.as_mut().ok_or(BackendError::Projection {
+            reason: "no timeline has been given to the render backend yet".into(),
+        })?;
+        let run = decode_run(graph, Frame(start), frame, res)?;
+        keep_run(&mut self.frames, &mut self.decodes, scale, frame, run)
+            .ok_or(BackendError::Seek { frame: frame.get() })
+    }
+
     /// Create a backend for a timeline's profile.
     pub fn new(props: TimelineProps) -> Result<Self> {
         let profile = Profile::new(
@@ -1096,33 +1131,15 @@ impl RenderBackend for MltBackend {
 
     fn frame_at(&mut self, frame: Frame, scale: PreviewScale) -> Result<VideoFrame> {
         let previous = self.last_request.replace(frame);
-        if let Some(hit) = self.frames.get(frame, scale) {
-            self.cache_hits = self.cache_hits.saturating_add(1);
-            return Ok(hit.clone());
-        }
-
-        // Decoding backwards one frame at a time is the pathological case: a
-        // seek to `n - 1` discards the decoder state and re-decodes from the
-        // preceding keyframe, so each step costs a whole GOP. When the
-        // request is a step backwards, decode the run *leading up to* the
-        // target instead - one seek, then sequential decodes - so the steps
-        // that follow are cache hits.
         let stepping_back = previous.is_some_and(|p| p > frame);
-        let start = if stepping_back {
-            frame
-                .get()
-                .saturating_sub(self.backstep_run.saturating_sub(1))
-        } else {
-            frame.get()
-        };
+        self.pull(frame, scale, stepping_back)
+    }
 
-        let res = scale.apply(self.props.resolution);
-        let graph = self.graph.as_mut().ok_or(BackendError::Projection {
-            reason: "no timeline has been given to the render backend yet".into(),
-        })?;
-        let run = decode_run(graph, Frame(start), frame, res)?;
-        keep_run(&mut self.frames, &mut self.decodes, scale, frame, run)
-            .ok_or(BackendError::Seek { frame: frame.get() })
+    /// A thumbnail leaves `last_request` alone: it is not the user moving,
+    /// and letting it stand in for the playhead makes the next genuine
+    /// backward step look like a forward one, which costs a GOP per frame.
+    fn thumbnail_at(&mut self, frame: Frame, scale: PreviewScale) -> Result<VideoFrame> {
+        self.pull(frame, scale, false)
     }
 
     fn preview_start(&mut self, from: Frame, scale: PreviewScale) -> Result<()> {

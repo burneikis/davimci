@@ -171,6 +171,52 @@ fn stepping_backwards_decodes_each_frame_once_and_is_exact() {
     );
 }
 
+/// Regression: a quarter-scale thumbnail pulled between two preview steps
+/// used to clear the frame cache and stand in for the playhead, so the next
+/// backward step both missed and was taken for a forward one - a GOP per
+/// frame, with the picture hitching whenever a strip was filling in.
+#[test]
+fn a_thumbnail_between_steps_costs_neither_the_cache_nor_the_backstep() {
+    let _mlt = davimci_mlt::test_support::media_lock();
+    let res = Resolution {
+        width: 640,
+        height: 480,
+    };
+    let tl = timeline_of("scene_cut.mkv", 240, res);
+    let mut b = MltBackend::new(tl.props).unwrap();
+    b.set_timeline(&tl).unwrap();
+
+    let start = 130u64;
+    b.frame_at(Frame(start), PreviewScale::Half).unwrap();
+    // The first backward step decodes the run leading up to it.
+    b.frame_at(Frame(start - 1), PreviewScale::Half).unwrap();
+    let baseline = b.decodes;
+
+    // A thumbnail far away, at the scale the timeline strips use.
+    b.thumbnail_at(Frame(0), PreviewScale::Quarter).unwrap();
+    let hits = b.cache_hits;
+
+    // The run is still there, and the step after it is still a backward one.
+    b.frame_at(Frame(start - 2), PreviewScale::Half).unwrap();
+    assert_eq!(
+        b.cache_hits,
+        hits + 1,
+        "the thumbnail evicted the preview run"
+    );
+
+    // Walk off the bottom of the run: one run, not one GOP per frame.
+    let steps = 24u64;
+    for n in (start - steps..start - 2).rev() {
+        let f = b.frame_at(Frame(n), PreviewScale::Half).unwrap();
+        assert_eq!(f.position, Frame(n));
+    }
+    let decoded = b.decodes - baseline;
+    assert!(
+        decoded <= steps as usize + 2 * b.backstep_run as usize,
+        "{steps} steps around a thumbnail decoded {decoded} frames"
+    );
+}
+
 /// A cached still of an edited timeline is a picture of a timeline that no
 /// longer exists, so any graph change must throw the cache away.
 #[test]

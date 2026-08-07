@@ -1,5 +1,4 @@
 # Human
-- figure out how davinci resolve can cleanly step framewise backwards
 - allow plugins that render smth / a window. e.g. something like which-key
 - plugin support for gui/tui sub-windows
 - command to center the playhead, moving the timeline scroll to center the playhead in the timeline view (user may want to have this on all the time, or bind it, or hook pause/playing states/transitions)
@@ -22,6 +21,11 @@
 - `an_exported_file_has_the_duration_of_the_timeline` fails on a 5s timeline:
   the file comes out 5.088s. Pre-dates the hardening pass; the export writes
   a few frames more than the timeline holds
+
+- the first backward step of every run decodes `backstep_run` frames inline in
+  `show_playhead`, so held-down `h` hitches once every `backstep_run` frames;
+  the run wants prefetching onto a worker like `Scrub`, which needs a second
+  graph while the transport is idle
 
 # AI - deferred (not v1)
 - GPU/hardware acceleration (decode, planar upload, zero-copy import, hardware

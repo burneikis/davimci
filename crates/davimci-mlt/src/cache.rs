@@ -15,6 +15,11 @@
 //! a count-based bound would mean either wasted memory or a useless cache
 //! depending on which. Eviction is oldest-first: the run just decoded is the
 //! run about to be walked, so it must be the last thing thrown away.
+//!
+//! Entries carry the scale they were decoded at, because thumbnails are
+//! pulled at quarter scale between preview steps: a cache that held one scale
+//! would throw the backstep run away every time a strip filled in, and the
+//! next backward step would pay a whole GOP.
 
 use std::collections::VecDeque;
 
@@ -28,13 +33,9 @@ pub(crate) const DEFAULT_BUDGET_BYTES: usize = 96 * 1024 * 1024;
 #[derive(Debug)]
 pub(crate) struct FrameCache {
     /// Oldest first, so eviction is a `pop_front`.
-    entries: VecDeque<VideoFrame>,
+    entries: VecDeque<(PreviewScale, VideoFrame)>,
     bytes: usize,
     budget: usize,
-    /// The scale everything held was decoded at. Frames at two scales are not
-    /// interchangeable, and mixing them in one map would mean a lookup could
-    /// return a picture of the wrong size.
-    scale: PreviewScale,
 }
 
 impl Default for FrameCache {
@@ -49,7 +50,6 @@ impl FrameCache {
             entries: VecDeque::new(),
             bytes: 0,
             budget,
-            scale: PreviewScale::Full,
         }
     }
 
@@ -65,21 +65,18 @@ impl FrameCache {
         self.entries.len()
     }
 
-    /// The cached frame at `at`, if it was decoded at `scale`.
+    /// The cached frame at `at`, if one was decoded at `scale`.
     pub(crate) fn get(&self, at: Frame, scale: PreviewScale) -> Option<&VideoFrame> {
-        if scale != self.scale {
-            return None;
-        }
-        self.entries.iter().find(|f| f.position == at)
+        self.entries
+            .iter()
+            .find(|(s, f)| *s == scale && f.position == at)
+            .map(|(_, f)| f)
     }
 
-    /// Take ownership of a decoded frame. A different scale invalidates
-    /// everything held, rather than being stored alongside it.
+    /// Take ownership of a decoded frame. Frames at two scales are not
+    /// interchangeable, so the scale is part of the key rather than a reason
+    /// to discard everything held at another one.
     pub(crate) fn insert(&mut self, scale: PreviewScale, frame: VideoFrame) {
-        if scale != self.scale {
-            self.clear();
-            self.scale = scale;
-        }
         if self.get(frame.position, scale).is_some() {
             return;
         }
@@ -90,10 +87,10 @@ impl FrameCache {
             return;
         }
         self.bytes = self.bytes.saturating_add(size);
-        self.entries.push_back(frame);
+        self.entries.push_back((scale, frame));
         while self.bytes > self.budget {
             match self.entries.pop_front() {
-                Some(old) => self.bytes = self.bytes.saturating_sub(old.rgba.len()),
+                Some((_, old)) => self.bytes = self.bytes.saturating_sub(old.rgba.len()),
                 None => break,
             }
         }
@@ -133,12 +130,29 @@ mod tests {
     }
 
     #[test]
-    fn changing_scale_invalidates_rather_than_mixing_sizes() {
+    fn two_scales_are_held_apart_rather_than_mixed_or_discarded() {
         let mut c = FrameCache::default();
         c.insert(PreviewScale::Full, frame(1));
         c.insert(PreviewScale::Half, frame(2));
         assert!(c.get(Frame(1), PreviewScale::Half).is_none());
-        assert_eq!(c.len(), 1);
+        assert!(c.get(Frame(2), PreviewScale::Full).is_none());
+        assert!(c.get(Frame(1), PreviewScale::Full).is_some());
+        assert!(c.get(Frame(2), PreviewScale::Half).is_some());
+        assert_eq!(c.len(), 2);
+    }
+
+    /// Regression: a quarter-scale thumbnail pull between two preview steps
+    /// used to clear the cache, so the next backward step paid a whole GOP.
+    #[test]
+    fn a_thumbnail_pull_does_not_evict_the_preview_run() {
+        let mut c = FrameCache::default();
+        for i in 0..12 {
+            c.insert(PreviewScale::Full, frame(i));
+        }
+        c.insert(PreviewScale::Quarter, frame(400));
+        for i in 0..12 {
+            assert!(c.get(Frame(i), PreviewScale::Full).is_some(), "lost {i}");
+        }
     }
 
     #[test]

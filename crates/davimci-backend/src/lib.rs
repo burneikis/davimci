@@ -65,6 +65,17 @@ pub trait RenderBackend {
     /// Pull one frame at an explicit position, for scrubbing and tests.
     fn frame_at(&mut self, frame: Frame, scale: PreviewScale) -> Result<VideoFrame>;
 
+    /// Pull one frame for something other than the playhead - a timeline
+    /// thumbnail, say.
+    ///
+    /// Distinct from [`RenderBackend::frame_at`] because a backend may read
+    /// the sequence of playhead requests to tell a backward step from a
+    /// forward one, and an interleaved thumbnail must not be mistaken for the
+    /// user moving.
+    fn thumbnail_at(&mut self, frame: Frame, scale: PreviewScale) -> Result<VideoFrame> {
+        self.frame_at(frame, scale)
+    }
+
     /// Start realtime playback from `from`, with audio going to the system
     /// output. Video is *not* displayed by the backend.
     fn preview_start(&mut self, from: Frame, scale: PreviewScale) -> Result<()>;

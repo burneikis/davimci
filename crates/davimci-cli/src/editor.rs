@@ -674,7 +674,7 @@ impl Editor {
         let decoded = self
             .backend
             .seek(req.at)
-            .and_then(|()| self.backend.frame_at(req.at, PreviewScale::Quarter));
+            .and_then(|()| self.backend.thumbnail_at(req.at, PreviewScale::Quarter));
         // A thumbnail that cannot be decoded leaves the clip drawn plain
         // rather than putting an error in the status line: the media may be
         // offline, which the clip's own colour already says.
@@ -685,7 +685,8 @@ impl Editor {
         // Put the decoder back where the user left it. A seek, not a
         // repaint: the composed preview frame is cached and a thumbnail pull
         // never touched it, so recomposing here would decode the playhead's
-        // frame again on every tick a strip is filling in.
+        // frame again on every tick a strip is filling in. The frame cache
+        // keeps scales apart, so the preview run this walked over survives.
         let _ = self.backend.seek(session.timeline().playhead().frame);
     }
 
