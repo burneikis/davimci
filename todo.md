@@ -1,6 +1,6 @@
 # Human
-- group clips dont need to render differently, maybe just darken slightly, so we can still distinguish video/audio clips
-- better visual mode selection visibility, clarify how bisual mode works, is it a frame selection, track selection, clip selection
+- better visual mode selection visibility, clarify how visual mode works, is it a frame selection, track selection, clip selection
+- visual mode should not select the whole clip by default, it should be the frame under cursor, or maybe the current jump point, that way visual line mode is actually different
 - should we not be able to do visual mode up and down with j/k
 - allow plugins that render smth / a window. e.g. something like which-key
 - plugin support for gui/tui sub-windows

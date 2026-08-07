@@ -41,7 +41,7 @@ pub fn fill_color(fill: Fill) -> Color32 {
         Fill::Clip => Color32::from_rgb(70, 110, 160),
         Fill::ClipSelected => Color32::from_rgb(120, 170, 230),
         Fill::ClipOffline => Color32::from_rgb(150, 60, 60),
-        Fill::ClipGrouped => Color32::from_rgb(52, 82, 120),
+        Fill::ClipGrouped => Color32::from_rgb(56, 88, 128),
         Fill::Waveform => Color32::from_rgb(150, 200, 180),
         Fill::Selection => Color32::from_rgba_unmultiplied(120, 170, 230, 60),
         Fill::Playhead => Color32::from_rgb(240, 220, 90),
@@ -366,7 +366,17 @@ mod tests {
         // fill has to stay a darker version of the plain one.
         let (plain, grouped) = (fill_color(Fill::Clip), fill_color(Fill::ClipGrouped));
         assert_ne!(plain, grouped);
-        assert!(grouped.r() < plain.r() && grouped.g() < plain.g() && grouped.b() < plain.b());
+        // Darker on every channel, but not so dark it reads as a hole in the
+        // lane: between half and four-fifths of the plain clip's brightness.
+        for (g, p) in [
+            (grouped.r(), plain.r()),
+            (grouped.g(), plain.g()),
+            (grouped.b(), plain.b()),
+        ] {
+            let (g, p) = (u32::from(g), u32::from(p));
+            assert!(g * 10 <= p * 9, "grouping must read as darker");
+            assert!(g * 2 >= p, "grouping must not read as a hole");
+        }
 
         for role in [
             TextRole::Status,
