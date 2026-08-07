@@ -396,7 +396,7 @@ fn paint_clip(d: &mut DrawList, layout: &Layout, clip: &davimci_app::ClipView, y
     } else if clip.selected {
         Fill::ClipSelected
     } else if clip.linked {
-        Fill::ClipLinked
+        Fill::ClipGrouped
     } else {
         Fill::Clip
     };

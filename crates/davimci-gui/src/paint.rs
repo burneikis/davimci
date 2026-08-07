@@ -48,7 +48,9 @@ pub enum Fill {
     Clip,
     ClipSelected,
     ClipOffline,
-    ClipLinked,
+    /// A clip in a link group: the clip colour, a shade darker, so grouping
+    /// reads without taking the colour that says what the clip is.
+    ClipGrouped,
     Selection,
     /// One column of an audio lane's envelope.
     Waveform,

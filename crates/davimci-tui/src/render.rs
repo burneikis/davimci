@@ -224,15 +224,20 @@ fn lane(view: &ViewState, track: &davimci_app::TrackView, columns: u16) -> Line<
     Line::from(spans)
 }
 
+/// Grouping is a shade, not a colour: a clip's colour says whether it is
+/// video or audio, and a group holds one of each.
 fn clip_style(track: &davimci_app::TrackView, clip: &davimci_app::ClipView) -> Style {
     let base = if clip.offline {
         Style::default().fg(Color::Red)
-    } else if clip.linked {
-        Style::default().fg(Color::Magenta)
     } else if track.kind == TrackKind::Audio {
         Style::default().fg(Color::Green)
     } else {
         Style::default().fg(Color::Cyan)
+    };
+    let base = if clip.linked && !clip.offline {
+        base.dim()
+    } else {
+        base
     };
     if clip.selected { base.reversed() } else { base }
 }
@@ -431,6 +436,63 @@ pub fn plain(lines: &[Line<'_>]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn clip_view(linked: bool, offline: bool) -> davimci_app::ClipView {
+        davimci_app::ClipView {
+            id: davimci_core::ClipId(1),
+            label: "a".into(),
+            start: davimci_core::Frame(0),
+            end: davimci_core::Frame(100),
+            columns: (0, 9),
+            selected: false,
+            offline,
+            linked,
+            thumbnails: Vec::new(),
+        }
+    }
+
+    fn track_view(kind: TrackKind) -> davimci_app::TrackView {
+        davimci_app::TrackView {
+            index: 0,
+            id: davimci_core::TrackId(1),
+            name: "V1".into(),
+            kind,
+            muted: false,
+            solo: false,
+            locked: false,
+            focused: false,
+            silenced_by_solo: false,
+            clips: Vec::new(),
+            waveform: Vec::new(),
+        }
+    }
+
+    /// Grouping dims a clip; it never repaints it, because the colour is how
+    /// video is told from audio.
+    #[test]
+    fn a_grouped_clip_keeps_the_colour_of_its_kind() {
+        for (kind, colour) in [
+            (TrackKind::Video, Color::Cyan),
+            (TrackKind::Audio, Color::Green),
+        ] {
+            let track = track_view(kind);
+            let plain = clip_style(&track, &clip_view(false, false));
+            let grouped = clip_style(&track, &clip_view(true, false));
+            assert_eq!(plain.fg, Some(colour));
+            assert_eq!(grouped.fg, Some(colour), "grouping is a shade, not a hue");
+            assert_ne!(plain, grouped, "a grouped clip still reads as grouped");
+        }
+    }
+
+    /// Offline media is the one thing louder than grouping: an offline clip
+    /// blocks export, and a dimmed red would understate that.
+    #[test]
+    fn offline_beats_grouped() {
+        let track = track_view(TrackKind::Video);
+        let offline = clip_style(&track, &clip_view(true, true));
+        assert_eq!(offline.fg, Some(Color::Red));
+        assert_eq!(offline, clip_style(&track, &clip_view(false, true)));
+    }
 
     #[test]
     fn the_surface_gives_the_command_line_its_rows_back() {

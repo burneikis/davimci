@@ -41,7 +41,7 @@ pub fn fill_color(fill: Fill) -> Color32 {
         Fill::Clip => Color32::from_rgb(70, 110, 160),
         Fill::ClipSelected => Color32::from_rgb(120, 170, 230),
         Fill::ClipOffline => Color32::from_rgb(150, 60, 60),
-        Fill::ClipLinked => Color32::from_rgb(90, 140, 120),
+        Fill::ClipGrouped => Color32::from_rgb(52, 82, 120),
         Fill::Waveform => Color32::from_rgb(150, 200, 180),
         Fill::Selection => Color32::from_rgba_unmultiplied(120, 170, 230, 60),
         Fill::Playhead => Color32::from_rgb(240, 220, 90),
@@ -356,11 +356,18 @@ mod tests {
             Fill::Background,
             Fill::Clip,
             Fill::ClipSelected,
+            Fill::ClipGrouped,
             Fill::Playhead,
             Fill::Video,
         ] {
             let _ = fill_color(fill);
         }
+        // Grouping shades a clip rather than recolouring it, so the grouped
+        // fill has to stay a darker version of the plain one.
+        let (plain, grouped) = (fill_color(Fill::Clip), fill_color(Fill::ClipGrouped));
+        assert_ne!(plain, grouped);
+        assert!(grouped.r() < plain.r() && grouped.g() < plain.g() && grouped.b() < plain.b());
+
         for role in [
             TextRole::Status,
             TextRole::ClipLabel,
