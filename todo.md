@@ -1,5 +1,4 @@
 # Human
-- command to center the playhead (without moving it within the timeline), moving the timeline scroll to center the playhead in the timeline view (user may want to have this on all the time, or bind it, or hook pause/playing states/transitions)
 - clip grouping, imported clip video/audio should be grouped together until un-grouped, meaning splitting the clip for example should split both the video and audio, and moving one should move the other, etc
 - allow plugins that render smth / a window. e.g. something like which-key
 - plugin support for gui/tui sub-windows
