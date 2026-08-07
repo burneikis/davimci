@@ -1,8 +1,5 @@
 # Human
-- `just test-slow` aborts when its cases run in parallel (ffmpeg's
-  `fctx->async_lock` assertion); passes with `--test-threads=1`
 - figure out how davinci resolve can cleanly step framewise backwards
-- figure out whats causing playback to break after doing a few seeks, or shuttles to the end or fast backwards etc
 - allow plugins that render smth / a window. e.g. something like which-key
 - plugin support for gui/tui sub-windows
 - command to center the playhead, moving the timeline scroll to center the playhead in the timeline view (user may want to have this on all the time, or bind it, or hook pause/playing states/transitions)

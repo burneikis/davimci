@@ -67,6 +67,7 @@ fn dominant(f: &VideoFrame) -> usize {
 /// the colour *is* the frame number's signature - no OCR needed.
 #[test]
 fn seek_lands_on_the_exact_frame() {
+    let _mlt = davimci_mlt::test_support::media_lock();
     let res = Resolution {
         width: 640,
         height: 480,
@@ -87,6 +88,7 @@ fn seek_lands_on_the_exact_frame() {
 
 #[test]
 fn a_quarter_res_pull_is_the_same_frame_scaled() {
+    let _mlt = davimci_mlt::test_support::media_lock();
     let res = Resolution {
         width: 640,
         height: 480,
@@ -108,6 +110,7 @@ fn a_quarter_res_pull_is_the_same_frame_scaled() {
 
 #[test]
 fn consecutive_pulls_are_monotonic_and_never_duplicate() {
+    let _mlt = davimci_mlt::test_support::media_lock();
     let res = Resolution {
         width: 640,
         height: 480,
@@ -132,6 +135,7 @@ fn consecutive_pulls_are_monotonic_and_never_duplicate() {
 /// frame. The run-ahead makes it one decode per frame, exactly as forwards.
 #[test]
 fn stepping_backwards_decodes_each_frame_once_and_is_exact() {
+    let _mlt = davimci_mlt::test_support::media_lock();
     let res = Resolution {
         width: 640,
         height: 480,
@@ -171,6 +175,7 @@ fn stepping_backwards_decodes_each_frame_once_and_is_exact() {
 /// longer exists, so any graph change must throw the cache away.
 #[test]
 fn editing_the_timeline_invalidates_cached_stills() {
+    let _mlt = davimci_mlt::test_support::media_lock();
     let res = Resolution {
         width: 640,
         height: 480,
@@ -197,6 +202,7 @@ fn editing_the_timeline_invalidates_cached_stills() {
 
 #[test]
 fn probe_reports_the_stream_graph_of_a_multitrack_mkv() {
+    let _mlt = davimci_mlt::test_support::media_lock();
     let mut b = MltBackend::new(TimelineProps::default()).unwrap();
     let info = b.probe(&fixtures().join("multitrack.mkv")).unwrap();
     assert!(info.has_video);
@@ -213,6 +219,7 @@ fn probe_reports_the_stream_graph_of_a_multitrack_mkv() {
 
 #[test]
 fn preview_pulls_frames_and_advances_the_clock() {
+    let _mlt = davimci_mlt::test_support::media_lock();
     let res = Resolution {
         width: 640,
         height: 480,
@@ -250,6 +257,7 @@ fn preview_pulls_frames_and_advances_the_clock() {
 /// the pictures have to arrive descending with it.
 #[test]
 fn a_backwards_shuttle_keeps_up_with_its_own_clock() {
+    let _mlt = davimci_mlt::test_support::media_lock();
     let res = Resolution {
         width: 640,
         height: 480,
@@ -283,6 +291,7 @@ fn a_backwards_shuttle_keeps_up_with_its_own_clock() {
 /// froze outright. Skipping frames is fine; showing none is not.
 #[test]
 fn a_fast_backwards_shuttle_keeps_showing_pictures() {
+    let _mlt = davimci_mlt::test_support::media_lock();
     let res = Resolution {
         width: 640,
         height: 480,
@@ -337,6 +346,7 @@ fn drain_backwards(b: &mut MltBackend, window: Duration) -> (Vec<Frame>, u64) {
 
 #[test]
 fn a_render_produces_a_file_with_the_requested_streams() {
+    let _mlt = davimci_mlt::test_support::media_lock();
     let res = Resolution {
         width: 320,
         height: 240,
@@ -391,6 +401,7 @@ fn a_render_produces_a_file_with_the_requested_streams() {
 
 #[test]
 fn a_cancelled_render_stops_reporting_progress() {
+    let _mlt = davimci_mlt::test_support::media_lock();
     let res = Resolution {
         width: 320,
         height: 240,
@@ -410,6 +421,7 @@ fn a_cancelled_render_stops_reporting_progress() {
 
 #[test]
 fn an_unknown_clip_id_never_reaches_the_graph() {
+    let _mlt = davimci_mlt::test_support::media_lock();
     // Guard against a projection that silently drops clips: every clip in the
     // timeline must appear in the XML the graph was built from.
     let res = Resolution {

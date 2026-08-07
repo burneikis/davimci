@@ -25,6 +25,8 @@ pub mod error;
 pub mod ffi;
 pub mod patch;
 pub mod projection;
+#[cfg(feature = "slow-tests")]
+pub mod test_support;
 pub mod transitions;
 pub mod xml;
 

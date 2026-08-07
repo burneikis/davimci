@@ -91,6 +91,7 @@ fn drain_export(app: &mut App, editor: &mut Editor) {
 
 #[test]
 fn the_whole_spec_one_workflow_survives_a_real_import_and_export() {
+    let _mlt = davimci_mlt::test_support::media_lock();
     let src = fixture("multitrack.mkv");
     let audio_streams = stream_count(&src, "a");
     assert!(audio_streams >= 2, "the fixture should be multi-track");

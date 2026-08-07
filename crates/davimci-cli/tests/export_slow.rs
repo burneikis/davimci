@@ -93,6 +93,7 @@ fn drain_export(app: &mut App, editor: &mut Editor) {
 /// one stream no matter what the consumer was told.
 #[test]
 fn exporting_a_multi_audio_mkv_keeps_every_audio_track_separate() {
+    let _mlt = davimci_mlt::test_support::media_lock();
     let src = fixture("multitrack.mkv");
     let want_audio = stream_count(&src, "a");
     assert!(
@@ -176,6 +177,7 @@ fn dominant_hz(path: &Path, stream: usize) -> f64 {
 
 #[test]
 fn a_preset_decides_the_container_and_codec_of_the_file() {
+    let _mlt = davimci_mlt::test_support::media_lock();
     let src = fixture("counter_720p.mkv");
     let (mut app, mut editor) = editor_with(&src);
     let out = std::env::temp_dir().join("davimci-slow-preset.mp4");
@@ -206,6 +208,7 @@ fn a_preset_decides_the_container_and_codec_of_the_file() {
 
 #[test]
 fn an_exported_file_has_the_duration_of_the_timeline() {
+    let _mlt = davimci_mlt::test_support::media_lock();
     let src = fixture("counter_720p.mkv");
     let (mut app, mut editor) = editor_with(&src);
     let frames = app.session().timeline().duration();
@@ -219,24 +222,35 @@ fn an_exported_file_has_the_duration_of_the_timeline() {
     );
     drain_export(&mut app, &mut editor);
 
-    let secs: f64 = probe(
+    // Counted frames, not `format=duration`: the container's duration is the
+    // longest stream's, and the audio encoder pads its last packet to a full
+    // frame, so a correct export reads several milliseconds long there.
+    let coded: u64 = probe(
         &out,
-        &["-show_entries", "format=duration", "-of", "csv=p=0"],
+        &[
+            "-select_streams",
+            "v:0",
+            "-count_frames",
+            "-show_entries",
+            "stream=nb_read_frames",
+            "-of",
+            "csv=p=0",
+        ],
     )
     .parse()
-    .expect("ffprobe should report a duration");
-    let want = frames.get() as f64 * f64::from(fps.den) / f64::from(fps.num);
-    // One frame of slack: containers round durations, timelines do not.
-    let slack = 1.0 * f64::from(fps.den) / f64::from(fps.num);
-    assert!(
-        (secs - want).abs() <= slack + 0.05,
-        "exported {secs}s but the timeline is {want}s"
+    .expect("ffprobe should count the video frames");
+    assert_eq!(
+        coded,
+        frames.get(),
+        "the export has {coded} frames but the timeline is {} at {fps:?}",
+        frames.get()
     );
     let _ = std::fs::remove_file(&out);
 }
 
 #[test]
 fn cancelling_a_real_export_stops_it_and_keeps_the_partial_file() {
+    let _mlt = davimci_mlt::test_support::media_lock();
     let src = fixture("counter_1080p60.mkv");
     let (mut app, mut editor) = editor_with(&src);
     let out = std::env::temp_dir().join("davimci-slow-cancel.mkv");
@@ -263,6 +277,7 @@ fn cancelling_a_real_export_stops_it_and_keeps_the_partial_file() {
 /// Each subtitle mode produces the file it promises.
 #[test]
 fn subtitle_modes_burn_write_or_mux_and_are_told_apart_by_ffprobe() {
+    let _mlt = davimci_mlt::test_support::media_lock();
     use davimci_backend::{AudioCodec, Container, Preset, SubtitleMode, VideoCodec};
 
     let src = fixture("counter_720p.mkv");
