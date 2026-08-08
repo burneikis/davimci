@@ -8,7 +8,7 @@
 use std::io::{self, Stdout, Write};
 use std::time::{Duration, Instant};
 
-use crossterm::cursor::MoveTo;
+use crossterm::cursor::{Hide, MoveTo, Show};
 use crossterm::event::{
     DisableMouseCapture, EnableMouseCapture, Event as CtEvent, MouseButton, MouseEventKind,
 };
@@ -219,6 +219,14 @@ impl Terminal {
             let mut out = io::stdout();
             queue!(out, MoveTo(0, 0))?;
             out.write_all(bytes)?;
+            // The picture is written at the home position, which leaves the
+            // caret there; put it back where the screen says it belongs, or
+            // the user watches it blink between the `:` line and the top-left
+            // corner once per composed frame.
+            match cursor {
+                Some((column, row)) => queue!(out, MoveTo(column, row), Show)?,
+                None => queue!(out, Hide)?,
+            }
             out.flush()?;
         }
         Ok(())
