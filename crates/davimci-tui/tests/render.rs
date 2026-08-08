@@ -310,3 +310,37 @@ fn a_panel_taller_than_the_track_count_still_fits_the_terminal() {
         assert_eq!(r.chars().count(), usize::from(width));
     }
 }
+
+/// Regression: on a terminal with no spare rows, opening `:` pushed the line
+/// being typed off the bottom, because the app was still handing back a track
+/// list sized for a screen without a command line.
+#[test]
+fn the_command_line_is_drawn_on_a_terminal_with_no_spare_rows() {
+    use davimci_app::{App, NullHost};
+    use davimci_tui::{Modifiers, TermKey};
+
+    let (width, height) = (60u16, 5u16);
+    let mut tui = Tui::new(width, height);
+    let mut app = App::new(davimci_cmd::Session::new(fixtures::timeline()));
+    app.resize(tui.surface());
+    let mut host = NullHost;
+
+    for c in [':', 'w'] {
+        tui.push(TermEvent::Key(TermKey::Char(c), Modifiers::default()));
+    }
+    for event in tui.poll() {
+        app.event(event, &mut host);
+    }
+    tui.render(&app.view()).expect("the tui draws");
+
+    let drawn = tui.last_rows();
+    assert!(
+        drawn.len() <= usize::from(height),
+        "the tui drew {} rows into {height}: {drawn:?}",
+        drawn.len()
+    );
+    assert!(
+        drawn.iter().any(|r| r.starts_with(":w")),
+        "the command line was pushed off the bottom: {drawn:?}"
+    );
+}

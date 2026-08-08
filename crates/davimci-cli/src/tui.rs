@@ -106,6 +106,13 @@ pub fn run(mut app: App, mut editor: Editor) -> Result<()> {
         if let Err(e) = tui.render(&view) {
             app.notify(davimci_app::Message::error(e.to_string()));
         }
+        // Rendering is where the frontend finds out how many rows the `:`
+        // line and its completions want, so the timeline is told about the
+        // smaller surface here rather than a frame late.
+        let after = tui.surface();
+        if after != before {
+            app.resize(after);
+        }
         // A failed draw loses a frame, not the session (Phase 0: recoverable
         // errors degrade locally).
         if let Err(e) = term.draw(tui.last_lines(), tui.preview_escape()) {

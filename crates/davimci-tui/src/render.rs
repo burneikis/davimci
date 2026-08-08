@@ -99,6 +99,7 @@ pub fn lines(
     numbers: Numbers,
 ) -> Vec<Line<'static>> {
     let columns = width.saturating_sub(GUTTER);
+    let cmd_rows = command_rows(view);
     let mut out: Vec<Line<'static>> = Vec::new();
     for row in 0..band.rows {
         out.push(match band.cells.get(usize::from(row)) {
@@ -146,8 +147,23 @@ pub fn lines(
     }
     overlay_panels(&mut out, view, width, 0);
 
-    out.push(status(view, width));
-    out.extend(command_line(view, width));
+    // The status and `:` lines are the last thing dropped. A frontend learns
+    // how many rows the command line wants only once it is open, so the app
+    // is still handing back a track list sized for a screen without one for
+    // at least a frame; drawing it whole would push the `:` line off the
+    // bottom, which is exactly where the user is typing.
+    let body = usize::from(height.saturating_sub(1).saturating_sub(cmd_rows));
+    out.truncate(body);
+
+    let mut tail = vec![status(view, width)];
+    tail.extend(command_line(view, width));
+    // On a terminal too short for both, the line being typed outranks the
+    // status line.
+    while tail.len() > usize::from(height).max(1) {
+        tail.remove(0);
+    }
+    out.extend(tail);
+    out.truncate(usize::from(height).max(1));
     out
 }
 
