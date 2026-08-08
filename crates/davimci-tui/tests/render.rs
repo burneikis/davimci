@@ -143,8 +143,10 @@ fn an_audio_lane_draws_its_envelope_inside_the_clip() {
     );
 }
 
+/// The `:` line shares the mode line's row, so typing costs the timeline
+/// nothing; only the suggestion row takes a track's place.
 #[test]
-fn the_command_line_takes_a_row_from_the_tracks() {
+fn the_command_line_takes_over_the_mode_line_and_only_suggestions_cost_a_row() {
     let view = fixtures::normal();
     let mut tui = Tui::new(60, 8);
     tui.render(&view).unwrap();
@@ -154,19 +156,32 @@ fn the_command_line_takes_a_row_from_the_tracks() {
     open.command_line = Some(davimci_app::CommandLineView {
         buffer: "wri".into(),
         cursor: 3,
+        completions: Vec::new(),
+    });
+    tui.render(&open).unwrap();
+    assert_eq!(tui.surface().rows, before, "the : line cost a track a row");
+    let drawn = tui.last_rows();
+    assert!(drawn[drawn.len() - 1].starts_with(":wri"));
+    assert!(
+        !drawn.iter().any(|r| r.starts_with("-- ")),
+        "the mode line is still drawn under the : line: {drawn:?}"
+    );
+
+    open.command_line = Some(davimci_app::CommandLineView {
+        buffer: "wri".into(),
+        cursor: 3,
         completions: vec!["write".into()],
     });
     tui.render(&open).unwrap();
     assert_eq!(
         tui.surface().rows,
-        before - 2,
-        "the : line drew over a track"
+        before - 1,
+        "the suggestion row must take a track's place"
     );
-    // Bottom-up: the `:` line, the mode line, then the suggestions.
+    // Bottom-up: the `:` line, then the suggestions above it.
     let drawn = tui.last_rows();
     assert!(drawn[drawn.len() - 1].starts_with(":wri"));
-    assert!(drawn[drawn.len() - 2].starts_with("-- "));
-    assert!(drawn[drawn.len() - 3].starts_with("write"));
+    assert!(drawn[drawn.len() - 2].starts_with("write"));
 }
 
 #[test]

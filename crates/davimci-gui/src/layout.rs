@@ -118,6 +118,30 @@ pub struct Layout {
     pub metrics: Metrics,
 }
 
+/// Heights of the mode line, the `:` line and the suggestion row.
+///
+/// The line being typed takes the mode line's row over rather than a row of
+/// its own - vim's `laststatus=0` - so opening `:` never costs the timeline
+/// any height; only the suggestions do.
+fn chrome_heights(
+    remaining: &mut u32,
+    take: &impl Fn(&mut u32, u32) -> u32,
+    metrics: Metrics,
+    command_open: bool,
+    completions_shown: bool,
+) -> (u32, u32, u32) {
+    if !command_open {
+        return (take(remaining, metrics.status_height), 0, 0);
+    }
+    let command = take(remaining, metrics.command_height);
+    let completions = if completions_shown {
+        take(remaining, metrics.command_height)
+    } else {
+        0
+    };
+    (0, command, completions)
+}
+
 impl Layout {
     /// Lay out a window of `width` x `height` pixels.
     ///
@@ -145,17 +169,13 @@ impl Layout {
             got
         };
 
-        let status_h = take(&mut remaining, metrics.status_height);
-        let command_h = if command_open {
-            take(&mut remaining, metrics.command_height)
-        } else {
-            0
-        };
-        let completion_h = if command_open && completions_shown {
-            take(&mut remaining, metrics.command_height)
-        } else {
-            0
-        };
+        let (status_h, command_h, completion_h) = chrome_heights(
+            &mut remaining,
+            &take,
+            metrics,
+            command_open,
+            completions_shown,
+        );
         let ruler_h = take(&mut remaining, metrics.ruler_height);
         let video_h = take(
             &mut remaining,
@@ -203,8 +223,9 @@ impl Layout {
             None
         };
         y += completion_h as i32;
-        // Bottom-up the chrome is suggestions, mode line, `:` line - vim's
-        // order, and the terminal frontend's, so the two cannot drift apart.
+        // Bottom-up the chrome is the suggestions, then one row shared by the
+        // mode line and the `:` line - vim's order, and the terminal
+        // frontend's, so the two cannot drift apart.
         let status = Rect {
             x: 0,
             y,
@@ -633,6 +654,10 @@ fn paint_playhead(d: &mut DrawList, layout: &Layout, view: &ViewState) {
 }
 
 fn paint_status(d: &mut DrawList, layout: &Layout, view: &ViewState) {
+    // The `:` line owns that row while it is open.
+    if layout.status.height == 0 {
+        return;
+    }
     d.rect(layout.status, Fill::StatusLine);
     d.text(layout.status, TextRole::Status, status_text(view));
 }
@@ -941,7 +966,10 @@ mod tests {
     #[test]
     fn a_very_short_window_gives_up_timeline_height_not_correctness() {
         let l = Layout::compute(400, 10, Metrics::default(), true, false);
-        assert_eq!(l.status.height, 10);
+        // The one row a window this short has goes to the line being typed,
+        // which shares it with the mode line.
+        assert_eq!(l.status.height, 0);
+        assert_eq!(l.command.map(|r| r.height), Some(10));
         assert_eq!(l.tracks.height, 0);
         assert_eq!(l.surface().rows, 1);
     }

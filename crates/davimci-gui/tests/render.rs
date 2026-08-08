@@ -198,12 +198,13 @@ fn completions_are_painted_on_their_own_row_above_the_line() {
         list.texts()
     );
     let command = l.command.expect("a command row");
-    // Vim's order, bottom-up: the `:` line last, the mode line above it, the
-    // suggestions above that. The terminal frontend draws the same order.
+    // Vim's order, bottom-up: the `:` line last, on the row the mode line
+    // would have had, with the suggestions above it. The terminal frontend
+    // draws the same order.
+    assert_eq!(l.status.height, 0, "the : line owns the mode line's row");
     assert!(
-        row.y < l.status.y && l.status.y < command.y,
-        "chrome order is suggestions, status, command: {row:?} {:?} {command:?}",
-        l.status
+        row.y < command.y,
+        "suggestions sit above the line they complete: {row:?} {command:?}"
     );
     assert_eq!(
         command.y + command.height as i32,

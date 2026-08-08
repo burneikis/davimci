@@ -47,10 +47,10 @@ impl Overlay<'_> {
 
 /// The timeline area a terminal of this size offers.
 ///
-/// The `:` line, its completions and the preview band take rows from the
-/// tracks, so the app is told about a smaller timeline the moment any of them
-/// opens - a frontend that kept the old count would draw a track over its own
-/// command line.
+/// The suggestion row and the preview band take rows from the tracks, so the
+/// app is told about a smaller timeline the moment either opens - a frontend
+/// that kept the old count would draw a track over its own command line. The
+/// `:` line itself is free: it shares the mode line's row.
 #[must_use]
 pub fn surface(width: u16, height: u16, command_rows: u16, preview_rows: u16) -> Surface {
     Surface {
@@ -75,14 +75,16 @@ pub fn surface(width: u16, height: u16, command_rows: u16, preview_rows: u16) ->
     }
 }
 
-/// How many rows the `:` line wants: none while it is closed, one when it is
-/// open, two when it is suggesting completions.
+/// Rows the `:` line wants *on top of* the mode line it replaces.
+///
+/// Typing takes over the last row rather than pushing the timeline up, as vim
+/// does with `laststatus=0`, so an open command line costs nothing. Only the
+/// suggestion row is extra.
 #[must_use]
 pub fn command_rows(view: &ViewState) -> u16 {
     match &view.command_line {
-        None => 0,
-        Some(c) if c.completions.is_empty() => 1,
-        Some(_) => 2,
+        Some(c) if !c.completions.is_empty() => 1,
+        _ => 0,
     }
 }
 
@@ -175,14 +177,18 @@ pub fn lines(
         out.push(Line::from(Span::raw(fit("", width))));
     }
 
-    // Bottom-up: the `:` line is the last row, the mode line sits above it,
-    // and the suggestions sit above that - where vim's wildmenu is, and where
-    // the GUI puts them too.
+    // Bottom-up: the last row is the `:` line while one is open and the mode
+    // line otherwise - they share a row - with the suggestions above it,
+    // where vim's wildmenu goes and where the GUI puts them too.
     let mut tail = completions(view, width);
-    tail.push(status(view, width));
-    tail.extend(command_line(view, width));
-    // On a terminal too short for all of it, the line being typed outranks
-    // the mode line, which outranks the suggestions.
+    let typed = command_line(view, width);
+    if typed.is_empty() {
+        tail.push(status(view, width));
+    } else {
+        tail.extend(typed);
+    }
+    // On a terminal too short for both, the line being typed outranks the
+    // suggestions.
     while tail.len() > usize::from(height).max(1) {
         tail.remove(0);
     }
