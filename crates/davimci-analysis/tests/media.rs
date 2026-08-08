@@ -156,6 +156,48 @@ fn a_proxy_has_exactly_the_same_frame_count_as_its_source() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Regression: the encode wrote straight to the cache path, so an encode
+/// that was killed left a `.mov` with no `moov` atom - a file that exists,
+/// passes every "is it there?" check, and makes ffmpeg say `moov atom not
+/// found` when the preview tries to decode it, for every session after.
+#[test]
+fn an_interrupted_encode_leaves_no_file_a_later_session_would_trust() {
+    let info = probe("counter_4k.mkv");
+    let c = conform(&info, TimelineProps::default(), ConformOptions::default());
+    let dir = std::env::temp_dir().join(format!("davimci-partial-{}", std::process::id()));
+    let cache = AnalysisCache::for_project(&dir);
+    let spec = plan_proxy(&info, &c, &ProxyPolicy::default(), cache.root(), "fixture")
+        .expect("4K must trigger the proxy threshold");
+
+    // What a killed ffmpeg leaves behind: a container with a header and no
+    // index. It is written where the encode writes, which is not where a
+    // proxy is read from.
+    std::fs::create_dir_all(cache.root()).unwrap();
+    std::fs::write(spec.partial_path(), b"\0\0\0\x14ftypqt  truncated").unwrap();
+    assert!(
+        !spec.path.is_file(),
+        "a half-written encode is visible as a finished proxy"
+    );
+
+    // And one that finishes is both present and decodable.
+    davimci_analysis::proxy::generate(&spec, None).unwrap();
+    assert!(spec.path.is_file());
+    assert!(
+        !spec.partial_path().exists(),
+        "the partial outlived the encode"
+    );
+    assert!(davimci_analysis::proxy::is_usable(&spec.path));
+
+    // A truncated file that is already in the cache is caught before the
+    // preview ever opens it.
+    std::fs::write(&spec.path, b"\0\0\0\x14ftypqt  truncated").unwrap();
+    assert!(
+        !davimci_analysis::proxy::is_usable(&spec.path),
+        "a truncated proxy passed for a usable one"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn a_cached_analysis_survives_a_round_trip_through_disk() {
     let dir = std::env::temp_dir().join(format!("davimci-cache-slow-{}", std::process::id()));

@@ -400,11 +400,15 @@ impl Prefetch {
         }
     }
 
-    /// Ask for `start..=end` next. A run that was queued and not started is
-    /// replaced: the newest position is the only one worth decoding for.
+    /// Ask for `start..=end` next, unless a run is already queued or being
+    /// decoded: one run outstanding is what keeps the worker one run ahead
+    /// of the walk rather than a whole timeline ahead of it.
     fn request(&self, start: Frame, end: Frame) {
         let (lock, signal) = &*self.shared;
         if let Ok(mut state) = lock.lock() {
+            if state.want.is_some() || state.busy.is_some() {
+                return;
+            }
             state.want = Some((start, end));
             signal.notify_all();
         }
@@ -543,14 +547,15 @@ impl MltBackend {
         if let Some(hit) = self.frames.get(frame, scale).cloned() {
             self.cache_hits = self.cache_hits.saturating_add(1);
             if stepping_back {
-                self.prefetch_below(scale);
+                self.prefetch_below(frame, scale);
             }
             return Ok(hit);
         }
         // A run the worker is already decoding is waited for rather than
         // decoded again: it started before the walk got here, so it is
         // usually a wait of nothing at all.
-        if stepping_back && let Some(prefetch) = self.prefetch.as_ref() {
+        if stepping_back && let Some(prefetch) = self.prefetch.as_ref().filter(|p| p.scale == scale)
+        {
             let ready = prefetch.wait_for(frame, Duration::from_millis(250));
             for decoded in ready {
                 self.decodes = self.decodes.saturating_add(1);
@@ -562,7 +567,7 @@ impl MltBackend {
             }
             if let Some(hit) = self.frames.get(frame, scale).cloned() {
                 self.cache_hits = self.cache_hits.saturating_add(1);
-                self.prefetch_below(scale);
+                self.prefetch_below(frame, scale);
                 return Ok(hit);
             }
         }
@@ -583,7 +588,7 @@ impl MltBackend {
             .ok_or(BackendError::Seek { frame: frame.get() })?;
         if stepping_back {
             self.run_floor = Some(start);
-            self.prefetch_below(scale);
+            self.prefetch_below(frame, scale);
         }
         Ok(served)
     }
@@ -661,7 +666,12 @@ impl MltBackend {
     /// Only while the transport is idle: during playback the picture comes
     /// from the preview consumer, and a second decoding graph would compete
     /// with it for the disk and the CPU it is pacing against.
-    fn prefetch_below(&mut self, scale: PreviewScale) {
+    ///
+    /// Exactly one run ahead. Asking for the run below the last one decoded
+    /// unconditionally would advance the worker twelve frames for every one
+    /// the user steps, so it would race the walk to frame 0, decode the
+    /// whole timeline and evict the pictures the walk is about to ask for.
+    fn prefetch_below(&mut self, frame: Frame, scale: PreviewScale) {
         if self.preview.is_some() {
             self.prefetch = None;
             return;
@@ -670,6 +680,12 @@ impl MltBackend {
             return;
         };
         let run = self.backstep_run.max(1);
+        // Not into the lowest cached run yet: what is already decoded is a
+        // run's worth of pictures ahead of the walk, which is the whole
+        // point.
+        if frame.get() > floor.saturating_add(run) {
+            return;
+        }
         let end = Frame(floor.saturating_sub(1));
         let start = Frame(end.get().saturating_sub(run - 1));
         if self.prefetch.as_ref().is_none_or(|p| p.scale != scale) {

@@ -111,7 +111,13 @@ impl Proxies {
                 proxy: spec.path.display().to_string(),
             };
             // An encode that has already been done is reused: the cache is
-            // keyed by content, so a re-import of the same file is free.
+            // keyed by content, so a re-import of the same file is free. A
+            // cached file that will not decode is thrown away rather than
+            // handed to the preview, which is what a truncated container
+            // from an interrupted encode looks like.
+            if spec.path.is_file() && !davimci_analysis::proxy::is_usable(&spec.path) {
+                let _ = std::fs::remove_file(&spec.path);
+            }
             if !spec.path.is_file() {
                 davimci_analysis::proxy::generate(&spec, Some(ctx))?;
             }

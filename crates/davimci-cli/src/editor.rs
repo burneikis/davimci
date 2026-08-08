@@ -63,6 +63,9 @@ pub struct Editor {
     /// `:set proxy`: the policy, the encodes it started, and which proxy
     /// stands in for which original.
     proxies: crate::proxy::Proxies,
+    /// Proxies that finished while the transport was running, waiting for it
+    /// to stop before the graph is rebuilt onto them.
+    proxies_landed: usize,
     /// Job updates waiting for the app to collect on the next tick.
     job_updates: Vec<JobUpdate>,
     /// Envelopes finished since the app last collected them.
@@ -143,6 +146,7 @@ impl Editor {
         Self {
             analyser: Analyser::new(workspace.root()),
             proxies: crate::proxy::Proxies::new(workspace.root()),
+            proxies_landed: 0,
             workspace,
             backend,
             presenter,
@@ -362,13 +366,15 @@ impl Editor {
     /// No command, no undo entry: the timeline does not change. What changes
     /// is which file the preview graph decodes, which is why the projection
     /// is rebuilt rather than the model edited.
+    ///
+    /// Never while the transport is running. Rebuilding the graph out from
+    /// under a consumer that is pulling from it is the same hazard an edit
+    /// during playback has, and an encode finishing is not a reason to
+    /// interrupt playback - so the swap waits for the transport to stop.
     fn adopt_finished_proxies(&mut self, session: &Session) {
         let (updates, swaps) = self.proxies.poll();
         self.job_updates.extend(updates);
-        if swaps.is_empty() {
-            return;
-        }
-        let landed = swaps
+        self.proxies_landed += swaps
             .iter()
             .filter(|(source, _)| {
                 session
@@ -379,10 +385,12 @@ impl Editor {
                     .any(|c| c.media.as_ref().is_some_and(|m| &m.path == source))
             })
             .count();
-        if landed == 0 {
+        if self.proxies_landed == 0 || self.transport.state() != TransportState::Stopped {
             return;
         }
+        let landed = std::mem::take(&mut self.proxies_landed);
         self.project(session);
+        self.show_playhead(session);
         self.notices.push(Message::info(format!(
             "{landed} source(s) are now decoding from a proxy"
         )));

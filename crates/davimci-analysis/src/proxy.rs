@@ -122,6 +122,22 @@ pub fn plan_proxy(
 }
 
 impl ProxySpec {
+    /// Where the encode writes before it is finished.
+    ///
+    /// A `.mov` has no `moov` atom until ffmpeg closes it, so an encode
+    /// killed part way through leaves a file that exists and cannot be
+    /// decoded. Writing beside the real path and renaming on success means a
+    /// file at [`ProxySpec::path`] is a complete one, and every reader can
+    /// go on trusting that it exists.
+    ///
+    /// It keeps the extension: ffmpeg picks the muxer from it.
+    #[must_use]
+    pub fn partial_path(&self) -> PathBuf {
+        let stem = self.path.file_stem().unwrap_or_default().to_string_lossy();
+        let ext = self.path.extension().unwrap_or_default().to_string_lossy();
+        self.path.with_file_name(format!("{stem}.partial.{ext}"))
+    }
+
     /// The ffmpeg invocation that produces this proxy. Kept as data so the
     /// argument list is testable without encoding anything.
     #[must_use]
@@ -147,7 +163,7 @@ impl ProxySpec {
             args.push("0".into());
         }
         args.push("-an".into());
-        args.push(self.path.display().to_string());
+        args.push(self.partial_path().display().to_string());
         args
     }
 
@@ -157,6 +173,28 @@ impl ProxySpec {
     pub fn conformed_length(&self, timeline_fps: Fps) -> Frame {
         timeline_fps.conform_frame(Frame(self.frames), self.fps)
     }
+}
+
+/// Whether a proxy already in the cache can be decoded.
+///
+/// Proxies written before the encode became atomic, or by any other means,
+/// can be truncated containers: they exist, they have a plausible size, and
+/// ffmpeg reports `moov atom not found` when the preview tries to play them.
+/// One probe at import is cheaper than a session of blank pictures.
+#[must_use]
+pub fn is_usable(path: &Path) -> bool {
+    std::process::Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "csv=p=0",
+        ])
+        .arg(path)
+        .output()
+        .is_ok_and(|out| out.status.success() && !out.stdout.is_empty())
 }
 
 /// Encode a proxy with ffmpeg. Cancellable, since a 4K transcode is the
@@ -174,10 +212,12 @@ pub fn generate(
             reason: e.to_string(),
         })?;
     }
+    let partial = spec.partial_path();
     let out = std::process::Command::new("ffmpeg")
         .args(spec.ffmpeg_args())
         .output()
         .map_err(|e| {
+            let _ = std::fs::remove_file(&partial);
             if e.kind() == std::io::ErrorKind::NotFound {
                 AnalysisError::ToolMissing {
                     tool: "ffmpeg",
@@ -188,11 +228,19 @@ pub fn generate(
             }
         })?;
     if !out.status.success() {
+        // Half a container is worse than none: it exists, so every later
+        // check takes it for a finished proxy.
+        let _ = std::fs::remove_file(&partial);
         return Err(AnalysisError::AnalysisFailed {
             path: spec.source.clone(),
             reason: String::from_utf8_lossy(&out.stderr).trim().to_string(),
         });
     }
+    // The rename is what publishes the proxy, and it is atomic within the
+    // cache directory: a reader sees the whole file or no file.
+    std::fs::rename(&partial, &spec.path).map_err(|e| AnalysisError::CacheUnwritable {
+        reason: e.to_string(),
+    })?;
     if let Some(ctx) = ctx {
         ctx.progress(1, 1);
     }

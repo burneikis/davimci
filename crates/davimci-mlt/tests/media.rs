@@ -171,6 +171,47 @@ fn stepping_backwards_decodes_each_frame_once_and_is_exact() {
     );
 }
 
+/// Regression: the prefetcher asked for the run below the last one it
+/// decoded on every step, so it advanced a run for every frame the user
+/// stepped - racing the walk to frame 0, decoding the whole timeline and
+/// evicting the pictures the walk was about to ask for. It must stay about
+/// one run ahead, and every picture it delivers must be the frame it claims.
+#[test]
+fn the_prefetcher_stays_one_run_ahead_and_delivers_the_right_pictures() {
+    let _mlt = davimci_mlt::test_support::media_lock();
+    let res = Resolution {
+        width: 640,
+        height: 480,
+    };
+    let tl = timeline_of("scene_cut.mkv", 240, res);
+    let mut b = MltBackend::new(tl.props).unwrap();
+    b.set_timeline(&tl).unwrap();
+
+    let run = b.backstep_run;
+    let start = 160u64;
+    let steps = 40u64;
+    b.frame_at(Frame(start), PreviewScale::Half).unwrap();
+    for n in (start - steps..start).rev() {
+        // Slower than the worker, which is the case that used to run away.
+        std::thread::sleep(Duration::from_millis(20));
+        let f = b.frame_at(Frame(n), PreviewScale::Half).unwrap();
+        assert_eq!(f.position, Frame(n));
+        // `scene_cut.mkv` is red below frame 120 and blue from there up, so
+        // a picture from the wrong side of the cut shows in one channel.
+        let want = usize::from(n >= 120) * 2;
+        assert_eq!(
+            dominant(&f),
+            want,
+            "frame {n} came back with another frame's picture"
+        );
+    }
+    assert!(
+        b.prefetched <= (steps + 2 * run) as usize,
+        "the worker decoded {} frames for a {steps}-frame walk: it is racing ahead",
+        b.prefetched
+    );
+}
+
 /// Regression: the first backward step of every run used to decode that run
 /// on the caller's thread, so a held `h` hitched once every `backstep_run`
 /// frames. The run below what is cached is decoded by a worker with a graph
