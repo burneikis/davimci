@@ -253,7 +253,7 @@ impl eframe::App for Window {
         // Modals go over the video, or the picker is painted and then
         // covered by the picture.
         if let Some(list) = self.gui.last_draw() {
-            egui_shell::draw_modal(list, ui, screen.min);
+            egui_shell::draw_modal(list, ui, screen.min, &mut self.thumbnails);
         }
     }
 }
@@ -265,5 +265,6 @@ pub fn initial_surface() -> Surface {
         columns: 1200,
         rows: 6,
         thumbnail_columns: 0,
+        cell_columns: 150,
     }
 }

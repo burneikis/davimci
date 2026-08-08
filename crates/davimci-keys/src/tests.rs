@@ -632,3 +632,43 @@ fn visual_line_in_a_gap_selects_the_gap_not_one_frame() {
     let sel = e.selection().expect("visual line is live");
     assert_eq!((sel.start.get(), sel.end.get()), (100, 200));
 }
+
+#[test]
+fn continuations_list_every_key_that_can_follow_a_prefix() {
+    let keymap = crate::keymap::Keymap::new();
+    let g = Key::parse_str("g");
+    let next = keymap.continuations(&g);
+    assert!(!next.is_empty(), "`g` is a prefix and must offer something");
+    assert!(
+        next.iter()
+            .any(|c| c.key == Key::Char('g') && c.leaf.is_some()),
+        "`gg` is bound, so `g` must complete: {next:?}"
+    );
+    // A bound leaf that nothing extends offers nothing after it.
+    assert!(keymap.continuations(&Key::parse_str("gg")).is_empty());
+}
+
+#[test]
+fn a_pending_sequence_reports_what_was_typed_and_what_could_follow() {
+    let (mut engine, mut session) = scene();
+    assert!(
+        engine.pending().is_idle(),
+        "a fresh engine has nothing pending"
+    );
+
+    engine.feed(Key::Char('3'), &mut session);
+    engine.feed(Key::Char('g'), &mut session);
+    let pending = engine.pending();
+    assert_eq!(pending.text, "3g", "the count is part of what was typed");
+    assert!(
+        pending
+            .continuations
+            .iter()
+            .any(|c| c.key == Key::Char('g')),
+        "the keymap's continuations are not reported: {pending:?}"
+    );
+
+    // Finishing the sequence empties it again, so a which-key panel hides.
+    engine.feed(Key::Char('g'), &mut session);
+    assert!(engine.pending().is_idle(), "the sequence stayed pending");
+}

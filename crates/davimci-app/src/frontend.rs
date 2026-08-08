@@ -10,6 +10,8 @@ use davimci_keys::{Key, MediaIntent};
 
 use crate::cmdline::CommandKey;
 use crate::error::AppError;
+use crate::modal::ModalKey;
+use crate::panel::PanelId;
 use crate::view::ViewState;
 
 /// Size of the timeline area, in whatever unit the frontend draws in - GUI
@@ -28,6 +30,13 @@ pub struct Surface {
     /// the frames. Zero means "no thumbnails", which is how a terminal or a
     /// test opts out.
     pub thumbnail_columns: u32,
+    /// How many character cells wide the timeline area is.
+    ///
+    /// Panels are text, so they are placed in cells rather than in timeline
+    /// columns: a terminal's cell is its column, and a window's is a glyph
+    /// wide. Reporting it is the frontend's job, since only it knows its own
+    /// font; deciding what goes where stays here.
+    pub cell_columns: u32,
 }
 
 impl Default for Surface {
@@ -36,6 +45,7 @@ impl Default for Surface {
             columns: 80,
             rows: 4,
             thumbnail_columns: 0,
+            cell_columns: 80,
         }
     }
 }
@@ -78,6 +88,12 @@ pub enum Event {
     },
     /// The subtitle editor closed without changing anything.
     TextEditCancelled,
+    /// One keystroke into a focused plugin panel. The app owns which panel
+    /// has focus, so a frontend only reports the key.
+    PanelKey {
+        panel: PanelId,
+        key: ModalKey,
+    },
     /// Time passed: repaint, poll jobs, pull a preview frame.
     Tick,
     Quit,

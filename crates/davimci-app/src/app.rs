@@ -16,6 +16,8 @@ use crate::error::AppError;
 use crate::frontend::{Event, Frontend, Response, Surface};
 use crate::job::{JobList, JobUpdate};
 use crate::message::{Message, MessageQueue};
+use crate::modal::ModalKey;
+use crate::panel::{PanelId, PanelOp, PanelStore};
 use crate::plugin::PluginEffects;
 use crate::thumbnail::{Thumbnail, ThumbnailRequest, Thumbnails};
 use crate::view::{CommandLineView, ViewInputs, ViewState};
@@ -94,6 +96,26 @@ pub trait Host {
     /// interrupt with nothing playing does nothing.
     fn interrupt_transport(&mut self, session: &Session) {
         let _ = session;
+    }
+
+    /// The half-typed key sequence changed, so anything that draws it - a
+    /// which-key panel above all - can be rebuilt.
+    ///
+    /// The app owns the grammar's state, so this is the only place a host
+    /// can learn of it, and a plugin is a *view* of it rather than a second
+    /// copy of the keymap.
+    fn key_pending(&mut self, pending: &davimci_keys::Pending, session: &mut Session) {
+        let _ = (pending, session);
+    }
+
+    /// One keystroke into a focused plugin panel.
+    ///
+    /// The panel already owns the keyboard by the time this is called; the
+    /// host only has to hand the key to the plugin and report what came
+    /// back.
+    fn panel_key(&mut self, panel: PanelId, key: ModalKey, session: &mut Session) -> PluginEffects {
+        let _ = (panel, key, session);
+        PluginEffects::default()
     }
 
     /// Invoke Lua callback `id` and report what it asked for.
@@ -233,6 +255,25 @@ fn command_key_of(key: Key) -> Option<CommandKey> {
     })
 }
 
+/// One key as a modal reads it. `Ctrl` chords and anything a panel has no
+/// alphabet for are dropped rather than delivered as text.
+fn modal_key_of(key: Key) -> Option<ModalKey> {
+    use davimci_keys::Named;
+    Some(match key {
+        Key::Char(c) => ModalKey::Char(c),
+        Key::Named(Named::Space) => ModalKey::Char(' '),
+        Key::Named(Named::Enter) => ModalKey::Enter,
+        Key::Named(Named::Esc) => ModalKey::Escape,
+        Key::Named(Named::Backspace) => ModalKey::Backspace,
+        Key::Named(Named::Tab) => ModalKey::Tab,
+        Key::Named(Named::Left) => ModalKey::Left,
+        Key::Named(Named::Right) => ModalKey::Right,
+        Key::Named(Named::Up) => ModalKey::Up,
+        Key::Named(Named::Down) => ModalKey::Down,
+        Key::Ctrl(_) => return None,
+    })
+}
+
 /// A host that does nothing, for tests and the headless frontend.
 #[derive(Debug, Default)]
 pub struct NullHost;
@@ -253,6 +294,9 @@ pub struct App {
     /// How wide the frontend draws one thumbnail, in columns; zero means it
     /// draws none.
     thumbnail_columns: u32,
+    /// How many character cells wide the frontend's timeline area is - the
+    /// unit plugin panels are placed in.
+    cell_columns: u32,
     /// The `:` line's buffer, history and completion vocabulary. Owned here
     /// rather than in a frontend so every host shows the same line, with the
     /// same completions, as it is typed.
@@ -268,6 +312,12 @@ pub struct App {
     /// The selection at the moment `:` was pressed, for the `:` line that
     /// follows.
     pending_selection: Option<Selection>,
+    /// Panels plugins have open. View state, not project state: nothing here
+    /// reaches the timeline or the undo log.
+    panels: PanelStore,
+    /// The pending sequence last reported to the host, so `key_pending` fires
+    /// on a change rather than on every keystroke.
+    last_pending: Option<davimci_keys::Pending>,
     /// Set while a batch of events is being drained: the expensive host
     /// notifications are recorded here and issued once at the end.
     batching: bool,
@@ -294,12 +344,15 @@ impl App {
             waveforms: Waveforms::default(),
             thumbnails: Thumbnails::default(),
             thumbnail_columns: 0,
+            cell_columns: 0,
             command: CommandLine::new(crate::cmdline::default_vocabulary()),
             command_open: false,
             pending_pick: None,
             center_follow: false,
             editing_text: None,
             pending_selection: None,
+            panels: PanelStore::default(),
+            last_pending: None,
             batching: false,
             deferred_moved: false,
             deferred_changed: false,
@@ -367,6 +420,7 @@ impl App {
 
     pub fn resize(&mut self, surface: Surface) {
         self.thumbnail_columns = surface.thumbnail_columns;
+        self.cell_columns = surface.cell_columns;
         self.viewport.resize(surface.columns, surface.rows);
         self.follow();
     }
@@ -465,6 +519,8 @@ impl App {
             waveforms: (!self.waveforms.is_empty()).then_some(&self.waveforms),
             thumbnails: (!self.thumbnails.is_empty()).then_some(&self.thumbnails),
             thumbnail_columns: self.thumbnail_columns,
+            cell_columns: self.cell_columns,
+            panels: (!self.panels.is_empty()).then_some(&self.panels),
         };
         ViewState::build(&self.session, self.viewport, &self.jump_cfg, &inputs)
     }
@@ -512,6 +568,15 @@ impl App {
         {
             return self.command_key(k, host);
         }
+        // A focused panel owns the keyboard next, for a frontend that sends
+        // raw keys rather than routing modals itself. An unfocused panel -
+        // which-key and every other reporting panel - is skipped here, which
+        // is what keeps it from ever eating a keystroke.
+        if let Some(panel) = self.panels.focused().map(|p| p.id)
+            && let Some(k) = modal_key_of(key)
+        {
+            return self.panel_key(panel, k, host);
+        }
         // Entering COMMAND clears the visual selection in the key engine
         // (`:` is a mode change like any other), so what the user had
         // selected is remembered here, before the key is fed, and handed to
@@ -532,7 +597,9 @@ impl App {
         if fed.transport.interrupts() {
             host.interrupt_transport(&self.session);
         }
-        self.apply_outcome(fed.outcome, host)
+        let response = self.apply_outcome(fed.outcome, host);
+        self.note_pending(host);
+        response
     }
 
     /// Handle a batch of frontend events, telling the host *once* about the
@@ -589,6 +656,7 @@ impl App {
                 Response::Continue
             }
             Event::Click { column, row } => self.click(column, row, host),
+            Event::PanelKey { panel, key } => self.panel_key(panel, key, host),
             Event::TextEdited { clip, text } => self.commit_clip_text(clip, text, host),
             Event::TextEditCancelled => {
                 self.editing_text = None;
@@ -868,6 +936,51 @@ impl App {
             let outcome = self.engine.execute_action(action, &mut self.session);
             self.apply_outcome(outcome, host);
         }
+        for op in effects.panels {
+            if let Err(e) = self.panels.apply(op) {
+                self.fail(e);
+            }
+        }
+    }
+
+    /// The panels currently open, for a host that wants to inspect them.
+    #[must_use]
+    pub fn panels(&self) -> &PanelStore {
+        &self.panels
+    }
+
+    /// Apply one panel operation directly, for a host with no plugin runtime
+    /// - the headless harness and the tests.
+    pub fn apply_panel(&mut self, op: PanelOp) {
+        if let Err(e) = self.panels.apply(op) {
+            self.fail(e);
+        }
+    }
+
+    /// Hand one key to the focused panel.
+    ///
+    /// `Esc` always closes the panel *and* is still delivered, so a plugin
+    /// that stops answering can never hold the keyboard.
+    fn panel_key(&mut self, panel: PanelId, key: ModalKey, host: &mut dyn Host) -> Response {
+        if self.panels.get(panel).is_none() {
+            return Response::Continue;
+        }
+        let effects = host.panel_key(panel, key, &mut self.session);
+        if key == ModalKey::Escape {
+            let _ = self.panels.apply(PanelOp::Close(panel));
+        }
+        self.apply_plugin(effects, host);
+        Response::Continue
+    }
+
+    /// Tell the host what the grammar is now waiting for, when that changed.
+    fn note_pending(&mut self, host: &mut dyn Host) {
+        let pending = self.engine.pending();
+        if self.last_pending.as_ref() == Some(&pending) {
+            return;
+        }
+        host.key_pending(&pending, &mut self.session);
+        self.last_pending = Some(pending);
     }
 
     /// The vocabulary Tab completes against. The app does not own the ex

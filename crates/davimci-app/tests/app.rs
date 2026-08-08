@@ -291,6 +291,7 @@ fn a_clip_is_sampled_across_its_width_and_each_picture_is_drawn_where_it_belongs
         rows: 4,
         // One picture every 20 columns, so a clip wants several.
         thumbnail_columns: 20,
+        cell_columns: 100,
     });
     // Zoomed in, so a clip is wide enough to hold several pictures.
     app.set_zoom(davimci_motion::Zoom::MAX);

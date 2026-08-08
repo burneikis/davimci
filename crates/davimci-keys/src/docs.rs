@@ -57,7 +57,8 @@ fn sort_key(keys: &str) -> (u8, String) {
 }
 
 /// Render a key sequence the way a config file would spell it.
-fn render(keys: &[Key]) -> String {
+#[must_use]
+pub fn render(keys: &[Key]) -> String {
     keys.iter()
         .map(|k| match k {
             Key::Char(c) => c.to_string(),
@@ -66,6 +67,13 @@ fn render(keys: &[Key]) -> String {
             Key::Named(_) => k.to_token(),
         })
         .collect()
+}
+
+/// One sentence for what a binding does, for anything that lists bindings
+/// to the user rather than to a document - a which-key panel most of all.
+#[must_use]
+pub fn describe_leaf(action: &LeafAction) -> String {
+    describe(action).1
 }
 
 fn describe(action: &LeafAction) -> (&'static str, String) {

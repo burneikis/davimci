@@ -232,6 +232,21 @@ impl Runtime {
     /// reported; the timeline is untouched either way, because Lua only ever
     /// queues requests.
     pub fn invoke(&self, id: HandlerId) -> Result<Vec<Request>, LuaError> {
+        self.call(id, mlua::Value::Nil)
+    }
+
+    /// Hand one keystroke to a focused panel's `on_key`. The key is named the
+    /// way a config spells it, so a handler matches on `"j"` or `"<Esc>"`
+    /// rather than on a number.
+    pub fn invoke_key(&self, id: HandlerId, key: &str) -> Result<Vec<Request>, LuaError> {
+        let value = self
+            .lua
+            .create_string(key)
+            .map_or(mlua::Value::Nil, mlua::Value::String);
+        self.call(id, value)
+    }
+
+    fn call(&self, id: HandlerId, arg: mlua::Value) -> Result<Vec<Request>, LuaError> {
         if self.is_disabled(id) {
             return Ok(Vec::new());
         }
@@ -239,7 +254,7 @@ impl Runtime {
         let Some(func) = func else {
             return Err(LuaError::Config(format!("no callback {id} is registered")));
         };
-        match func.call::<()>(()) {
+        match func.call::<()>(arg) {
             Ok(()) => Ok(self.take_requests()),
             Err(e) => {
                 // Discard anything the callback queued before it threw: a

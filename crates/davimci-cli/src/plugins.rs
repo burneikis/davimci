@@ -31,6 +31,17 @@ impl std::fmt::Debug for Plugins {
     }
 }
 
+/// The plugins every build ships with, run before any user config so a
+/// config can rebind or replace what they set up.
+///
+/// They use the same `davimci.*` surface a third-party plugin does: if a
+/// bundled plugin needs something the API cannot express, that is a gap in
+/// the API rather than a reason to special-case it.
+const BUNDLED: &[(&str, &str)] = &[(
+    "which-key.lua",
+    include_str!("../runtime/plugins/which-key.lua"),
+)];
+
 impl Plugins {
     /// A runtime with no user config loaded. Every build has one, so the Lua
     /// path is never a special case the tests can skip.
@@ -55,12 +66,26 @@ impl Plugins {
     #[must_use]
     pub fn load(paths: Option<&ConfigPaths>, project_dir: &Path, trust: &dyn TrustPrompt) -> Self {
         let mut plugins = Self::empty();
+        plugins.load_bundled();
         if let Some(paths) = paths {
             plugins.notices.extend(plugins.runtime.load_config(paths));
         }
         let (_, notice) = plugins.runtime.load_project_local(project_dir, trust);
         plugins.notices.extend(notice);
         plugins
+    }
+
+    /// Run the bundled plugins. A bundled plugin that fails is a notice like
+    /// any other: the editor keeps working without it.
+    pub fn load_bundled(&mut self) {
+        for (name, source) in BUNDLED {
+            if let Err(e) = self
+                .runtime
+                .exec(source, name, davimci_lua::Sandbox::Trusted)
+            {
+                self.notices.push(Notice::from_error(&e));
+            }
+        }
     }
 
     /// Startup notices, as status-line messages. Drained once by the host.
@@ -146,6 +171,13 @@ impl Plugins {
     pub fn invoke(&mut self, id: u32) -> (Vec<Request>, Vec<Message>) {
         let requests = self.runtime.invoke(id).unwrap_or_default();
         (requests, self.drain_notices())
+    }
+
+    /// Hand one keystroke to a focused panel's `on_key` handler. A handler
+    /// that throws is already disabled by the runtime; its notice comes back
+    /// on the next drain, like every other plugin failure.
+    pub fn invoke_key(&mut self, id: u32, key: &str) -> Result<Vec<Request>, LuaError> {
+        self.runtime.invoke_key(id, key)
     }
 
     /// Requests queued outside a callback, drained every tick.

@@ -31,6 +31,7 @@ pub mod preset;
 pub mod registry;
 pub mod request;
 pub mod runtime;
+pub mod ui;
 
 #[cfg(test)]
 mod tests;
@@ -38,10 +39,14 @@ mod tests;
 pub use api::EVENTS;
 pub use config::TimelineConfig;
 pub use error::LuaError;
-pub use event::{Dispatch, Event, HandlerFailure};
+pub use event::{Continuation, Dispatch, Event, HandlerFailure};
 pub use loader::{ConfigPaths, DenyAll, Trust, TrustPrompt};
 pub use motion::{MotionAnswer, MotionEnv, Sample, TrackData};
 pub use preset::{ExportPreset, SubtitleSelection, TrackSelection};
 pub use registry::{HandlerId, KeyBinding, Rhs, TransitionDef};
 pub use request::{OptValue, Opts, Request, parse_editor_command};
 pub use runtime::{ClipInfo, ObjectForm, Runtime, Sandbox};
+pub use ui::{
+    PanelAnchor, PanelContent, PanelHandle, PanelLine, PanelRequest, PanelRole, PanelSpan,
+    PanelSpec,
+};

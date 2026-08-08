@@ -14,6 +14,7 @@ use davimci_motion::{JumpConfig, JumpPoints, Zoom};
 
 use crate::job::Job;
 use crate::message::Message;
+use crate::panel::{PanelContent, PanelStore, PanelView};
 use crate::thumbnail::{Thumbnail, Thumbnails};
 use crate::viewport::Viewport;
 use crate::waveform::Waveforms;
@@ -40,6 +41,12 @@ pub struct ViewInputs<'a> {
     /// How wide one thumbnail is drawn, in columns - the frontend's
     /// [`crate::Surface`] hint. Zero draws no filmstrip.
     pub thumbnail_columns: u32,
+    /// Panels plugins have open, when the host has any.
+    pub panels: Option<&'a PanelStore>,
+    /// How many character cells wide the timeline area is - the unit panels
+    /// are placed in. Zero falls back to the viewport's columns, which is
+    /// right for a terminal and for a test.
+    pub cell_columns: u32,
 }
 
 impl Default for ViewInputs<'_> {
@@ -57,6 +64,8 @@ impl Default for ViewInputs<'_> {
             waveforms: None,
             thumbnails: None,
             thumbnail_columns: 0,
+            panels: None,
+            cell_columns: 0,
         }
     }
 }
@@ -167,6 +176,9 @@ pub struct ViewState {
     pub message: Option<Message>,
     pub job: Option<Job>,
     pub recording: Option<char>,
+    /// Plugin panels, already placed, back to front. A frontend draws these
+    /// over everything else and decides nothing about where they sit.
+    pub panels: Vec<PanelView>,
 }
 
 impl ViewState {
@@ -274,6 +286,7 @@ impl ViewState {
             message: inputs.message.clone(),
             job: inputs.job.clone(),
             recording: inputs.recording,
+            panels: place_panels(&viewport, inputs, playhead.frame),
         }
     }
 
@@ -372,8 +385,73 @@ impl ViewState {
         if let Some(m) = &self.message {
             let _ = writeln!(s, "message {:?} {}", m.severity, m.text);
         }
+        s.push_str(&dump_panels(&self.panels));
         s
     }
+}
+
+/// Place every open panel on the surface the frontend reported.
+///
+/// Panels are measured in character cells, which a terminal and a window
+/// both have; the timeline's columns are not the same unit in the two, so a
+/// panel placed in columns would land in two different places.
+fn place_panels(
+    viewport: &Viewport,
+    inputs: &ViewInputs<'_>,
+    playhead: Frame,
+) -> Vec<crate::panel::PanelView> {
+    let Some(store) = inputs.panels else {
+        return Vec::new();
+    };
+    let cells = if inputs.cell_columns == 0 {
+        viewport.columns()
+    } else {
+        inputs.cell_columns
+    };
+    // A panel that follows the playhead wants the cell its column falls in.
+    let at = viewport
+        .column_of(playhead)
+        .map(|c| c * cells / viewport.columns().max(1));
+    store.place(
+        cells,
+        u32::try_from(viewport.rows()).unwrap_or(u32::MAX),
+        at,
+    )
+}
+
+/// Panels as [`ViewState::dump`] prints them: placement, then content, so a
+/// panel that moves or changes fails a snapshot.
+fn dump_panels(panels: &[PanelView]) -> String {
+    use std::fmt::Write as _;
+    let mut s = String::new();
+    for p in panels {
+        let _ = writeln!(
+            s,
+            "panel {} owner={} at={},{} size={}x{} z={}{}{}",
+            p.id.get(),
+            p.owner,
+            p.rect.column,
+            p.rect.row,
+            p.rect.columns,
+            p.rect.rows,
+            p.z,
+            if p.focus { " focus" } else { "" },
+            p.title
+                .as_ref()
+                .map_or_else(String::new, |t| format!(" title={t}")),
+        );
+        match &p.content {
+            PanelContent::Lines(lines) => {
+                for line in lines {
+                    let _ = writeln!(s, "  {}", line.text());
+                }
+            }
+            PanelContent::Pixels { width, height, .. } => {
+                let _ = writeln!(s, "  <picture {width}x{height}>");
+            }
+        }
+    }
+    s
 }
 
 /// One lane's envelope: peak level per visible column.

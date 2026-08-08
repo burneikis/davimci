@@ -615,6 +615,7 @@ fn a_tick_decodes_one_thumbnail_and_leaves_the_playhead_where_it_was() {
         columns: 300,
         rows: 4,
         thumbnail_columns: 40,
+        cell_columns: 100,
     });
     let before = app.session().timeline().playhead();
     // First tick asks, second decodes what was asked for.

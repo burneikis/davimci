@@ -80,6 +80,9 @@ pub struct Editor {
     queued_requests: Vec<Request>,
     /// Messages the plugin layer produced outside a callback.
     plugin_messages: Vec<Message>,
+    /// The `on_key` handler of each focusable panel a plugin opened, so a
+    /// keystroke into a focused panel reaches the plugin that owns it.
+    panel_handlers: std::collections::BTreeMap<u32, u32>,
     /// The preset and output of the running export, for `AfterExport`.
     last_export: Option<(String, String)>,
     /// Which clips existed at the last notification, so an edit can be
@@ -142,6 +145,7 @@ impl Editor {
             plugins: Plugins::empty(),
             queued_requests: Vec::new(),
             plugin_messages: Vec::new(),
+            panel_handlers: std::collections::BTreeMap::new(),
             last_export: None,
             known_clips: std::collections::BTreeSet::new(),
             preview: true,
@@ -736,7 +740,12 @@ impl Editor {
         for failure in &dispatch.failures {
             self.notices.push(Message::error(failure.message.clone()));
         }
-        let (_, messages) = self.plugins.take_requests();
+        // Anything queued outside a handler - by config top level, or by a
+        // handler through a module that queues rather than returns - waits
+        // with the rest for the next tick. Dropping it here is what used to
+        // lose a panel a config opened at load time.
+        let (mut requests, messages) = self.plugins.take_requests();
+        self.queued_requests.append(&mut requests);
         self.plugin_messages.extend(messages);
         dispatch.cancelled
     }
@@ -807,7 +816,54 @@ impl Editor {
             Request::Motion { name, opts } => {
                 self.move_by_plugin_motion(&name, &opts, session, out);
             }
+            // A panel is view state: it goes to the app as an effect and
+            // never near `Session::exec`.
+            Request::Panel(request) => self.run_panel_request(request, out),
         }
+    }
+
+    /// Translate a Lua panel request into the app's own panel vocabulary.
+    fn run_panel_request(&mut self, request: davimci_lua::PanelRequest, out: &mut PluginEffects) {
+        use davimci_app::{PanelId, PanelOp};
+        let id = PanelId(request.handle());
+        let op = match request {
+            davimci_lua::PanelRequest::Open { handle, spec } => {
+                match spec.on_key {
+                    Some(handler) => {
+                        self.panel_handlers.insert(handle, handler);
+                    }
+                    None => {
+                        self.panel_handlers.remove(&handle);
+                    }
+                }
+                PanelOp::Open {
+                    id,
+                    spec: Box::new(davimci_app::PanelSpec {
+                        owner: format!("lua:{handle}"),
+                        title: spec.title,
+                        anchor: panel_anchor(spec.anchor),
+                        size: davimci_app::PanelSize {
+                            columns: spec.columns,
+                            rows: spec.rows,
+                        },
+                        z: spec.z,
+                        focus: spec.focus,
+                        on_key: spec.on_key,
+                    }),
+                }
+            }
+            davimci_lua::PanelRequest::SetContent { content, .. } => PanelOp::SetContent {
+                id,
+                content: panel_content(content),
+            },
+            davimci_lua::PanelRequest::Show(_) => PanelOp::Show(id),
+            davimci_lua::PanelRequest::Hide(_) => PanelOp::Hide(id),
+            davimci_lua::PanelRequest::Close(handle) => {
+                self.panel_handlers.remove(&handle);
+                PanelOp::Close(id)
+            }
+        };
+        out.panel(op);
     }
 
     /// A plugin export goes to the preset's own default output, through the
@@ -957,6 +1013,71 @@ fn splits(command: &EditCommand) -> Vec<(TrackId, Frame)> {
     }
 }
 
+/// A panel key as a Lua handler reads it: the spelling a config would use,
+/// so a handler matches on `"j"` or `"<Esc>"`.
+fn panel_key_name(key: davimci_app::ModalKey) -> String {
+    use davimci_app::ModalKey;
+    match key {
+        ModalKey::Char(c) => c.to_string(),
+        ModalKey::Escape => "<Esc>".to_string(),
+        ModalKey::Enter => "<Enter>".to_string(),
+        ModalKey::Backspace => "<BS>".to_string(),
+        ModalKey::Tab => "<Tab>".to_string(),
+        ModalKey::Left => "<Left>".to_string(),
+        ModalKey::Right => "<Right>".to_string(),
+        ModalKey::Up => "<Up>".to_string(),
+        ModalKey::Down => "<Down>".to_string(),
+    }
+}
+
+fn panel_anchor(anchor: davimci_lua::PanelAnchor) -> davimci_app::PanelAnchor {
+    use davimci_lua::PanelAnchor as From;
+    match anchor {
+        From::Center => davimci_app::PanelAnchor::Center,
+        From::TopLeft => davimci_app::PanelAnchor::TopLeft,
+        From::TopRight => davimci_app::PanelAnchor::TopRight,
+        From::BottomLeft => davimci_app::PanelAnchor::BottomLeft,
+        From::BottomRight => davimci_app::PanelAnchor::BottomRight,
+        From::Playhead => davimci_app::PanelAnchor::Playhead,
+    }
+}
+
+fn panel_content(content: davimci_lua::PanelContent) -> davimci_app::PanelContent {
+    match content {
+        davimci_lua::PanelContent::Lines(lines) => davimci_app::PanelContent::Lines(
+            lines
+                .into_iter()
+                .map(|line| davimci_app::PanelLine {
+                    spans: line
+                        .spans
+                        .into_iter()
+                        .map(|s| davimci_app::PanelSpan::new(s.text, panel_role(s.role)))
+                        .collect(),
+                })
+                .collect(),
+        ),
+        davimci_lua::PanelContent::Picture {
+            width,
+            height,
+            rgba,
+        } => davimci_app::PanelContent::Pixels {
+            width,
+            height,
+            rgba: std::sync::Arc::new(rgba),
+        },
+    }
+}
+
+fn panel_role(role: davimci_lua::PanelRole) -> davimci_app::PanelRole {
+    use davimci_lua::PanelRole as From;
+    match role {
+        From::Normal => davimci_app::PanelRole::Normal,
+        From::Key => davimci_app::PanelRole::Key,
+        From::Accent => davimci_app::PanelRole::Accent,
+        From::Warning => davimci_app::PanelRole::Warning,
+    }
+}
+
 /// A source millisecond as a timeline frame.
 fn frame_of_ms(ms: u64, fps: davimci_core::Fps) -> u64 {
     ms.saturating_mul(u64::from(fps.num)) / (1000 * u64::from(fps.den).max(1))
@@ -1001,6 +1122,44 @@ impl Host for Editor {
             return PluginEffects::default();
         }
         self.run_requests(queued, session)
+    }
+
+    fn key_pending(&mut self, pending: &davimci_keys::Pending, _session: &mut Session) {
+        self.fire(&davimci_lua::Event::KeyPending {
+            mode: pending.mode.name().to_string(),
+            keys: pending.text.clone(),
+            continuations: pending
+                .continuations
+                .iter()
+                .map(|c| davimci_lua::Continuation {
+                    key: davimci_keys::docs::render(std::slice::from_ref(&c.key)),
+                    description: c
+                        .leaf
+                        .as_ref()
+                        .map(davimci_keys::docs::describe_leaf)
+                        .unwrap_or_default(),
+                    group: c.leaf.is_none(),
+                })
+                .collect(),
+        });
+    }
+
+    fn panel_key(
+        &mut self,
+        panel: davimci_app::PanelId,
+        key: davimci_app::ModalKey,
+        session: &mut Session,
+    ) -> PluginEffects {
+        let Some(handler) = self.panel_handlers.get(&panel.get()).copied() else {
+            return PluginEffects::default();
+        };
+        let requests = self
+            .plugins
+            .invoke_key(handler, &panel_key_name(key))
+            .unwrap_or_default();
+        let messages = self.plugins.take_requests().1;
+        self.plugin_messages.extend(messages);
+        self.run_requests(requests, session)
     }
 
     fn mode_changed(&mut self, from: davimci_keys::Mode, to: davimci_keys::Mode) {

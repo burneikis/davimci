@@ -99,6 +99,90 @@ impl Parser {
         !matches!(self.state, St::Idle)
     }
 
+    /// The keys buffered so far, as the table would match them.
+    ///
+    /// Only the part a [`crate::Keymap`] lookup takes: a count or a register
+    /// prefix is grammar, not a table entry, so it is reported separately by
+    /// [`Self::pending_text`].
+    #[must_use]
+    pub fn pending_keys(&self) -> &[Key] {
+        match &self.state {
+            St::Buffering { buf, .. } | St::OperatorTarget { buf, .. } => buf,
+            _ => &[],
+        }
+    }
+
+    /// The half-typed sequence as the user typed it, count and register
+    /// included - what a status line or a which-key panel shows.
+    #[must_use]
+    pub fn pending_text(&self) -> String {
+        let prefix = |count1: Option<u32>, register: Option<char>| {
+            let mut s = String::new();
+            if let Some(n) = count1 {
+                s.push_str(&n.to_string());
+            }
+            if let Some(r) = register {
+                s.push('"');
+                s.push(r);
+            }
+            s
+        };
+        match &self.state {
+            St::Idle => String::new(),
+            St::Count1(n) => n.to_string(),
+            St::AwaitRegisterChar { count1 } => format!("{}\"", prefix(*count1, None)),
+            St::HaveRegister { count1, register } => prefix(*count1, Some(*register)),
+            St::Buffering {
+                count1,
+                register,
+                buf,
+                ..
+            } => format!("{}{}", prefix(*count1, *register), crate::docs::render(buf)),
+            St::NeedsArg {
+                count1, register, ..
+            } => prefix(*count1, *register),
+            St::OperatorTarget {
+                op,
+                trigger,
+                count1,
+                register,
+                count2,
+                buf,
+            } => {
+                let _ = op;
+                let mut s = prefix(*count1, *register);
+                s.push_str(&crate::docs::render(trigger));
+                if let Some(n) = count2 {
+                    s.push_str(&n.to_string());
+                }
+                s.push_str(&crate::docs::render(buf));
+                s
+            }
+            St::VisualObject { around } => {
+                if *around {
+                    "a".to_string()
+                } else {
+                    "i".to_string()
+                }
+            }
+            St::OperatorObject {
+                op,
+                count1,
+                register,
+                count2,
+                wide,
+            } => {
+                let _ = op;
+                let mut s = prefix(*count1, *register);
+                if let Some(n) = count2 {
+                    s.push_str(&n.to_string());
+                }
+                s.push(if *wide { 'a' } else { 'i' });
+                s
+            }
+        }
+    }
+
     /// Drop any half-typed sequence. Used on `Esc` and when the editor
     /// switches to a different timeline, where a pending count or operator
     /// would otherwise apply to the wrong one.

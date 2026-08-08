@@ -132,6 +132,25 @@ impl Feed {
     }
 }
 
+/// What the grammar is waiting for: the keys typed so far and every key that
+/// could follow them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Pending {
+    pub mode: Mode,
+    /// The sequence as typed, count and register included. Empty when the
+    /// grammar is idle.
+    pub text: String,
+    pub continuations: Vec<crate::keymap::Continuation>,
+}
+
+impl Pending {
+    /// Whether anything is half-typed. An idle grammar has nothing to show.
+    #[must_use]
+    pub fn is_idle(&self) -> bool {
+        self.text.is_empty()
+    }
+}
+
 /// Ties the key grammar to a live session. One `Engine` per open timeline.
 #[derive(Debug)]
 pub struct Engine {
@@ -197,6 +216,19 @@ impl Engine {
 
     pub fn set_zoom(&mut self, zoom: Zoom) {
         self.zoom = zoom;
+    }
+
+    /// The half-typed sequence and what could finish it.
+    ///
+    /// The grammar is the only thing that knows this, so a which-key panel
+    /// is a view of it rather than a second copy of the keymap.
+    #[must_use]
+    pub fn pending(&self) -> Pending {
+        Pending {
+            mode: self.mode.mode(),
+            text: self.parser.pending_text(),
+            continuations: self.keymap.continuations(self.parser.pending_keys()),
+        }
     }
 
     /// `:set visualstart`. Only affects selections made after it: rewriting a

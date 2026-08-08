@@ -13,7 +13,8 @@
 use std::fmt::Write as _;
 
 use davimci_app::{
-    LabelMetrics, MediaPicker, Numbers, PickerIntent, SubtitleEdit, Surface, ViewState,
+    LabelMetrics, MediaPicker, Numbers, PanelContent, PanelRole, PanelView, PickerIntent,
+    SubtitleEdit, Surface, ViewState,
 };
 
 use crate::preview::Band;
@@ -64,6 +65,8 @@ pub fn surface(width: u16, height: u16, command_rows: u16, preview_rows: u16) ->
         // A terminal cell cannot hold a picture, so no clip is ever sampled
         // for a filmstrip.
         thumbnail_columns: 0,
+        // A terminal column *is* a cell.
+        cell_columns: u32::from(width.saturating_sub(GUTTER)),
     }
 }
 
@@ -113,9 +116,150 @@ pub fn lines(
         }
     }
 
+    // Panels sit over the timeline rows the tracks were drawn into: the
+    // ruler row is chrome, and the app placed them in track rows.
+    let top = usize::from(band.rows) + 1;
+    overlay_panels(&mut out, view, width, top);
+
     out.push(status(view, width));
     out.extend(command_line(view, width));
     out
+}
+
+/// Draw every placed panel over the rows beneath it.
+///
+/// Placement was decided in `davimci-app`; this only blits, which is why the
+/// GUI and the terminal cannot put a panel in two different places.
+fn overlay_panels(out: &mut [Line<'static>], view: &ViewState, width: u16, top: usize) {
+    for panel in &view.panels {
+        let cells = panel_rows(panel);
+        for (i, row) in cells.into_iter().enumerate() {
+            let Some(target) = out.get_mut(top + panel.rect.row as usize + i) else {
+                continue;
+            };
+            let at = usize::from(GUTTER) + panel.rect.column as usize;
+            *target = splice(target, at, row, width);
+        }
+    }
+}
+
+/// One panel as terminal rows, each exactly as wide as the panel.
+///
+/// A picture is a placeholder here by design: a terminal has no pixels, and
+/// the rule is to degrade locally rather than to refuse the panel.
+fn panel_rows(panel: &PanelView) -> Vec<Vec<Span<'static>>> {
+    let w = panel.rect.columns as usize;
+    let h = panel.rect.rows as usize;
+    let border = w >= 2 && h >= 2;
+    let inner = if border { w - 2 } else { w };
+    let frame = Style::default().fg(if panel.focus {
+        Color::White
+    } else {
+        Color::DarkGray
+    });
+
+    let mut body: Vec<Vec<Span<'static>>> = Vec::new();
+    match &panel.content {
+        PanelContent::Lines(lines) => {
+            for line in lines {
+                body.push(
+                    line.spans
+                        .iter()
+                        .map(|s| Span::styled(s.text.clone(), role_style(s.role)))
+                        .collect(),
+                );
+            }
+        }
+        PanelContent::Pixels { width, height, .. } => body.push(vec![Span::styled(
+            format!("[picture {width}x{height}]"),
+            Style::default().fg(Color::DarkGray),
+        )]),
+    }
+
+    let mut out: Vec<Vec<Span<'static>>> = Vec::new();
+    if border {
+        let title = panel.title.clone().unwrap_or_default();
+        let bar: String =
+            std::iter::repeat_n('\u{2500}', inner.saturating_sub(title.chars().count())).collect();
+        out.push(vec![Span::styled(
+            fit(
+                &format!("\u{250c}{title}{bar}\u{2510}"),
+                u16::try_from(w).unwrap_or(u16::MAX),
+            ),
+            frame,
+        )]);
+    }
+    let body_rows = if border { h.saturating_sub(2) } else { h };
+    for i in 0..body_rows {
+        let content = body.get(i).cloned().unwrap_or_default();
+        let mut row = Vec::new();
+        if border {
+            row.push(Span::styled("\u{2502}".to_string(), frame));
+        }
+        let mut used = 0usize;
+        for span in content {
+            let room = inner.saturating_sub(used);
+            if room == 0 {
+                break;
+            }
+            let text: String = span.content.chars().take(room).collect();
+            used += text.chars().count();
+            row.push(Span::styled(text, span.style));
+        }
+        row.push(Span::raw(" ".repeat(inner.saturating_sub(used))));
+        if border {
+            row.push(Span::styled("\u{2502}".to_string(), frame));
+        }
+        out.push(row);
+    }
+    if border {
+        out.push(vec![Span::styled(
+            format!("\u{2514}{}\u{2518}", "\u{2500}".repeat(inner)),
+            frame,
+        )]);
+    }
+    out.truncate(h);
+    out
+}
+
+fn role_style(role: PanelRole) -> Style {
+    match role {
+        PanelRole::Normal => Style::default().fg(Color::Gray),
+        PanelRole::Key => Style::default().fg(Color::Yellow).bold(),
+        PanelRole::Accent => Style::default().fg(Color::White).bold(),
+        PanelRole::Warning => Style::default().fg(Color::Red),
+    }
+}
+
+/// Overwrite `line` from character `at` with `patch`, keeping the styles of
+/// everything it does not cover and the row exactly `width` wide.
+fn splice(line: &Line<'static>, at: usize, patch: Vec<Span<'static>>, width: u16) -> Line<'static> {
+    // Cell by cell rather than span by span: a panel lands wherever it lands,
+    // and a row that came back a character short or long would ruin every
+    // row beneath it.
+    let mut cells: Vec<(char, Style)> = line
+        .spans
+        .iter()
+        .flat_map(|s| s.content.chars().map(move |c| (c, s.style)))
+        .collect();
+    cells.resize(usize::from(width), (' ', Style::default()));
+    let mut column = at;
+    for span in patch {
+        for c in span.content.chars() {
+            if let Some(cell) = cells.get_mut(column) {
+                *cell = (c, span.style);
+            }
+            column += 1;
+        }
+    }
+    let mut out: Vec<Span<'static>> = Vec::new();
+    for (c, style) in cells {
+        match out.last_mut() {
+            Some(last) if last.style == style => last.content.to_mut().push(c),
+            _ => out.push(Span::styled(c.to_string(), style)),
+        }
+    }
+    Line::from(out)
 }
 
 /// The ruler: jump points as ticks, with the playhead's own column marked,

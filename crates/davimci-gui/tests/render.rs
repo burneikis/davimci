@@ -252,7 +252,7 @@ fn the_picker_title_names_the_intent() {
             .iter()
             .filter_map(|op| match op {
                 Paint::Text { text, .. } => Some(text.clone()),
-                Paint::Rect { .. } | Paint::Image { .. } => None,
+                Paint::Rect { .. } | Paint::Image { .. } | Paint::Picture { .. } => None,
             })
             .collect::<Vec<_>>()
             .join(" | ");
@@ -458,4 +458,67 @@ fn a_clip_thumbnail_tiles_across_the_clip_and_stays_inside_it() {
 fn an_unanalysed_lane_paints_no_envelope() {
     let list = paint_view(&fixtures::normal(), &layout(800, 600), &Chrome::default());
     assert!(list.rects(Fill::Waveform).is_empty());
+}
+
+#[test]
+fn a_plugin_panel_is_painted_over_the_timeline() {
+    let view = davimci_app::fixtures::panel();
+    let mut gui = Gui::new(800, 600);
+    gui.render(&view).unwrap();
+    let list = gui.last_draw().expect("a draw list");
+    let text: Vec<&str> = list.texts();
+    assert!(
+        text.contains(&"which-key") && text.iter().any(|t| t.trim() == "go to the start"),
+        "the panel's text was not painted: {text:?}"
+    );
+    // Its background is drawn, and as a modal - so the video texture cannot
+    // cover it.
+    assert!(
+        !list
+            .rects(davimci_gui::paint::Fill::PanelBackground)
+            .is_empty(),
+        "the panel has no body"
+    );
+    assert!(
+        list.ops()
+            .iter()
+            .filter(|op| matches!(
+                op,
+                davimci_gui::paint::Paint::Text {
+                    role: davimci_gui::paint::TextRole::Panel(_),
+                    ..
+                }
+            ))
+            .all(davimci_gui::paint::Paint::is_modal),
+        "panel text is not drawn as an overlay"
+    );
+}
+
+/// Regression: the which-key panel drew each key half cut off.
+///
+/// A shell insets text by `TEXT_PADDING` and clips it to the rectangle it was
+/// given, so a span box sized to its glyphs alone loses its tail - and a
+/// one-glyph key span loses half of its only glyph.
+#[test]
+fn a_panel_span_has_room_for_its_glyphs_and_the_shells_inset() {
+    let view = davimci_app::fixtures::panel();
+    let mut gui = Gui::new(800, 600);
+    gui.render(&view).unwrap();
+    let metrics = davimci_gui::layout::Metrics::default();
+    for op in gui.last_draw().expect("a draw list").ops() {
+        let davimci_gui::paint::Paint::Text {
+            rect,
+            role: davimci_gui::paint::TextRole::Panel(_),
+            text,
+        } = op
+        else {
+            continue;
+        };
+        let glyphs = u32::try_from(text.chars().count()).unwrap() * metrics.char_width;
+        assert!(
+            rect.width >= glyphs + davimci_gui::layout::TEXT_PADDING,
+            "{text:?} is drawn in {rect:?}, which clips {} px of it",
+            glyphs + davimci_gui::layout::TEXT_PADDING - rect.width
+        );
+    }
 }

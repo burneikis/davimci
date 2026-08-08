@@ -440,7 +440,7 @@ fn every_v1_event_is_bindable_and_dispatchable() {
         fired = {}
         for _, name in ipairs({ "PlayheadMoved", "SplitPerformed", "ClipDeleted",
                                 "ClipInserted", "ModeChanged", "BeforeExport",
-                                "AfterExport", "ProjectLoaded" }) do
+                                "AfterExport", "ProjectLoaded", "KeyPending" }) do
           require("davimci.autocmd").on(name, function(e)
             fired[#fired + 1] = e.event
           end)
@@ -478,6 +478,15 @@ fn every_v1_event_is_bindable_and_dispatchable() {
         },
         Event::ProjectLoaded {
             path: "/tmp/p.davimci".into(),
+        },
+        Event::KeyPending {
+            mode: "NORMAL".into(),
+            keys: "g".into(),
+            continuations: vec![crate::event::Continuation {
+                key: "g".into(),
+                description: "go to the start".into(),
+                group: false,
+            }],
         },
     ];
     for (e, name) in events.iter().zip(EVENTS) {
@@ -941,4 +950,114 @@ fn editor_set_refuses_a_value_no_setting_could_take() {
         err.to_string().contains("previewheight"),
         "the error names the property: {err}"
     );
+}
+
+// panels
+
+#[test]
+fn a_panel_queues_its_own_lifecycle_and_nothing_else() {
+    use crate::ui::{PanelAnchor, PanelContent, PanelRequest, PanelRole};
+
+    let rt = rt();
+    exec(
+        &rt,
+        r#"
+        local ui = require("davimci.ui")
+        local p = ui.panel({ title = "notes", anchor = "top-right", z = 3 })
+        p:set_lines({ "plain", { { text = "d", role = "key" }, "  delete" } })
+        p:hide()
+        p:show()
+        p:close()
+        "#,
+    );
+    let requests = rt.take_requests();
+    let panels: Vec<PanelRequest> = requests
+        .into_iter()
+        .map(|r| match r {
+            Request::Panel(p) => p,
+            other => panic!("a panel call queued {other:?}"),
+        })
+        .collect();
+    assert_eq!(panels.len(), 5, "{panels:?}");
+    let handle = panels[0].handle();
+    assert!(panels.iter().all(|p| p.handle() == handle), "{panels:?}");
+
+    let PanelRequest::Open { spec, .. } = &panels[0] else {
+        panic!("the first call opens: {panels:?}");
+    };
+    assert_eq!(spec.title.as_deref(), Some("notes"));
+    assert_eq!(spec.anchor, PanelAnchor::TopRight);
+    assert_eq!(spec.z, 3);
+    assert!(!spec.focus, "a panel takes no focus unless it asks");
+
+    let PanelRequest::SetContent {
+        content: PanelContent::Lines(lines),
+        ..
+    } = &panels[1]
+    else {
+        panic!("the second call fills: {panels:?}");
+    };
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[0].spans[0].text, "plain");
+    assert_eq!(lines[1].spans[0].role, PanelRole::Key);
+    assert!(matches!(panels[2], PanelRequest::Hide(_)));
+    assert!(matches!(panels[3], PanelRequest::Show(_)));
+    assert!(matches!(panels[4], PanelRequest::Close(_)));
+}
+
+#[test]
+fn a_panel_that_wants_focus_must_say_how_it_answers_keys() {
+    let rt = rt();
+    let e = rt
+        .exec(
+            r#"require("davimci.ui").panel({ focus = true })"#,
+            "focus.lua",
+            Sandbox::Trusted,
+        )
+        .expect_err("a focused panel with no handler must be refused");
+    let text = e.to_string();
+    assert!(text.contains("on_key"), "{text}");
+    assert!(
+        rt.take_requests().is_empty(),
+        "a refused panel still queued something"
+    );
+}
+
+#[test]
+fn an_unknown_anchor_is_rejected_when_the_panel_is_opened() {
+    let rt = rt();
+    let e = rt
+        .exec(
+            r#"require("davimci.ui").panel({ anchor = "middle-ish" })"#,
+            "anchor.lua",
+            Sandbox::Trusted,
+        )
+        .expect_err("a typo in an anchor must be caught at open time");
+    assert!(e.to_string().contains("bottom-right"), "{e}");
+}
+
+#[test]
+fn a_panel_key_handler_is_called_with_the_key_it_was_given() {
+    let rt = rt();
+    exec(
+        &rt,
+        r#"
+        seen = {}
+        require("davimci.ui").panel({
+          focus = true,
+          on_key = function(key)
+            seen[#seen + 1] = key
+            require("davimci.editor").message("got " .. key)
+          end,
+        })
+        "#,
+    );
+    let Some(Request::Panel(crate::ui::PanelRequest::Open { spec, .. })) =
+        rt.take_requests().into_iter().next()
+    else {
+        panic!("the panel did not open");
+    };
+    let handler = spec.on_key.expect("a focused panel registered its handler");
+    let requests = rt.invoke_key(handler, "j").expect("the handler runs");
+    assert_eq!(requests, vec![Request::Message("got j".to_string())]);
 }

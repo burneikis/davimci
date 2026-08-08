@@ -18,6 +18,9 @@ use crate::error::LuaError;
 use crate::preset::{ExportPreset, SubtitleSelection, TrackSelection, parse_resolution};
 use crate::registry::{Autocmd, KeyBinding, ObjectDef, Rhs, State, parse_mode};
 use crate::request::{OptValue, Opts, Request, parse_editor_command};
+use crate::ui::{
+    PanelAnchor, PanelContent, PanelLine, PanelRequest, PanelRole, PanelSpan, PanelSpec,
+};
 
 /// The v1 event list. A typo in an event name binds a handler
 /// that would never fire, so it is rejected at registration.
@@ -30,6 +33,7 @@ pub const EVENTS: &[&str] = &[
     "BeforeExport",
     "AfterExport",
     "ProjectLoaded",
+    "KeyPending",
 ];
 
 type Shared = Rc<RefCell<State>>;
@@ -78,7 +82,8 @@ pub(crate) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
     let davimci = lua.create_table()?;
     davimci.set("version", env!("CARGO_PKG_VERSION"))?;
 
-    let modules: [(&str, Table); 8] = [
+    let modules: [(&str, Table); 9] = [
+        ("ui", ui_module(lua, state)?),
         ("keymap", keymap_module(lua, state)?),
         ("motions", motions_module(lua, state)?),
         ("textobject", textobject_module(lua, state)?),
@@ -393,6 +398,181 @@ fn timeline_module(lua: &Lua, state: &Shared) -> mlua::Result<Table> {
         })?,
     )?;
     Ok(t)
+}
+
+/// `davimci.ui` - panels.
+///
+/// `ui.panel(spec)` hands back a handle with `set_lines`, `set_picture`,
+/// `show`, `hide` and `close` on it. Every one queues a request: this crate
+/// never draws, and the host decides where a panel lands.
+fn ui_module(lua: &Lua, state: &Shared) -> mlua::Result<Table> {
+    let t = lua.create_table()?;
+    let st = Rc::clone(state);
+    t.set(
+        "panel",
+        lua.create_function(move |lua, spec: Option<Table>| {
+            let spec = match &spec {
+                Some(t) => panel_spec_from_table(t, &st)?,
+                None => PanelSpec::default(),
+            };
+            let handle = {
+                let mut st = st.borrow_mut();
+                let handle = st.next_id();
+                st.requests.push(Request::Panel(PanelRequest::Open {
+                    handle,
+                    spec: Box::new(spec),
+                }));
+                handle
+            };
+            panel_handle(lua, &st, handle)
+        })?,
+    )?;
+    Ok(t)
+}
+
+/// The table `ui.panel` returns: methods that queue, and the handle itself
+/// so a plugin can keep it.
+fn panel_handle(lua: &Lua, state: &Shared, handle: u32) -> mlua::Result<Table> {
+    let t = lua.create_table()?;
+    t.set("id", handle)?;
+
+    let queue = |state: &Shared, request: PanelRequest| {
+        state.borrow_mut().requests.push(Request::Panel(request));
+    };
+
+    let st = Rc::clone(state);
+    t.set(
+        "set_lines",
+        lua.create_function(move |_, (_this, lines): (Table, Table)| {
+            let content = PanelContent::Lines(panel_lines_from_table(&lines)?);
+            queue(&st, PanelRequest::SetContent { handle, content });
+            Ok(())
+        })?,
+    )?;
+    let st = Rc::clone(state);
+    t.set(
+        "set_picture",
+        lua.create_function(move |_, (_this, def): (Table, Table)| {
+            let width: u32 = def.get("width")?;
+            let height: u32 = def.get("height")?;
+            let rgba: mlua::LuaString = def.get("rgba")?;
+            let content = PanelContent::Picture {
+                width,
+                height,
+                rgba: rgba.as_bytes().to_vec(),
+            };
+            queue(&st, PanelRequest::SetContent { handle, content });
+            Ok(())
+        })?,
+    )?;
+    for (name, make) in [
+        ("show", PanelRequest::Show as fn(u32) -> PanelRequest),
+        ("hide", PanelRequest::Hide as fn(u32) -> PanelRequest),
+        ("close", PanelRequest::Close as fn(u32) -> PanelRequest),
+    ] {
+        let st = Rc::clone(state);
+        t.set(
+            name,
+            lua.create_function(move |_, _this: Table| {
+                queue(&st, make(handle));
+                Ok(())
+            })?,
+        )?;
+    }
+    Ok(t)
+}
+
+fn panel_spec_from_table(def: &Table, state: &Shared) -> mlua::Result<PanelSpec> {
+    let anchor = match def.get::<Option<String>>("anchor")? {
+        None => PanelAnchor::default(),
+        Some(name) => PanelAnchor::parse(&name).ok_or_else(|| {
+            err(LuaError::Config(format!(
+                "a panel cannot be anchored at '{name}' (known: {})",
+                PanelAnchor::NAMES
+            )))
+        })?,
+    };
+    let on_key = match def.get::<Option<Function>>("on_key")? {
+        None => None,
+        Some(f) => {
+            let mut st = state.borrow_mut();
+            let id = st.next_id();
+            st.callbacks.insert(id, f);
+            Some(id)
+        }
+    };
+    let focus = def.get::<Option<bool>>("focus")?.unwrap_or(false);
+    if focus && on_key.is_none() {
+        return Err(err(LuaError::Config(
+            "a panel that takes focus needs an on_key handler to answer with".into(),
+        )));
+    }
+    Ok(PanelSpec {
+        title: def.get::<Option<String>>("title")?,
+        anchor,
+        columns: def.get::<Option<u32>>("columns")?,
+        rows: def.get::<Option<u32>>("rows")?,
+        z: def.get::<Option<i32>>("z")?.unwrap_or(0),
+        focus,
+        on_key,
+    })
+}
+
+/// `{ "plain", { { text = "d", role = "key" }, ... } }` - a line is either a
+/// string or a list of spans, because most panels only want text.
+fn panel_lines_from_table(lines: &Table) -> mlua::Result<Vec<PanelLine>> {
+    let mut out = Vec::new();
+    for value in lines.clone().sequence_values::<Value>() {
+        let line = match value? {
+            Value::String(s) => PanelLine {
+                spans: vec![PanelSpan {
+                    text: s.to_str()?.to_string(),
+                    role: PanelRole::Normal,
+                }],
+            },
+            Value::Table(t) => {
+                let mut spans = Vec::new();
+                for span in t.sequence_values::<Value>() {
+                    spans.push(match span? {
+                        Value::String(s) => PanelSpan {
+                            text: s.to_str()?.to_string(),
+                            role: PanelRole::Normal,
+                        },
+                        Value::Table(t) => {
+                            let role = match t.get::<Option<String>>("role")? {
+                                None => PanelRole::Normal,
+                                Some(name) => PanelRole::parse(&name).ok_or_else(|| {
+                                    err(LuaError::Config(format!(
+                                        "'{name}' is not a panel text role (known: {})",
+                                        PanelRole::NAMES
+                                    )))
+                                })?,
+                            };
+                            PanelSpan {
+                                text: t.get::<Option<String>>("text")?.unwrap_or_default(),
+                                role,
+                            }
+                        }
+                        other => {
+                            return Err(err(LuaError::Config(format!(
+                                "a panel span must be a string or a table, not {}",
+                                other.type_name()
+                            ))));
+                        }
+                    });
+                }
+                PanelLine { spans }
+            }
+            other => {
+                return Err(err(LuaError::Config(format!(
+                    "a panel line must be a string or a list of spans, not {}",
+                    other.type_name()
+                ))));
+            }
+        };
+        out.push(line);
+    }
+    Ok(out)
 }
 
 fn media_module(lua: &Lua, state: &Shared) -> mlua::Result<Table> {

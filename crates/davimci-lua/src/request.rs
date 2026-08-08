@@ -103,6 +103,9 @@ pub enum Request {
     /// `require("davimci.editor").set(property, value)` - `:set`, so a config
     /// can state a view setting the session would otherwise have to type.
     Set { property: String, value: String },
+    /// `require("davimci.ui")` - open, fill, show, hide or close a panel.
+    /// Never an edit: a panel is view state and stays out of the undo log.
+    Panel(crate::ui::PanelRequest),
 }
 
 /// Map an `editor.*` string from a keymap right-hand side onto

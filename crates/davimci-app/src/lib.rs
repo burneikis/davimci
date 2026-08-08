@@ -17,6 +17,7 @@ pub mod frontend;
 pub mod job;
 pub mod message;
 pub mod modal;
+pub mod panel;
 pub mod picker;
 pub mod plugin;
 pub mod ruler;
@@ -39,6 +40,10 @@ pub use frontend::{Event, Frontend, Response, Surface};
 pub use job::{Job, JobList, JobState, JobUpdate};
 pub use message::{Message, MessageQueue, Severity};
 pub use modal::{ModalKey, Modals};
+pub use panel::{
+    Panel, PanelAnchor, PanelContent, PanelId, PanelLine, PanelOp, PanelRect, PanelRole, PanelSize,
+    PanelSpan, PanelSpec, PanelStore, PanelView,
+};
 pub use picker::{Entry, MediaPicker, PickerEvent, PickerIntent};
 pub use plugin::PluginEffects;
 pub use ruler::{Label, LabelMetrics, Numbers, labels};

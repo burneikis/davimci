@@ -123,6 +123,43 @@ pub fn waveform() -> ViewState {
     ViewState::build(&s, viewport(Zoom::new(8)), &JumpConfig::default(), &inputs)
 }
 
+/// A plugin panel over the timeline, as a which-key plugin would open it:
+/// bottom-left, unfocused, two lines of keys.
+#[must_use]
+pub fn panel() -> ViewState {
+    use crate::panel::{
+        PanelAnchor, PanelContent, PanelId, PanelLine, PanelOp, PanelRole, PanelSpan, PanelSpec,
+        PanelStore,
+    };
+    let s = session();
+    let mut panels = PanelStore::default();
+    let id = PanelId(1);
+    let _ = panels.apply(PanelOp::Open {
+        id,
+        spec: Box::new(PanelSpec {
+            owner: "which-key".into(),
+            title: Some("which-key".into()),
+            anchor: PanelAnchor::BottomLeft,
+            ..PanelSpec::default()
+        }),
+    });
+    let row = |key: &str, what: &str| PanelLine {
+        spans: vec![
+            PanelSpan::new(key, PanelRole::Key),
+            PanelSpan::new(format!("  {what}"), PanelRole::Normal),
+        ],
+    };
+    let _ = panels.apply(PanelOp::SetContent {
+        id,
+        content: PanelContent::Lines(vec![row("g", "go to the start"), row("d", "delete")]),
+    });
+    let inputs = ViewInputs {
+        panels: Some(&panels),
+        ..ViewInputs::default()
+    };
+    ViewState::build(&s, viewport(Zoom::new(8)), &JumpConfig::default(), &inputs)
+}
+
 /// Every golden view, with a stable name for snapshot files.
 #[must_use]
 pub fn all() -> Vec<(&'static str, ViewState)> {
@@ -132,5 +169,6 @@ pub fn all() -> Vec<(&'static str, ViewState)> {
         ("visual_across_tracks", visual_across_tracks()),
         ("zoomed_out", zoomed_out()),
         ("waveform", waveform()),
+        ("panel", panel()),
     ]
 }

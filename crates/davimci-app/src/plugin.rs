@@ -9,18 +9,26 @@
 use davimci_keys::Action;
 
 use crate::message::Message;
+use crate::panel::PanelOp;
 
 /// Actions to run and things to say, in the order the plugin asked for them.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PluginEffects {
     pub actions: Vec<Action>,
     pub messages: Vec<Message>,
+    /// Panels to open, fill, show, hide or close. Applied after the actions,
+    /// so a plugin that edits and then reports sees the edit's result.
+    pub panels: Vec<PanelOp>,
 }
 
 impl PluginEffects {
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.actions.is_empty() && self.messages.is_empty()
+        self.actions.is_empty() && self.messages.is_empty() && self.panels.is_empty()
+    }
+
+    pub fn panel(&mut self, op: PanelOp) {
+        self.panels.push(op);
     }
 
     pub fn say(&mut self, message: Message) {

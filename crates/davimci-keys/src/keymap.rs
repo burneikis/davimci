@@ -30,6 +30,17 @@ pub enum Lookup {
     Match(LeafAction),
 }
 
+/// One key that could follow the sequence typed so far.
+///
+/// `leaf` is what pressing it would run, when it completes a binding on its
+/// own; a key that only extends longer bindings carries `None` and is shown
+/// as a group.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Continuation {
+    pub key: Key,
+    pub leaf: Option<LeafAction>,
+}
+
 /// Key-sequence to [`LeafAction`] bindings, defaults with overrides layered
 /// on top (config over defaults).
 #[derive(Debug, Clone)]
@@ -86,6 +97,31 @@ impl Keymap {
     #[must_use]
     pub fn has_object(&self, c: char) -> bool {
         self.objects.contains(&c)
+    }
+
+    /// Every key that can follow `buf`, in key order.
+    ///
+    /// This is what a which-key panel is a view of: the table is the only
+    /// thing that knows which keys are live, so no frontend and no plugin
+    /// gets to guess at it.
+    #[must_use]
+    pub fn continuations(&self, buf: &[Key]) -> Vec<Continuation> {
+        let mut next: std::collections::BTreeMap<String, Continuation> =
+            std::collections::BTreeMap::new();
+        for (keys, leaf) in &self.bindings {
+            if keys.len() <= buf.len() || !keys.starts_with(buf) {
+                continue;
+            }
+            let key = keys[buf.len()];
+            let completes = keys.len() == buf.len() + 1;
+            let entry = next
+                .entry(crate::docs::render(&[key]))
+                .or_insert(Continuation { key, leaf: None });
+            if completes {
+                entry.leaf = Some(leaf.clone());
+            }
+        }
+        next.into_values().collect()
     }
 
     #[must_use]

@@ -15,7 +15,7 @@
 
 use std::fmt::Write as _;
 
-use davimci_app::{Severity, Thumbnail, ViewState};
+use davimci_app::{PanelId, PanelRole, Severity, Thumbnail, ViewState};
 
 /// A rectangle in window pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,6 +70,12 @@ pub enum Fill {
     ModalBackground,
     /// The row under the picker's cursor.
     ModalSelected,
+    /// A plugin panel's body.
+    PanelBackground,
+    /// Its frame. The focused one is brighter: a panel that owns the
+    /// keyboard has to say so.
+    PanelBorder,
+    PanelBorderFocused,
 }
 
 /// Where text sits and what it is for.
@@ -92,6 +98,10 @@ pub enum TextRole {
     ModalEntry,
     ModalEntryDir,
     ModalEntrySelected,
+    /// A plugin panel's title.
+    PanelTitle,
+    /// One span of a plugin panel's text, in the role the plugin asked for.
+    Panel(PanelRole),
 }
 
 impl Paint {
@@ -104,10 +114,16 @@ impl Paint {
     #[must_use]
     pub fn is_modal(&self) -> bool {
         match self {
-            Self::Rect { fill, .. } => {
-                matches!(fill, Fill::ModalBackground | Fill::ModalSelected)
-            }
+            Self::Rect { fill, .. } => matches!(
+                fill,
+                Fill::ModalBackground
+                    | Fill::ModalSelected
+                    | Fill::PanelBackground
+                    | Fill::PanelBorder
+                    | Fill::PanelBorderFocused
+            ),
             Self::Image { .. } => false,
+            Self::Picture { .. } => true,
             Self::Text { role, .. } => matches!(
                 role,
                 TextRole::ModalTitle
@@ -115,6 +131,8 @@ impl Paint {
                     | TextRole::ModalEntry
                     | TextRole::ModalEntryDir
                     | TextRole::ModalEntrySelected
+                    | TextRole::PanelTitle
+                    | TextRole::Panel(_)
             ),
         }
     }
@@ -143,6 +161,15 @@ pub enum Paint {
         /// so the shell shows `rect.width / tile` of the picture.
         tile: u32,
     },
+    /// A picture a plugin panel carries. Unlike a thumbnail it belongs to no
+    /// clip, so the shell keys its texture by the panel and the buffer.
+    Picture {
+        rect: Rect,
+        panel: PanelId,
+        width: u32,
+        height: u32,
+        rgba: std::sync::Arc<Vec<u8>>,
+    },
 }
 
 /// An ordered list of paint operations, back to front.
@@ -161,6 +188,25 @@ impl DrawList {
             rect,
             role,
             text: text.into(),
+        });
+    }
+
+    /// A plugin panel's picture. Kept by handle, like a thumbnail: a draw
+    /// list is rebuilt every frame and pixels are never copied into one.
+    pub fn picture(
+        &mut self,
+        rect: Rect,
+        panel: PanelId,
+        width: u32,
+        height: u32,
+        rgba: std::sync::Arc<Vec<u8>>,
+    ) {
+        self.ops.push(Paint::Picture {
+            rect,
+            panel,
+            width,
+            height,
+            rgba,
         });
     }
 
@@ -285,6 +331,7 @@ pub fn summarise(list: &DrawList) -> String {
             Paint::Rect { fill, .. } => format!("{fill:?}"),
             Paint::Text { role, .. } => format!("{role:?}"),
             Paint::Image { .. } => "Thumbnail".to_string(),
+            Paint::Picture { .. } => "PanelPicture".to_string(),
         };
         *counts.entry(key).or_insert(0usize) += 1;
     }

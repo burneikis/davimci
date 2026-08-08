@@ -14,6 +14,7 @@ use davimci_keys::MediaIntent;
 use crate::browse::list_dir;
 use crate::cmdline::CommandKey;
 use crate::frontend::{Event, Response};
+use crate::panel::PanelId;
 use crate::picker::{Entry, MediaPicker, PickerEvent, PickerIntent};
 use crate::subtitle::{SubtitleEdit, SubtitleEvent};
 use crate::view::ViewState;
@@ -44,6 +45,9 @@ pub struct Modals {
     /// Whether the `:` line is open. The line itself lives in the app; a
     /// frontend only needs to know that the keyboard belongs to it.
     command_open: bool,
+    /// The plugin panel that has focus, read from the view. A panel is the
+    /// last modal asked, so an editor modal is never taken over by a plugin.
+    panel: Option<PanelId>,
 }
 
 impl Default for Modals {
@@ -53,6 +57,7 @@ impl Default for Modals {
             browse_dir: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             subtitle: None,
             command_open: false,
+            panel: None,
         }
     }
 }
@@ -78,10 +83,19 @@ impl Modals {
         self.command_open
     }
 
+    /// The focused plugin panel, if one is open.
+    #[must_use]
+    pub fn panel(&self) -> Option<PanelId> {
+        self.panel
+    }
+
     /// True while some modal owns the keyboard.
     #[must_use]
     pub fn is_open(&self) -> bool {
-        self.picker.is_some() || self.subtitle.is_some() || self.command_open
+        self.picker.is_some()
+            || self.subtitle.is_some()
+            || self.command_open
+            || self.panel.is_some()
     }
 
     pub fn open_command_line(&mut self) {
@@ -125,6 +139,9 @@ impl Modals {
     /// guessing from the keys that went past.
     pub fn sync(&mut self, view: &ViewState) {
         self.command_open = view.command_line.is_some();
+        // Panels are drawn back to front, so the last focused one is the
+        // one on top - the same panel the app hands keys to.
+        self.panel = view.panels.iter().rev().find(|p| p.focus).map(|p| p.id);
     }
 
     /// Route one keystroke.
@@ -142,6 +159,14 @@ impl Modals {
         }
         if self.command_open {
             return Some(vec![Event::CommandKey(self.handle_command(key))]);
+        }
+        // Last, so a plugin panel can never take the keyboard from an
+        // editor modal that is already open.
+        if let Some(panel) = self.panel {
+            if key == ModalKey::Escape {
+                self.panel = None;
+            }
+            return Some(vec![Event::PanelKey { panel, key }]);
         }
         None
     }

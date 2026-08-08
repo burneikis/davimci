@@ -1,6 +1,4 @@
 # Human
-- allow plugins that render smth / a window. e.g. something like which-key
-- plugin support for gui/tui sub-windows
 - strip down to core features, everything else should be built as a plugin, include default plugins for common features (first decide what features are core, and what can be plugins)
 
 # AI

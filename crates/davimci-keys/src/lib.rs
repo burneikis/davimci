@@ -32,9 +32,9 @@ mod tests;
 pub use action::{
     Action, ArgKind, CenterIntent, LeafAction, Operator, Target, TransportPolicy, ZoomIntent,
 };
-pub use engine::{Engine, Feed, MediaIntent, Outcome, TransportCmd};
+pub use engine::{Engine, Feed, MediaIntent, Outcome, Pending, TransportCmd};
 pub use error::KeysError;
 pub use key::{Key, Named};
-pub use keymap::{Keymap, Lookup};
+pub use keymap::{Continuation, Keymap, Lookup};
 pub use mode::{Anchor, Mode, ModeChanged, ModeState, VisualSelection, VisualStart};
 pub use parser::{Parser, Step};

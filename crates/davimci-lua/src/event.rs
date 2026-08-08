@@ -10,14 +10,59 @@ use mlua::{Lua, Table};
 /// second write path into the model.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
-    PlayheadMoved { frame: u64, track: String },
-    SplitPerformed { frame: u64, track: String },
-    ClipDeleted { clip: u64, track: String },
-    ClipInserted { clip: u64, track: String },
-    ModeChanged { from: String, to: String },
-    BeforeExport { preset: String, output: String },
-    AfterExport { preset: String, output: String },
-    ProjectLoaded { path: String },
+    PlayheadMoved {
+        frame: u64,
+        track: String,
+    },
+    SplitPerformed {
+        frame: u64,
+        track: String,
+    },
+    ClipDeleted {
+        clip: u64,
+        track: String,
+    },
+    ClipInserted {
+        clip: u64,
+        track: String,
+    },
+    ModeChanged {
+        from: String,
+        to: String,
+    },
+    BeforeExport {
+        preset: String,
+        output: String,
+    },
+    AfterExport {
+        preset: String,
+        output: String,
+    },
+    ProjectLoaded {
+        path: String,
+    },
+    /// A key sequence is half-typed, or was just finished or cancelled.
+    ///
+    /// `keys` is empty when the grammar is idle, which is how a which-key
+    /// panel knows to hide. `continuations` is what the keymap says could
+    /// follow, so a plugin never keeps its own copy of the table.
+    KeyPending {
+        mode: String,
+        keys: String,
+        continuations: Vec<Continuation>,
+    },
+}
+
+/// One key that could follow the pending sequence, and what it would do.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Continuation {
+    pub key: String,
+    /// The sentence describing the binding, or empty when this key only
+    /// opens a longer sequence.
+    pub description: String,
+    /// True when the key only extends longer bindings - a group, in
+    /// which-key's terms.
+    pub group: bool,
 }
 
 impl Event {
@@ -33,6 +78,7 @@ impl Event {
             Self::BeforeExport { .. } => "BeforeExport",
             Self::AfterExport { .. } => "AfterExport",
             Self::ProjectLoaded { .. } => "ProjectLoaded",
+            Self::KeyPending { .. } => "KeyPending",
         }
     }
 
@@ -65,6 +111,23 @@ impl Event {
             }
             Self::ProjectLoaded { path } => {
                 t.set("path", path.as_str())?;
+            }
+            Self::KeyPending {
+                mode,
+                keys,
+                continuations,
+            } => {
+                t.set("mode", mode.as_str())?;
+                t.set("keys", keys.as_str())?;
+                let list = lua.create_table()?;
+                for (i, c) in continuations.iter().enumerate() {
+                    let entry = lua.create_table()?;
+                    entry.set("key", c.key.as_str())?;
+                    entry.set("description", c.description.as_str())?;
+                    entry.set("group", c.group)?;
+                    list.set(i + 1, entry)?;
+                }
+                t.set("continuations", list)?;
             }
         }
         Ok(t)

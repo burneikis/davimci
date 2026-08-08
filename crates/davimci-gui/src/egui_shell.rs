@@ -59,6 +59,11 @@ pub fn fill_color(fill: Fill) -> Color32 {
         // tinted: a half-transparent file list is unreadable over clips.
         Fill::ModalBackground => Color32::from_rgb(38, 38, 46),
         Fill::ModalSelected => Color32::from_rgb(70, 110, 160),
+        // A plugin panel is opaque for the same reason the picker is: text
+        // over clips is unreadable.
+        Fill::PanelBackground => Color32::from_rgb(32, 32, 40),
+        Fill::PanelBorder => Color32::from_rgb(70, 70, 84),
+        Fill::PanelBorderFocused => Color32::from_rgb(200, 200, 220),
     }
 }
 
@@ -85,6 +90,13 @@ pub fn text_style(role: TextRole) -> (Color32, f32) {
         TextRole::ModalEntry => (Color32::from_rgb(210, 210, 220), 13.0),
         TextRole::ModalEntryDir => (Color32::from_rgb(150, 190, 240), 13.0),
         TextRole::ModalEntrySelected => (Color32::from_rgb(255, 255, 255), 13.0),
+        TextRole::PanelTitle => (Color32::from_rgb(240, 220, 90), 13.0),
+        TextRole::Panel(davimci_app::PanelRole::Normal) => (Color32::from_rgb(210, 210, 220), 13.0),
+        TextRole::Panel(davimci_app::PanelRole::Key) => (Color32::from_rgb(240, 220, 90), 13.0),
+        TextRole::Panel(davimci_app::PanelRole::Accent) => (Color32::from_rgb(255, 255, 255), 13.0),
+        TextRole::Panel(davimci_app::PanelRole::Warning) => {
+            (Color32::from_rgb(240, 140, 140), 13.0)
+        }
     }
 }
 
@@ -105,12 +117,16 @@ fn to_egui(rect: Rect) -> EguiRect {
 pub struct ThumbnailTextures {
     textures:
         std::collections::HashMap<(davimci_core::ClipId, davimci_core::Frame), egui::TextureHandle>,
+    /// Panel pictures, keyed by panel and by the buffer's address: a panel
+    /// that publishes new pixels publishes a new `Arc`.
+    pictures: std::collections::HashMap<(davimci_app::PanelId, usize), egui::TextureHandle>,
 }
 
 impl std::fmt::Debug for ThumbnailTextures {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ThumbnailTextures")
             .field("len", &self.textures.len())
+            .field("pictures", &self.pictures.len())
             .finish()
     }
 }
@@ -138,6 +154,31 @@ impl ThumbnailTextures {
         tex
     }
 
+    /// A plugin panel's picture, keyed by the panel and by the buffer it
+    /// came from, so a panel that redraws the same pixels uploads once.
+    fn panel_texture(
+        &mut self,
+        ctx: &egui::Context,
+        panel: davimci_app::PanelId,
+        width: u32,
+        height: u32,
+        rgba: &std::sync::Arc<Vec<u8>>,
+    ) -> egui::TextureHandle {
+        let key = (panel, std::sync::Arc::as_ptr(rgba) as usize);
+        if let Some(tex) = self.pictures.get(&key) {
+            return tex.clone();
+        }
+        let image =
+            egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], rgba);
+        let tex = ctx.load_texture(
+            format!("davimci-panel-{}", panel.get()),
+            image,
+            egui::TextureOptions::LINEAR,
+        );
+        self.pictures.insert(key, tex.clone());
+        tex
+    }
+
     /// Forget textures for pictures the list no longer draws.
     pub fn retain(&mut self, list: &DrawList) {
         let live: Vec<(davimci_core::ClipId, davimci_core::Frame)> = list
@@ -146,6 +187,17 @@ impl ThumbnailTextures {
             .map(|(_, clip, thumb)| (clip, thumb.source))
             .collect();
         self.textures.retain(|key, _| live.contains(key));
+        let drawn: Vec<(davimci_app::PanelId, usize)> = list
+            .ops()
+            .iter()
+            .filter_map(|op| match op {
+                Paint::Picture { panel, rgba, .. } => {
+                    Some((*panel, std::sync::Arc::as_ptr(rgba) as usize))
+                }
+                _ => None,
+            })
+            .collect();
+        self.pictures.retain(|key, _| drawn.contains(key));
     }
 }
 
@@ -159,8 +211,8 @@ pub fn draw(list: &DrawList, ui: &Ui, origin: Pos2, thumbs: &mut ThumbnailTextur
 
 /// Draw only the modal overlay. The shell calls this *after* the video
 /// texture, so a picker is never hidden behind the picture.
-pub fn draw_modal(list: &DrawList, ui: &Ui, origin: Pos2) {
-    draw_ops(list, ui, origin, true, &mut ThumbnailTextures::default());
+pub fn draw_modal(list: &DrawList, ui: &Ui, origin: Pos2, thumbs: &mut ThumbnailTextures) {
+    draw_ops(list, ui, origin, true, thumbs);
 }
 
 fn draw_ops(list: &DrawList, ui: &Ui, origin: Pos2, modal: bool, thumbs: &mut ThumbnailTextures) {
@@ -192,6 +244,22 @@ fn draw_ops(list: &DrawList, ui: &Ui, origin: Pos2, modal: bool, thumbs: &mut Th
                     tex.id(),
                     r,
                     EguiRect::from_min_max(Pos2::ZERO, Pos2::new(u, 1.0)),
+                    Color32::WHITE,
+                );
+            }
+            Paint::Picture {
+                rect,
+                panel,
+                width,
+                height,
+                rgba,
+            } => {
+                let tex = thumbs.panel_texture(ui.ctx(), *panel, *width, *height, rgba);
+                let r = to_egui(*rect).translate(origin.to_vec2());
+                painter.with_clip_rect(r).image(
+                    tex.id(),
+                    r,
+                    EguiRect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
                     Color32::WHITE,
                 );
             }

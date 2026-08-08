@@ -436,3 +436,137 @@ require("davimci.transition").register("sparkle", {
         "the unknown type did not degrade:\n{xml}"
     );
 }
+
+/// The panels the app currently draws, as the frontends see them.
+fn panels(app: &App) -> Vec<davimci_app::PanelView> {
+    app.view().panels
+}
+
+#[test]
+fn a_plugin_panel_opens_fills_and_closes_through_the_ui_api() {
+    let cfg = Scratch::with_config(
+        "ui-panel",
+        &[(
+            "init.lua",
+            r#"
+            local ui = require("davimci.ui")
+            local p = ui.panel({ title = "notes", anchor = "top-right" })
+            p:set_lines({ "hello", { { text = "d", role = "key" }, "  delete" } })
+            require("davimci.keymap").map("normal", "<Space>x", function() p:close() end)
+            "#,
+        )],
+    );
+    let (mut app, mut editor, _) = editor_with(&cfg);
+
+    app.event(Event::Tick, &mut editor);
+    let open = panels(&app);
+    assert_eq!(open.len(), 1, "the config's panel is not open: {open:?}");
+    assert_eq!(open[0].title.as_deref(), Some("notes"));
+    let davimci_app::PanelContent::Lines(lines) = &open[0].content else {
+        panic!("a text panel");
+    };
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[1].text(), "d  delete");
+    // A panel is view state: opening one is not an edit and leaves nothing
+    // to undo.
+    assert!(
+        app.session().history().at_root(),
+        "a panel reached the undo log"
+    );
+
+    feed(&mut app, &mut editor, "<Space>x");
+    app.event(Event::Tick, &mut editor);
+    assert!(panels(&app).is_empty(), "the panel outlived its close");
+}
+
+#[test]
+fn the_which_key_panel_follows_the_pending_sequence_and_never_eats_a_key() {
+    let cfg = Scratch::with_config("which-key", &[("init.lua", "")]);
+    let (mut app, mut editor, _) = editor_with(&cfg);
+    app.event(Event::Tick, &mut editor);
+    assert!(
+        panels(&app).is_empty(),
+        "which-key shows with nothing typed"
+    );
+
+    // `g` is a prefix, so the panel lists what can follow it.
+    feed(&mut app, &mut editor, "g");
+    app.event(Event::Tick, &mut editor);
+    let open = panels(&app);
+    assert_eq!(open.len(), 1, "which-key did not open on a prefix");
+    assert!(!open[0].focus, "which-key must never take the keyboard");
+    let davimci_app::PanelContent::Lines(lines) = &open[0].content else {
+        panic!("a text panel");
+    };
+    let text = lines
+        .iter()
+        .map(davimci_app::PanelLine::text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        text.starts_with('g'),
+        "the pending keys are not shown:\n{text}"
+    );
+    assert!(text.contains('g'), "gg is not offered:\n{text}");
+
+    // Finishing the sequence still runs it, and the panel goes away.
+    let before = app.session().timeline().playhead().frame;
+    feed(&mut app, &mut editor, "g");
+    app.event(Event::Tick, &mut editor);
+    assert!(
+        panels(&app).is_empty(),
+        "which-key stayed after the sequence"
+    );
+    assert_eq!(
+        app.session().timeline().playhead().frame,
+        before,
+        "gg went somewhere other than the start"
+    );
+}
+
+#[test]
+fn a_focused_panel_owns_the_keyboard_and_esc_always_gives_it_back() {
+    let cfg = Scratch::with_config(
+        "focus-panel",
+        &[(
+            "init.lua",
+            r#"
+            typed = ""
+            local ui = require("davimci.ui")
+            ui.panel({
+              title = "prompt",
+              focus = true,
+              on_key = function(key) typed = typed .. key end,
+            })
+            "#,
+        )],
+    );
+    let (mut app, mut editor, _) = editor_with(&cfg);
+    app.event(Event::Tick, &mut editor);
+    assert_eq!(panels(&app).len(), 1);
+
+    // `x` would delete a clip if the grammar saw it; the panel has it.
+    let before = clips(&app);
+    feed(&mut app, &mut editor, "x");
+    app.event(Event::Tick, &mut editor);
+    assert_eq!(
+        clips(&app),
+        before,
+        "a focused panel leaked a key to the grammar"
+    );
+
+    // Esc closes the panel whatever the plugin does, so the keyboard can
+    // never be held hostage.
+    feed(&mut app, &mut editor, "<Esc>");
+    app.event(Event::Tick, &mut editor);
+    assert!(
+        panels(&app).is_empty(),
+        "Esc did not close the focused panel"
+    );
+    feed(&mut app, &mut editor, "x");
+    assert_eq!(
+        clips(&app),
+        before - 1,
+        "the grammar never got the keyboard back"
+    );
+}

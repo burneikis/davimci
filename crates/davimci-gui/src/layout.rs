@@ -15,7 +15,7 @@
 
 use std::fmt::Write as _;
 
-use davimci_app::{LabelMetrics, Surface, ViewState};
+use davimci_app::{LabelMetrics, PanelContent, PanelView, Surface, ViewState};
 
 use crate::paint::{Chrome, DrawList, Fill, PickerView, Rect, TextRole, status_text};
 
@@ -241,6 +241,9 @@ impl Layout {
             // 16:9 of the picture. The app samples a clip that often, so
             // the strip tiles without gaps or overlap.
             thumbnail_columns: (self.metrics.row_height.max(1) * 16 / 9).max(1),
+            // A panel is text, so it is measured in glyphs rather than in
+            // the pixel-wide columns the timeline is drawn in.
+            cell_columns: (self.tracks.width / self.metrics.char_width.max(1)).max(1),
         }
     }
 
@@ -270,7 +273,103 @@ pub fn paint(view: &ViewState, layout: &Layout, chrome: &Chrome) -> DrawList {
     if let Some(picker) = &chrome.picker {
         paint_picker(&mut d, layout, picker);
     }
+    // Plugin panels are placed by the app, in cells; the window only turns
+    // cells into pixels. They go last so a panel is never hidden behind the
+    // picture or a lane.
+    for panel in &view.panels {
+        paint_panel(&mut d, layout, panel);
+    }
     d
+}
+
+/// One plugin panel, its cell rectangle scaled to the window's font.
+fn paint_panel(d: &mut DrawList, layout: &Layout, panel: &PanelView) {
+    let cw = layout.metrics.char_width.max(1);
+    let row_h = layout.metrics.row_height.max(1);
+    let rect = Rect {
+        x: layout
+            .tracks
+            .x
+            .saturating_add((panel.rect.column * cw) as i32),
+        y: layout.lane_y(panel.rect.row as usize),
+        width: panel.rect.columns * cw,
+        height: panel.rect.rows * row_h,
+    };
+    let border = if panel.focus {
+        Fill::PanelBorderFocused
+    } else {
+        Fill::PanelBorder
+    };
+    d.rect(rect, border);
+    let inset = Rect {
+        x: rect.x + 1,
+        y: rect.y + 1,
+        width: rect.width.saturating_sub(2),
+        height: rect.height.saturating_sub(2),
+    };
+    d.rect(inset, Fill::PanelBackground);
+
+    let mut y = inset.y;
+    let mut line = |height: u32| {
+        let r = Rect {
+            x: inset.x,
+            y,
+            width: inset.width,
+            height,
+        };
+        y = y.saturating_add(height as i32);
+        r
+    };
+    if let Some(title) = &panel.title {
+        d.text(line(row_h), TextRole::PanelTitle, title.clone());
+    }
+    match &panel.content {
+        PanelContent::Lines(lines) => {
+            for text in lines {
+                let row = line(row_h);
+                if row.y + row.height as i32 > inset.y + inset.height as i32 {
+                    break;
+                }
+                // Spans are laid out along the row in glyph advances, which
+                // is the same measure the app sized the panel with.
+                //
+                // A shell insets text by `TEXT_PADDING` and clips it to the
+                // rectangle it was given, so a box sized to the glyphs alone
+                // loses its last characters - a one-glyph key span would be
+                // drawn half cut off. The box therefore carries the inset as
+                // well, while the *advance* stays the glyph width so spans
+                // still line up on the cell grid.
+                let mut x = row.x;
+                for span in &text.spans {
+                    let width = u32::try_from(span.text.chars().count()).unwrap_or(0) * cw;
+                    d.text(
+                        Rect {
+                            x,
+                            y: row.y,
+                            width: width.saturating_add(TEXT_PADDING),
+                            height: row.height,
+                        },
+                        TextRole::Panel(span.role),
+                        span.text.clone(),
+                    );
+                    x = x.saturating_add(width as i32);
+                }
+            }
+        }
+        PanelContent::Pixels {
+            width,
+            height,
+            rgba,
+        } => {
+            let room = Rect {
+                x: inset.x,
+                y,
+                width: inset.width,
+                height: (inset.y + inset.height as i32 - y).max(0) as u32,
+            };
+            d.picture(room, panel.id, *width, *height, rgba.clone());
+        }
+    }
 }
 
 /// The video pane. The presenter has already letterboxed, so the shell only

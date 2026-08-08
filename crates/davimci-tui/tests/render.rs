@@ -213,3 +213,36 @@ fn a_message_and_a_pending_count_reach_the_status_line() {
     assert!(status.contains("nothing to delete"));
     assert!(status.contains("3d "), "the pending count is not shown");
 }
+
+#[test]
+fn a_plugin_panel_is_drawn_where_the_app_placed_it() {
+    let view = davimci_app::fixtures::panel();
+    let panel = &view.panels[0];
+    let drawn = rows(&view, 60, 8);
+    // The app placed it in track rows; the terminal draws it there and
+    // nowhere else. Row 0 is the ruler.
+    let row = &drawn[1 + panel.rect.row as usize];
+    let at = usize::from(GUTTER) + panel.rect.column as usize;
+    let box_row: String = row
+        .chars()
+        .skip(at)
+        .take(panel.rect.columns as usize)
+        .collect();
+    assert!(
+        box_row.starts_with('\u{250c}') && box_row.contains("which-key"),
+        "the panel's frame and title are not at its placement: {box_row:?}"
+    );
+    let body: String = drawn[2 + panel.rect.row as usize]
+        .chars()
+        .skip(at)
+        .take(panel.rect.columns as usize)
+        .collect();
+    assert!(
+        body.contains("go to the start"),
+        "the panel body is missing: {body:?}"
+    );
+    // And a panel changes no row's width.
+    for r in &drawn {
+        assert_eq!(r.chars().count(), 60, "a panel made a row ragged: {r:?}");
+    }
+}
