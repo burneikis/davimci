@@ -162,9 +162,11 @@ fn the_command_line_takes_a_row_from_the_tracks() {
         before - 2,
         "the : line drew over a track"
     );
+    // Bottom-up: the `:` line, the mode line, then the suggestions.
     let drawn = tui.last_rows();
-    assert!(drawn[drawn.len() - 2].starts_with(":wri"));
-    assert!(drawn[drawn.len() - 1].starts_with("write"));
+    assert!(drawn[drawn.len() - 1].starts_with(":wri"));
+    assert!(drawn[drawn.len() - 2].starts_with("-- "));
+    assert!(drawn[drawn.len() - 3].starts_with("write"));
 }
 
 #[test]
@@ -390,6 +392,7 @@ fn the_caret_sits_in_the_command_line_while_it_is_typed() {
         cursor: 1,
         completions: vec!["write".into()],
     });
-    // A completion row is drawn under the `:` line, which moves up.
-    assert_eq!(davimci_tui::render::cursor(&view, 20), Some((2, 18)));
+    // The suggestion row appears above the mode line, so the caret does not
+    // move off the last row.
+    assert_eq!(davimci_tui::render::cursor(&view, 20), Some((2, 19)));
 }

@@ -89,16 +89,15 @@ pub fn command_rows(view: &ViewState) -> u16 {
 /// Where the terminal caret belongs: in the `:` line while it is open, and
 /// nowhere otherwise.
 ///
-/// The column counts characters, matching how the row itself is laid out, and
-/// the row is derived from the bottom of the screen because the command line
-/// is anchored there.
+/// The column counts characters, matching how the row itself is laid out. The
+/// row is always the last one: the `:` line is the bottom of the screen, so a
+/// suggestion row appearing above it never moves the caret.
 #[must_use]
 pub fn cursor(view: &ViewState, height: u16) -> Option<(u16, u16)> {
     let cmd = view.command_line.as_ref()?;
     let typed = cmd.buffer.get(..cmd.cursor).unwrap_or(&cmd.buffer);
     let column = u16::try_from(typed.chars().count()).unwrap_or(u16::MAX);
-    let row = height.saturating_sub(command_rows(view));
-    Some((column.saturating_add(1), row))
+    Some((column.saturating_add(1), height.saturating_sub(1)))
 }
 
 /// One screen, top row first. The preview band sits above the ruler; a
@@ -176,10 +175,14 @@ pub fn lines(
         out.push(Line::from(Span::raw(fit("", width))));
     }
 
-    let mut tail = vec![status(view, width)];
+    // Bottom-up: the `:` line is the last row, the mode line sits above it,
+    // and the suggestions sit above that - where vim's wildmenu is, and where
+    // the GUI puts them too.
+    let mut tail = completions(view, width);
+    tail.push(status(view, width));
     tail.extend(command_line(view, width));
-    // On a terminal too short for both, the line being typed outranks the
-    // status line.
+    // On a terminal too short for all of it, the line being typed outranks
+    // the mode line, which outranks the suggestions.
     while tail.len() > usize::from(height).max(1) {
         tail.remove(0);
     }
@@ -533,22 +536,29 @@ fn status(view: &ViewState, width: u16) -> Line<'static> {
     Line::from(Span::styled(justify(&left, &right, width), style))
 }
 
-/// The `:` line and its suggestions, or nothing at all.
+/// The `:` line itself, or nothing at all.
 fn command_line(view: &ViewState, width: u16) -> Vec<Line<'static>> {
     let Some(cmd) = &view.command_line else {
         return Vec::new();
     };
-    let mut out = vec![Line::from(Span::raw(fit(
+    vec![Line::from(Span::raw(fit(
         &format!(":{}", cmd.buffer),
         width,
-    )))];
-    if !cmd.completions.is_empty() {
-        out.push(Line::from(Span::styled(
-            fit(&cmd.completions.join(" "), width),
-            Style::default().fg(Color::DarkGray),
-        )));
+    )))]
+}
+
+/// The suggestion row, drawn only while the `:` line has candidates.
+fn completions(view: &ViewState, width: u16) -> Vec<Line<'static>> {
+    let Some(cmd) = &view.command_line else {
+        return Vec::new();
+    };
+    if cmd.completions.is_empty() {
+        return Vec::new();
     }
-    out
+    vec![Line::from(Span::styled(
+        fit(&cmd.completions.join(" "), width),
+        Style::default().fg(Color::DarkGray),
+    ))]
 }
 
 /// A modal, drawn over the timeline rows. A terminal has no floating window,

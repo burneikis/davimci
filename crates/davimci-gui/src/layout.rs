@@ -203,6 +203,15 @@ impl Layout {
             None
         };
         y += completion_h as i32;
+        // Bottom-up the chrome is suggestions, mode line, `:` line - vim's
+        // order, and the terminal frontend's, so the two cannot drift apart.
+        let status = Rect {
+            x: 0,
+            y,
+            width,
+            height: status_h,
+        };
+        y += status_h as i32;
         let command = if command_open {
             Some(Rect {
                 x: 0,
@@ -212,13 +221,6 @@ impl Layout {
             })
         } else {
             None
-        };
-        y += command_h as i32;
-        let status = Rect {
-            x: 0,
-            y,
-            width,
-            height: status_h,
         };
 
         Self {

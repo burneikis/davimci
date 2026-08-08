@@ -197,9 +197,18 @@ fn completions_are_painted_on_their_own_row_above_the_line() {
         "{:?}",
         list.texts()
     );
+    let command = l.command.expect("a command row");
+    // Vim's order, bottom-up: the `:` line last, the mode line above it, the
+    // suggestions above that. The terminal frontend draws the same order.
     assert!(
-        row.y < l.command.expect("a command row").y,
-        "suggestions sit above the line they complete"
+        row.y < l.status.y && l.status.y < command.y,
+        "chrome order is suggestions, status, command: {row:?} {:?} {command:?}",
+        l.status
+    );
+    assert_eq!(
+        command.y + command.height as i32,
+        600,
+        "the : line is not on the last row of the window"
     );
 }
 
