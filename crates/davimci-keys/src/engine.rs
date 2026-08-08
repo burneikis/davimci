@@ -22,7 +22,7 @@ use crate::action::{Action, CenterIntent, Operator, Target, TransportPolicy, Zoo
 use crate::error::KeysError;
 use crate::key::Key;
 use crate::keymap::Keymap;
-use crate::mode::{Anchor, Mode, ModeChanged, ModeState};
+use crate::mode::{Anchor, Mode, ModeChanged, ModeState, VisualStart};
 use crate::parser::{Parser, Step};
 
 /// A transport action, handed to the backend clock rather than the undo log.
@@ -139,6 +139,7 @@ pub struct Engine {
     parser: Parser,
     mode: ModeState,
     jump_cfg: JumpConfig,
+    visual_start: VisualStart,
     zoom: Zoom,
     /// Registers named with `"<reg>`; distinct from the
     /// clipboard/anonymous register used when none is named.
@@ -159,6 +160,7 @@ impl Engine {
             parser: Parser::new(),
             mode: ModeState::new(),
             jump_cfg: JumpConfig::default(),
+            visual_start: VisualStart::default(),
             zoom: Zoom::default(),
             registers: HashMap::new(),
         }
@@ -195,6 +197,65 @@ impl Engine {
 
     pub fn set_zoom(&mut self, zoom: Zoom) {
         self.zoom = zoom;
+    }
+
+    /// `:set visualstart`. Only affects selections made after it: rewriting a
+    /// live selection under the user is not what a setting is for.
+    pub fn set_visual_start(&mut self, start: VisualStart) {
+        self.visual_start = start;
+    }
+
+    #[must_use]
+    pub fn visual_start(&self) -> VisualStart {
+        self.visual_start
+    }
+
+    /// What one end of a selection covers at `at`, in the current mode.
+    ///
+    /// The whole difference between `v`, `V` and `<C-v>` lives here, which is
+    /// why it is one function: `V` covers the clip (or the gap) under the
+    /// end, and the other two cover whatever `visualstart` names.
+    fn unit_span(&self, kind: Mode, at: Anchor, session: &Session) -> TimeRange {
+        let frame = TimeRange::new(at.frame, Frame(at.frame.get().saturating_add(1)));
+        if kind == Mode::VisualLine {
+            return Self::clip_or_gap_span(at, session).unwrap_or(frame);
+        }
+        match self.visual_start {
+            VisualStart::Frame => frame,
+            VisualStart::Jump => {
+                let jumps = self.jump_points(session.timeline());
+                let start = jumps.prev(Frame(at.frame.get().saturating_add(1)));
+                let end = jumps.next(at.frame);
+                match (start, end) {
+                    (Some(s), Some(e)) if e > s => TimeRange::new(s, e),
+                    _ => frame,
+                }
+            }
+        }
+    }
+
+    /// The clip under `at`, or - in a gap - the gap itself, bounded by the
+    /// neighbouring clips and by the timeline's ends.
+    fn clip_or_gap_span(at: Anchor, session: &Session) -> Option<TimeRange> {
+        let track = session.timeline().track(at.track)?;
+        if let Some(clip) = track.clip_at(at.frame) {
+            return Some(TimeRange::new(clip.start, clip.end()));
+        }
+        let start = track
+            .clips()
+            .iter()
+            .filter(|c| c.end() <= at.frame)
+            .map(davimci_core::Clip::end)
+            .max()
+            .unwrap_or(Frame(0));
+        let end = track
+            .clips()
+            .iter()
+            .filter(|c| c.start > at.frame)
+            .map(|c| c.start)
+            .min()
+            .unwrap_or_else(|| Frame(at.frame.get().saturating_add(1)));
+        (end > start).then(|| TimeRange::new(start, end))
     }
 
     /// Return to `NORMAL` with nothing pending, for a host that has switched
@@ -314,7 +375,8 @@ impl Engine {
                     frame: p.frame,
                     track: p.track,
                 };
-                Outcome::Mode(self.mode.toggle_visual(kind, anchor))
+                let span = self.unit_span(kind, anchor, session);
+                Outcome::Mode(self.mode.toggle_visual(kind, anchor, span))
             }
             Action::SwapVisualEnds => {
                 self.mode.swap_visual_ends();
@@ -370,14 +432,16 @@ impl Engine {
         };
         match resolved {
             Ok(Resolved::Position(p)) => {
-                if self.mode.mode().is_visual() {
-                    self.mode.extend_visual(
-                        Anchor {
-                            frame: p.frame,
-                            track: p.track,
-                        },
-                        davimci_motion::Direction::Forward,
-                    );
+                let kind = self.mode.mode();
+                if kind.is_visual() {
+                    let to = Anchor {
+                        frame: p.frame,
+                        track: p.track,
+                    };
+                    let span = self.unit_span(kind, to, session);
+                    let order: Vec<TrackId> =
+                        session.timeline().tracks().iter().map(|t| t.id).collect();
+                    self.mode.extend_visual(to, span, &order);
                 } else if let Err(e) = session.set_playhead(p.frame, p.track) {
                     return Outcome::Error(e.to_string());
                 }

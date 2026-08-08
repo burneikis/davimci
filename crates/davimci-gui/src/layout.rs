@@ -393,14 +393,24 @@ fn paint_clip(d: &mut DrawList, layout: &Layout, clip: &davimci_app::ClipView, y
     let rect = clip_rect(layout, clip, y, row_h);
     let fill = if clip.offline {
         Fill::ClipOffline
-    } else if clip.selected {
-        Fill::ClipSelected
     } else if clip.linked {
         Fill::ClipGrouped
     } else {
         Fill::Clip
     };
     d.rect(rect, fill);
+    // Only the covered columns: a selection is a time range, so a clip whose
+    // tail is selected must not read as a wholly selected clip.
+    if let Some((first, last)) = clip.selected_columns {
+        d.rect(
+            Rect {
+                x: layout.tracks.x.saturating_add(first as i32),
+                width: last.saturating_sub(first).saturating_add(1),
+                ..rect
+            },
+            Fill::ClipSelected,
+        );
+    }
     paint_filmstrip(d, layout, clip, rect);
 }
 

@@ -1,7 +1,4 @@
 # Human
-- better visual mode selection visibility, clarify how visual mode works, is it a frame selection, track selection, clip selection
-- visual mode should not select the whole clip by default, it should be the frame under cursor, or maybe the current jump point, that way visual line mode is actually different
-- should we not be able to do visual mode up and down with j/k
 - allow plugins that render smth / a window. e.g. something like which-key
 - plugin support for gui/tui sub-windows
 - strip down to core features, everything else should be built as a plugin, include default plugins for common features (first decide what features are core, and what can be plugins)
@@ -17,8 +14,6 @@
 - a burned-in subtitle is not asserted by a pixel diff: MLT's text producers
   need a display, so the slow test only proves the text stayed out of the
   streams and the sidecar
-- `V` (visual-line) should snap the selection to whole clips; nothing
-  implements the snap, so `V` behaves like `v` until a motion extends it
 - `an_exported_file_has_the_duration_of_the_timeline` fails on a 5s timeline:
   the file comes out 5.088s. Pre-dates the hardening pass; the export writes
   a few frames more than the timeline holds

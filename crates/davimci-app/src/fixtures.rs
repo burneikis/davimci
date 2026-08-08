@@ -74,6 +74,8 @@ pub fn visual_block() -> ViewState {
             frame: Frame(240),
             track: v1,
         },
+        anchor_span: davimci_motion::TimeRange::new(Frame(60), Frame(61)),
+        active_span: davimci_motion::TimeRange::new(Frame(240), Frame(241)),
         tracks: vec![v1],
     };
     sel.toggle_track(a1);

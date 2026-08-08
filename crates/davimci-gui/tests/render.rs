@@ -45,7 +45,19 @@ fn a_selection_paints_one_band_per_selected_track() {
     let bands = list.rects(Fill::Selection);
     assert_eq!(bands.len(), 2, "one band per track in the block");
     assert!(bands.iter().all(|b| b.width > 0));
-    assert!(!list.rects(Fill::ClipSelected).is_empty());
+    // The tint stops at the selection: a clip that runs past the band is
+    // never painted selected end to end.
+    let tints = list.rects(Fill::ClipSelected);
+    assert!(!tints.is_empty());
+    let band = bands[0];
+    let right = band.x + i32::try_from(band.width).unwrap_or(0);
+    for tint in &tints {
+        let tint_right = tint.x + i32::try_from(tint.width).unwrap_or(0);
+        assert!(
+            tint.x >= band.x && tint_right <= right,
+            "a clip tint at {tint:?} escapes the selection at {band:?}"
+        );
+    }
 }
 
 #[test]
@@ -114,7 +126,7 @@ fn the_status_line_carries_the_mode_line() {
     assert!(
         list.texts()
             .iter()
-            .any(|t| t.starts_with("-- VISUAL-BLOCK (V1,A1) --")),
+            .any(|t| t.starts_with("-- VISUAL-BLOCK 181f (V1,A1) --")),
         "{:?}",
         list.texts()
     );

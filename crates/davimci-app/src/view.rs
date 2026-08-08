@@ -99,7 +99,10 @@ pub struct ClipView {
     /// Inclusive column range, clamped to the viewport. `None` when the clip
     /// is entirely off-screen (such clips are not emitted at all).
     pub columns: (u32, u32),
-    pub selected: bool,
+    /// The part of `columns` the selection covers, inclusive, or `None` when
+    /// the selection does not reach this clip. A selection is a region, so a
+    /// half-covered clip is drawn half covered rather than wholly selected.
+    pub selected_columns: Option<(u32, u32)>,
     pub offline: bool,
     pub linked: bool,
     /// The clip's filmstrip: a picture per sample point, with the column it
@@ -190,10 +193,15 @@ impl ViewState {
             }
         });
 
-        let selected_clip = |track: TrackId, start: Frame, end: Frame| -> bool {
-            selection
-                .as_ref()
-                .is_some_and(|s| s.tracks.contains(&track) && start < s.end && end > s.start)
+        let selected_columns = |track: TrackId, columns: (u32, u32)| -> Option<(u32, u32)> {
+            let sel = selection.as_ref()?;
+            if !sel.tracks.contains(&track) {
+                return None;
+            }
+            let (first, last) = sel.columns?;
+            let lo = columns.0.max(first);
+            let hi = columns.1.min(last);
+            (lo <= hi).then_some((lo, hi))
         };
 
         let tracks = tl
@@ -223,7 +231,7 @@ impl ViewState {
                             start: c.start,
                             end: c.end(),
                             columns,
-                            selected: selected_clip(t.id, c.start, c.end()),
+                            selected_columns: selected_columns(t.id, columns),
                             offline: c.is_offline(),
                             linked: c.group.is_some(),
                             thumbnails: inputs.thumbnails.map_or_else(Vec::new, |store| {
@@ -319,7 +327,8 @@ impl ViewState {
                     c.end.get(),
                     c.columns.0,
                     c.columns.1,
-                    if c.selected { " sel" } else { "" },
+                    c.selected_columns
+                        .map_or_else(String::new, |(a, b)| format!(" sel{a}-{b}")),
                     if c.offline { " offline" } else { "" },
                     if c.linked { " linked" } else { "" },
                 );
@@ -521,5 +530,14 @@ fn mode_line(tl: &davimci_core::Timeline, inputs: &ViewInputs<'_>) -> String {
         Mode::Insert => "INSERT",
         Mode::Command => "COMMAND",
     };
-    format!("-- {label} ({scope}) --")
+    // The extent is the point of a visual mode: without it a one-frame
+    // selection and a whole-clip one look the same on the status line.
+    let extent = match inputs.selection {
+        Some(sel) if inputs.mode.is_visual() => {
+            let r = sel.range();
+            format!(" {}f", r.end.get().saturating_sub(r.start.get()))
+        }
+        _ => String::new(),
+    };
+    format!("-- {label}{extent} ({scope}) --")
 }

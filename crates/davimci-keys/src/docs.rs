@@ -9,6 +9,7 @@
 use crate::action::{Action, ArgKind, CenterIntent, LeafAction, Operator, ZoomIntent};
 use crate::key::{Key, Named};
 use crate::keymap::default_bindings;
+use crate::mode::Mode;
 use davimci_motion::{BuiltinMotion, Direction};
 
 /// The whole reference document, ready to write to `docs/keymap.md`.
@@ -34,7 +35,9 @@ pub fn keymap_markdown() -> String {
          Generated from the keymap table in `davimci-keys`; do not edit by hand.\n\
          Run `just docs` after changing a binding.\n\n\
          Counts, registers, marks and text objects are grammar, not bindings:\n\
-         `3dw`, `\"ay`, `` `a `` and `dic` compose out of the entries below.\n",
+         `3dw`, `\"ay`, `` `a `` and `dic` compose out of the entries below.\n\n\
+         What the three visual modes select, and how `j`/`k` widen a selection\n\
+         across tracks, is in `docs/visual-mode.md`.\n",
     );
     let mut current = "";
     for (keys, text, section) in rows {
@@ -164,9 +167,19 @@ fn standalone(a: &Action) -> (&'static str, String) {
         ),
         Action::CreateTransition => (edit, "create a transition at the nearest cut".into()),
         Action::DeleteTransition => (edit, "delete the transition at the nearest cut".into()),
-        Action::EnterVisual(mode) => (visual, format!("enter {} mode", mode.name())),
+        Action::EnterVisual(mode) => (
+            visual,
+            match mode {
+                Mode::VisualLine => "select whole clips (visual-line)".into(),
+                Mode::VisualBlock => "select frames across tracks (visual-block)".into(),
+                _ => "select from the frame under the cursor (visual)".into(),
+            },
+        ),
         Action::SwapVisualEnds => (visual, "swap the ends of the selection".into()),
-        Action::ToggleVisualTrack => (visual, "add or remove a track from the selection".into()),
+        Action::ToggleVisualTrack => (
+            visual,
+            "add or remove one track, so a block selection can skip one".into(),
+        ),
         Action::NarrowSelection { group } => (
             visual,
             if *group {

@@ -35,7 +35,7 @@ fn scrolled_view_keeps_the_playhead_on_screen() {
 #[test]
 fn visual_block_reports_every_selected_track_in_the_mode_line() {
     let view = fixtures::visual_block();
-    assert_eq!(view.mode_line, "-- VISUAL-BLOCK (V1,A1) --");
+    assert_eq!(view.mode_line, "-- VISUAL-BLOCK 181f (V1,A1) --");
     let sel = view.selection.expect("visual mode has a selection");
     assert_eq!((sel.start.get(), sel.end.get()), (60, 241));
     assert_eq!(sel.tracks.len(), 2);
@@ -48,11 +48,40 @@ fn selection_marks_only_overlapping_clips_on_selected_tracks() {
         .tracks
         .iter()
         .flat_map(|t| t.clips.iter())
-        .filter(|c| c.selected)
+        .filter(|c| c.selected_columns.is_some())
         .map(|c| c.label.as_str())
         .collect();
     // `over` lives on V2, which is not in the block; `c` starts at 400.
     assert_eq!(selected, ["a", "b", "music"]);
+}
+
+#[test]
+fn a_partly_covered_clip_reports_only_the_covered_columns() {
+    let view = fixtures::visual_block();
+    let sel = view.selection.clone().expect("visual mode has a selection");
+    let (first, last) = sel.columns.expect("the selection is on screen");
+    for c in view.tracks.iter().flat_map(|t| t.clips.iter()) {
+        let Some(selected) = c.selected_columns else {
+            continue;
+        };
+        let (label, columns) = (&c.label, c.columns);
+        assert!(
+            selected.0 >= columns.0 && selected.1 <= columns.1,
+            "{label}: {selected:?} escapes the clip at {columns:?}"
+        );
+        assert!(
+            selected.0 >= first && selected.1 <= last,
+            "{label}: {selected:?} escapes the selection at {first}..={last}"
+        );
+    }
+    // `a` runs 0..200 and the selection starts at frame 60, so its head is
+    // outside: a clipped clip is not a wholly selected one.
+    let a = view.tracks[0]
+        .clips
+        .iter()
+        .find(|c| c.label == "a")
+        .expect("V1 carries clip a");
+    assert_ne!(a.selected_columns, Some(a.columns));
 }
 
 #[test]

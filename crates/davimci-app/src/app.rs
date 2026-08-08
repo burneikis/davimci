@@ -55,6 +55,15 @@ pub trait Host {
         let _ = (cmd, selection);
     }
 
+    /// A `:set` the host parsed but the key engine owns, taken once.
+    ///
+    /// `visualstart` shapes selections, which live in the engine, while `:set`
+    /// is the host's vocabulary; this is the seam between the two, so no
+    /// frontend has to know the setting exists.
+    fn take_visual_start(&mut self) -> Option<davimci_keys::VisualStart> {
+        None
+    }
+
     /// The visual selection changed or was cleared. Only the loop
     /// cares: a loop that follows a selection ends when the selection does.
     fn selection_changed(&mut self, selection: Option<&Selection>) {
@@ -387,6 +396,16 @@ impl App {
         self.engine.set_zoom(zoom);
     }
 
+    /// `:set visualstart`: what `v` and `<C-v>` cover at each end.
+    pub fn set_visual_start(&mut self, start: davimci_keys::VisualStart) {
+        self.engine.set_visual_start(start);
+    }
+
+    #[must_use]
+    pub fn visual_start(&self) -> davimci_keys::VisualStart {
+        self.engine.visual_start()
+    }
+
     /// Scroll so the playhead sits in the middle column. The playhead itself
     /// does not move, so this is view state only and never an edit.
     pub fn center_playhead(&mut self) {
@@ -604,6 +623,9 @@ impl App {
             Ok(Some(msg)) => self.say(msg),
             Ok(None) => {}
             Err(e) => self.fail(e.to_string()),
+        }
+        if let Some(start) = host.take_visual_start() {
+            self.engine.set_visual_start(start);
         }
         // A `:` line can edit (`:relink`) or swap the whole timeline
         // (`:e`, `:bn`), so the graph and the playhead are both

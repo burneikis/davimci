@@ -241,6 +241,25 @@ fn set_numbers_reaches_the_editor_without_an_undoable_edit() {
     assert_eq!(editor.numbers(), davimci_cli::Numbers::Absolute);
 }
 
+/// `visualstart` is parsed by the `:set` registry but enforced by the key
+/// engine, so the seam between the two is what this pins down.
+#[test]
+fn set_visualstart_reaches_the_key_engine() {
+    let (mut app, mut editor) = editor();
+    assert_eq!(app.visual_start(), davimci_keys::VisualStart::Frame);
+    let undos = app.session().undolist().len();
+    app.event(Event::Command("set visualstart jump".into()), &mut editor);
+    assert_eq!(app.visual_start(), davimci_keys::VisualStart::Jump);
+    assert_eq!(app.session().undolist().len(), undos);
+
+    app.event(Event::Command("set visualstart clip".into()), &mut editor);
+    assert_eq!(
+        app.messages().current().map(|m| m.severity),
+        Some(davimci_app::Severity::Error)
+    );
+    assert_eq!(app.visual_start(), davimci_keys::VisualStart::Jump);
+}
+
 #[test]
 fn an_unknown_command_reports_a_sentence_and_keeps_editing() {
     let (mut app, mut editor) = editor();

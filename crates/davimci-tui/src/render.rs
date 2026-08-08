@@ -196,6 +196,20 @@ fn lane(view: &ViewState, track: &davimci_app::TrackView, columns: u16) -> Line<
         }
     }
 
+    // The selection is a region, not a set of clips: invert exactly the
+    // columns it covers, so half a clip reads as half selected and an empty
+    // stretch of a covered lane still reads as selected.
+    if let Some(sel) = &view.selection
+        && sel.tracks.contains(&track.id)
+        && let Some((first, last)) = sel.columns
+    {
+        for column in first..=last {
+            if let Some(cell) = cells.get_mut(column as usize) {
+                cell.1 = cell.1.reversed();
+            }
+        }
+    }
+
     if track.focused
         && let Some(column) = view.playhead.column
         && let Some(cell) = cells.get_mut(column as usize)
@@ -238,8 +252,7 @@ fn clip_style(track: &davimci_app::TrackView, clip: &davimci_app::ClipView) -> S
         (false, false, false) => Color::Cyan,
         (false, false, true) => Color::Green,
     };
-    let base = Style::default().fg(colour);
-    if clip.selected { base.reversed() } else { base }
+    Style::default().fg(colour)
 }
 
 fn lane_style(track: &davimci_app::TrackView) -> Style {
@@ -444,7 +457,7 @@ mod tests {
             start: davimci_core::Frame(0),
             end: davimci_core::Frame(100),
             columns: (0, 9),
-            selected: false,
+            selected_columns: None,
             offline,
             linked,
             thumbnails: Vec::new(),

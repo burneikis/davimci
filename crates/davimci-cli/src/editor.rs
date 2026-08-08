@@ -98,6 +98,10 @@ pub struct Editor {
     preview_height: Option<PreviewHeight>,
     preview_protocol: PreviewProtocol,
     numbers: Numbers,
+    /// Set by `:set visualstart`, taken by the app on the next poll: the
+    /// setting is parsed here and enforced by the key engine.
+    visual_start: davimci_keys::VisualStart,
+    pending_visual_start: Option<davimci_keys::VisualStart>,
     quit: bool,
 }
 
@@ -144,6 +148,8 @@ impl Editor {
             preview_height: None,
             preview_protocol: PreviewProtocol::Auto,
             numbers: Numbers::Off,
+            visual_start: davimci_keys::VisualStart::default(),
+            pending_visual_start: None,
             quit: false,
         }
     }
@@ -280,6 +286,11 @@ impl Editor {
                 self.numbers = *numbers;
                 Some(Ok(numbers.describe().to_string()))
             }
+            ExCommand::Set(crate::setting::Setting::VisualStart(start)) => {
+                self.visual_start = *start;
+                self.pending_visual_start = Some(*start);
+                Some(Ok(start.describe().to_string()))
+            }
             ExCommand::Presets => Some(Ok(self.exporter.list_presets().join("  |  "))),
             ExCommand::CancelRender => Some(self.exporter.cancel(self.backend.as_mut())),
             _ => None,
@@ -334,6 +345,7 @@ impl Editor {
             preview_height: self.preview_height,
             preview_protocol: Some(self.preview_protocol),
             numbers: Some(self.numbers),
+            visual_start: Some(self.visual_start),
             fps: Some(tl.props.fps),
             resolution: Some(tl.props.resolution),
             clip: clip.map(|c| c.props),
@@ -1004,6 +1016,10 @@ impl Host for Editor {
 
     fn stale_waveforms(&mut self) -> Vec<TrackId> {
         self.analyser.take_stale()
+    }
+
+    fn take_visual_start(&mut self) -> Option<davimci_keys::VisualStart> {
+        self.pending_visual_start.take()
     }
 
     fn command(

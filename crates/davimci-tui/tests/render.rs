@@ -79,6 +79,54 @@ fn a_selection_is_drawn_on_every_selected_track() {
 }
 
 #[test]
+fn only_the_covered_columns_of_a_clip_are_inverted() {
+    let view = fixtures::visual_block();
+    let (first, last) = view
+        .selection
+        .as_ref()
+        .and_then(|s| s.columns)
+        .expect("the selection is on screen");
+    let track = view.tracks[0].id;
+    let mut tui = Tui::new(60, 10);
+    let lines = tui.rows(&view);
+    tui.render(&view).unwrap();
+    let row = view
+        .tracks
+        .iter()
+        .position(|t| t.id == track)
+        .expect("V1 is on screen");
+    // Row 0 is the ruler, and every lane starts after the gutter.
+    let line = &lines[row + 1];
+    let mut column = 0u32;
+    let mut cell = 0usize;
+    let mut inverted = Vec::new();
+    for span in &line.spans {
+        for _ in span.content.chars() {
+            if cell >= usize::from(GUTTER) {
+                if span
+                    .style
+                    .add_modifier
+                    .contains(ratatui::style::Modifier::REVERSED)
+                {
+                    inverted.push(column);
+                }
+                column += 1;
+            }
+            cell += 1;
+        }
+    }
+    assert!(!inverted.is_empty(), "the selection is not drawn at all");
+    assert_eq!(
+        (
+            inverted.iter().copied().min().unwrap_or(0),
+            inverted.iter().copied().max().unwrap_or(0)
+        ),
+        (first, last),
+        "the inversion is not exactly the selection's columns"
+    );
+}
+
+#[test]
 fn an_audio_lane_draws_its_envelope_inside_the_clip() {
     let drawn = rows(&fixtures::waveform(), 60, 8);
     let audio = drawn

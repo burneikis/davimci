@@ -705,6 +705,7 @@ impl Workspace {
             Setting::PreviewHeight(_) => Err(CliError::UnknownProperty("previewheight".into())),
             Setting::PreviewProtocol(_) => Err(CliError::UnknownProperty("previewprotocol".into())),
             Setting::Numbers(_) => Err(CliError::UnknownProperty("numbers".into())),
+            Setting::VisualStart(_) => Err(CliError::UnknownProperty("visualstart".into())),
         }
     }
 
@@ -854,6 +855,7 @@ fn describe_setting(setting: &crate::setting::Setting) -> String {
         Setting::PreviewHeight(height) => height.describe(),
         Setting::PreviewProtocol(p) => format!("preview protocol {}", p.name()),
         Setting::Numbers(n) => n.describe().to_string(),
+        Setting::VisualStart(v) => v.describe().to_string(),
     }
 }
 

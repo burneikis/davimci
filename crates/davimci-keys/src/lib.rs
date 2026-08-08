@@ -36,5 +36,5 @@ pub use engine::{Engine, Feed, MediaIntent, Outcome, TransportCmd};
 pub use error::KeysError;
 pub use key::{Key, Named};
 pub use keymap::{Keymap, Lookup};
-pub use mode::{Anchor, Mode, ModeChanged, ModeState, VisualSelection};
+pub use mode::{Anchor, Mode, ModeChanged, ModeState, VisualSelection, VisualStart};
 pub use parser::{Parser, Step};

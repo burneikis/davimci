@@ -7,6 +7,7 @@
 
 pub use davimci_app::Numbers;
 use davimci_core::{ClipProps, Fps, Frame, Resolution, Transition};
+pub use davimci_keys::VisualStart;
 
 use crate::audio::FadeEnd;
 use crate::error::CliError;
@@ -60,6 +61,10 @@ pub enum Setting {
     /// `numbers none|absolute|relative` - how the terminal ruler labels its
     /// jump points. Inert outside the terminal frontend.
     Numbers(Numbers),
+    /// `visualstart frame|jump` - what `v` and `<C-v>` cover at each end of
+    /// the selection. `V` is always the clip. A view setting: it shapes the
+    /// next selection and never edits.
+    VisualStart(VisualStart),
 }
 
 /// What `:set previewheight` accepts.
@@ -132,7 +137,11 @@ impl Setting {
     pub fn is_view_only(&self) -> bool {
         matches!(
             self,
-            Self::Preview(_) | Self::PreviewHeight(_) | Self::PreviewProtocol(_) | Self::Numbers(_)
+            Self::Preview(_)
+                | Self::PreviewHeight(_)
+                | Self::PreviewProtocol(_)
+                | Self::Numbers(_)
+                | Self::VisualStart(_)
         )
     }
 }
@@ -155,6 +164,7 @@ pub const PROPERTIES: &[&str] = &[
     "previewheight",
     "previewprotocol",
     "numbers",
+    "visualstart",
 ];
 
 /// The values a property enumerates, for completion. Empty for a property
@@ -167,6 +177,7 @@ pub fn values(prop: &str) -> Vec<String> {
         "previewheight" => &["auto"],
         "previewprotocol" => &["auto", "kitty", "sixel", "blocks"],
         "numbers" => Numbers::NAMES,
+        "visualstart" => VisualStart::NAMES,
         _ => &[],
     };
     words.iter().map(|w| (*w).to_string()).collect()
@@ -183,6 +194,7 @@ pub struct CurrentSettings {
     pub preview_height: Option<PreviewHeight>,
     pub preview_protocol: Option<PreviewProtocol>,
     pub numbers: Option<Numbers>,
+    pub visual_start: Option<VisualStart>,
     pub fps: Option<Fps>,
     pub resolution: Option<Resolution>,
     /// The clip the next `:set clip.*` would act on.
@@ -227,6 +239,7 @@ impl CurrentSettings {
             "previewheight" => self.preview_height.map(PreviewHeight::value),
             "previewprotocol" => self.preview_protocol.map(|p| p.name().to_string()),
             "numbers" => self.numbers.map(|n| n.name().to_string()),
+            "visualstart" => self.visual_start.map(|v| v.name().to_string()),
             _ => None,
         }
     }
@@ -341,6 +354,9 @@ pub fn parse(prop: &str, value: &str) -> Result<Setting, CliError> {
         "numbers" => Numbers::parse(value)
             .map(Setting::Numbers)
             .ok_or_else(|| bad(prop, "none, absolute, relative or both")),
+        "visualstart" => VisualStart::parse(value)
+            .map(Setting::VisualStart)
+            .ok_or_else(|| bad(prop, "frame or jump")),
         other => Err(CliError::UnknownProperty(other.to_string())),
     }
 }
@@ -517,6 +533,18 @@ mod tests {
     }
 
     #[test]
+    fn visualstart_parses_both_units() {
+        assert_eq!(
+            parse("visualstart", "frame").ok(),
+            Some(Setting::VisualStart(VisualStart::Frame))
+        );
+        assert_eq!(
+            parse("visualstart", "jump").ok(),
+            Some(Setting::VisualStart(VisualStart::Jump))
+        );
+    }
+
+    #[test]
     fn out_of_range_and_unknown_properties_are_user_errors_naming_the_property() {
         for (prop, value) in [
             ("clip.opacity", "2"),
@@ -534,6 +562,7 @@ mod tests {
             ("previewheight", "%"),
             ("previewprotocol", "iterm"),
             ("numbers", "sideways"),
+            ("visualstart", "clip"),
             ("clip.wobble", "1"),
         ] {
             let e = parse(prop, value).expect_err("must reject");
@@ -552,6 +581,7 @@ mod tests {
         assert!(parse("previewheight", "6").unwrap().is_view_only());
         assert!(parse("previewprotocol", "kitty").unwrap().is_view_only());
         assert!(parse("numbers", "relative").unwrap().is_view_only());
+        assert!(parse("visualstart", "jump").unwrap().is_view_only());
         assert!(!parse("clip.gain", "0").unwrap().is_view_only());
     }
 }

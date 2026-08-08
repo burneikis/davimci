@@ -542,3 +542,74 @@ fn a_registered_object_is_typeable_and_handed_to_the_host() {
         other => panic!("expected a host resolution, got {other:?}"),
     }
 }
+
+// Visual mode geometry: see `docs/visual-mode.md`.
+
+fn three_lanes() -> Session {
+    Session::new(fixture(&[
+        ("V1", &[(0, 100, "a"), (100, 100, "b")]),
+        ("V2", &[(0, 100, "c")]),
+        ("A1", &[(0, 100, "m")]),
+    ]))
+}
+
+#[test]
+fn v_selects_the_frame_under_the_cursor_not_the_clip_it_sits_in() {
+    let mut e = Engine::new();
+    let mut s = three_lanes();
+    feed(&mut e, &mut s, "50<Right>v");
+    let sel = e.selection().expect("visual mode is live");
+    assert_eq!((sel.start.get(), sel.end.get()), (50, 51));
+}
+
+#[test]
+fn visual_line_snaps_each_end_to_the_whole_clip_under_it() {
+    let mut e = Engine::new();
+    let mut s = three_lanes();
+    // Enter inside clip `a`: the whole of `a` is selected at once.
+    feed(&mut e, &mut s, "50<Right>V");
+    let sel = e.selection().expect("visual line is live");
+    assert_eq!((sel.start.get(), sel.end.get()), (0, 100));
+    // A motion into clip `b` takes the whole of `b` too.
+    feed(&mut e, &mut s, "l");
+    let sel = e.selection().expect("visual line is live");
+    assert_eq!((sel.start.get(), sel.end.get()), (0, 200));
+}
+
+#[test]
+fn j_and_k_in_visual_extend_the_selection_across_tracks() {
+    let mut e = Engine::new();
+    let mut s = three_lanes();
+    let tracks: Vec<_> = s.timeline().tracks().iter().map(|t| t.id).collect();
+    feed(&mut e, &mut s, "vj");
+    assert_eq!(e.selection().map(|s| s.tracks), Some(tracks[..2].to_vec()));
+    feed(&mut e, &mut s, "j");
+    assert_eq!(e.selection().map(|s| s.tracks), Some(tracks[..3].to_vec()));
+    // Coming back up shrinks the span rather than leaving it at its widest.
+    feed(&mut e, &mut s, "k");
+    assert_eq!(e.selection().map(|s| s.tracks), Some(tracks[..2].to_vec()));
+}
+
+#[test]
+fn visualstart_jump_anchors_on_the_interval_under_the_cursor() {
+    let mut e = Engine::new();
+    let mut s = three_lanes();
+    e.set_visual_start(crate::mode::VisualStart::Jump);
+    feed(&mut e, &mut s, "50<Right>v");
+    let sel = e.selection().expect("visual mode is live");
+    // Clip edges are jump points, so the interval is the clip `a` spans.
+    assert_eq!((sel.start.get(), sel.end.get()), (0, 100));
+    // The setting is for `v`; `V` is the clip either way.
+    feed(&mut e, &mut s, "<Esc>V");
+    let sel = e.selection().expect("visual line is live");
+    assert_eq!((sel.start.get(), sel.end.get()), (0, 100));
+}
+
+#[test]
+fn visual_line_in_a_gap_selects_the_gap_not_one_frame() {
+    let mut e = Engine::new();
+    let mut s = Session::new(fixture(&[("V1", &[(0, 100, "a"), (200, 100, "b")])]));
+    feed(&mut e, &mut s, "150<Right>V");
+    let sel = e.selection().expect("visual line is live");
+    assert_eq!((sel.start.get(), sel.end.get()), (100, 200));
+}
