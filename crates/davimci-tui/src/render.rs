@@ -67,6 +67,11 @@ pub fn surface(width: u16, height: u16, command_rows: u16, preview_rows: u16) ->
         thumbnail_columns: 0,
         // A terminal column *is* a cell.
         cell_columns: u32::from(width.saturating_sub(GUTTER)),
+        // A panel may cover the ruler, the preview band and the lanes -
+        // everything above the status line. Only the status and command
+        // rows are kept clear, so a which-key list is cut off by the
+        // terminal rather than by the track count.
+        cell_rows: u32::from(height.saturating_sub(1).saturating_sub(command_rows).max(1)),
     }
 }
 
@@ -116,10 +121,30 @@ pub fn lines(
         }
     }
 
-    // Panels sit over the timeline rows the tracks were drawn into: the
-    // ruler row is chrome, and the app placed them in track rows.
-    let top = usize::from(band.rows) + 1;
-    overlay_panels(&mut out, view, width, top);
+    // Panels cover the whole editing area, which is everything drawn so far:
+    // the preview band, the ruler and the lanes. The status and command
+    // rows are appended after this and stay clear.
+    //
+    // A project with fewer tracks than the terminal has room for draws fewer
+    // rows than the app placed panels in, so the area is grown to what the
+    // open panels reach - never past what the terminal can show. Without
+    // this a panel is cut off by the *track count*, which is what made a
+    // long which-key list disappear at the bottom.
+    let room = height
+        .saturating_sub(1)
+        .saturating_sub(command_rows(view))
+        .max(1);
+    let wanted = view
+        .panels
+        .iter()
+        .map(|p| p.rect.row.saturating_add(p.rect.rows))
+        .max()
+        .unwrap_or(0)
+        .min(u32::from(room)) as usize;
+    while out.len() < wanted {
+        out.push(Line::from(Span::raw(fit("", width))));
+    }
+    overlay_panels(&mut out, view, width, 0);
 
     out.push(status(view, width));
     out.extend(command_line(view, width));

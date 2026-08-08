@@ -43,10 +43,13 @@ pub struct ViewInputs<'a> {
     pub thumbnail_columns: u32,
     /// Panels plugins have open, when the host has any.
     pub panels: Option<&'a PanelStore>,
-    /// How many character cells wide the timeline area is - the unit panels
-    /// are placed in. Zero falls back to the viewport's columns, which is
-    /// right for a terminal and for a test.
+    /// How many character cells wide the panel area is - the unit panels are
+    /// placed in. Zero falls back to the viewport's columns, which is right
+    /// for a terminal and for a test.
     pub cell_columns: u32,
+    /// How many text lines tall the panel area is. Zero falls back to the
+    /// viewport's rows.
+    pub cell_rows: u32,
 }
 
 impl Default for ViewInputs<'_> {
@@ -66,6 +69,7 @@ impl Default for ViewInputs<'_> {
             thumbnail_columns: 0,
             panels: None,
             cell_columns: 0,
+            cell_rows: 0,
         }
     }
 }
@@ -412,11 +416,15 @@ fn place_panels(
     let at = viewport
         .column_of(playhead)
         .map(|c| c * cells / viewport.columns().max(1));
-    store.place(
-        cells,
-        u32::try_from(viewport.rows()).unwrap_or(u32::MAX),
-        at,
-    )
+    // The panel area is taller than the lanes: a panel is drawn over the
+    // ruler and the video pane too, so a which-key list is bounded by the
+    // screen rather than by how many tracks the project happens to have.
+    let rows = if inputs.cell_rows == 0 {
+        u32::try_from(viewport.rows()).unwrap_or(u32::MAX)
+    } else {
+        inputs.cell_rows
+    };
+    store.place(cells, rows, at)
 }
 
 /// Panels as [`ViewState::dump`] prints them: placement, then content, so a

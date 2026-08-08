@@ -49,9 +49,14 @@ instead. That is a local degradation, not an error.
 
 ## Sizes
 
-Panels are measured in **character cells**, the one unit a terminal and a
-window both have. Sizes are requests: a panel is always clamped to the
-surface, so an oversized panel is drawn big rather than drawn off screen.
+Panels are measured in **character cells**: glyphs across, text lines down -
+the one unit a terminal and a window both have. They are drawn over the whole
+editing area (ruler, video pane and lanes), *not* over the lanes alone, so a
+panel's height is bounded by the screen rather than by how many tracks the
+project happens to have. Only the status and `:` lines stay clear.
+
+Sizes are requests: a panel is always clamped to that area, so an oversized
+panel is drawn big rather than drawn off screen.
 
 Panels are capped per host (16 open, 200 lines, 64 spans a line) and control
 characters are stripped from their text. A plugin cannot push the editor off

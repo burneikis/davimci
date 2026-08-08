@@ -219,9 +219,9 @@ fn a_plugin_panel_is_drawn_where_the_app_placed_it() {
     let view = davimci_app::fixtures::panel();
     let panel = &view.panels[0];
     let drawn = rows(&view, 60, 8);
-    // The app placed it in track rows; the terminal draws it there and
-    // nowhere else. Row 0 is the ruler.
-    let row = &drawn[1 + panel.rect.row as usize];
+    // The app placed it in the editing area, whose first row is the first
+    // row the terminal draws; the terminal puts it there and nowhere else.
+    let row = &drawn[panel.rect.row as usize];
     let at = usize::from(GUTTER) + panel.rect.column as usize;
     let box_row: String = row
         .chars()
@@ -232,7 +232,7 @@ fn a_plugin_panel_is_drawn_where_the_app_placed_it() {
         box_row.starts_with('\u{250c}') && box_row.contains("which-key"),
         "the panel's frame and title are not at its placement: {box_row:?}"
     );
-    let body: String = drawn[2 + panel.rect.row as usize]
+    let body: String = drawn[1 + panel.rect.row as usize]
         .chars()
         .skip(at)
         .take(panel.rect.columns as usize)
@@ -244,5 +244,69 @@ fn a_plugin_panel_is_drawn_where_the_app_placed_it() {
     // And a panel changes no row's width.
     for r in &drawn {
         assert_eq!(r.chars().count(), 60, "a panel made a row ragged: {r:?}");
+    }
+}
+
+/// Regression: a which-key panel was cut off at the bottom, showing only
+/// what fitted inside the *timeline* - so a project with three tracks could
+/// never show more than three lines of it.
+#[test]
+fn a_panel_taller_than_the_track_count_still_fits_the_terminal() {
+    use davimci_app::{
+        App, PanelAnchor, PanelContent, PanelId, PanelLine, PanelOp, PanelRole, PanelSpan,
+        PanelSpec, PanelStore, Surface,
+    };
+    let _ = PanelStore::default();
+
+    let (width, height) = (60u16, 20u16);
+    let surface: Surface = davimci_tui::render::surface(width, height, 0, 0);
+    let mut app = App::new(davimci_cmd::Session::new(davimci_app::fixtures::timeline()));
+    app.resize(surface);
+
+    // Three tracks, ten lines of keys: the panel is taller than the lanes.
+    let entries = 10;
+    let id = PanelId(1);
+    app.apply_panel(PanelOp::Open {
+        id,
+        spec: Box::new(PanelSpec {
+            owner: "which-key".into(),
+            title: Some("which-key".into()),
+            anchor: PanelAnchor::BottomLeft,
+            ..PanelSpec::default()
+        }),
+    });
+    app.apply_panel(PanelOp::SetContent {
+        id,
+        content: PanelContent::Lines(
+            (0..entries)
+                .map(|i| PanelLine {
+                    spans: vec![PanelSpan::new(format!("key {i}"), PanelRole::Key)],
+                })
+                .collect(),
+        ),
+    });
+
+    let view = app.view();
+    assert!(
+        view.panels[0].rect.rows as usize >= entries + 2,
+        "the panel was clamped to the tracks: {:?}",
+        view.panels[0].rect
+    );
+
+    let drawn = rows(&view, width, height);
+    let text = drawn.join("\n");
+    for i in 0..entries {
+        assert!(
+            text.contains(&format!("key {i}")),
+            "line {i} of the panel was cut off:\n{text}"
+        );
+    }
+    // The status line still has its row, and nothing is ragged.
+    assert!(
+        drawn.last().unwrap().contains("NORMAL"),
+        "the panel pushed the status line off:\n{text}"
+    );
+    for r in &drawn {
+        assert_eq!(r.chars().count(), usize::from(width));
     }
 }

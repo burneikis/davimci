@@ -30,13 +30,20 @@ pub struct Surface {
     /// the frames. Zero means "no thumbnails", which is how a terminal or a
     /// test opts out.
     pub thumbnail_columns: u32,
-    /// How many character cells wide the timeline area is.
+    /// How many character cells wide the panel area is.
     ///
     /// Panels are text, so they are placed in cells rather than in timeline
     /// columns: a terminal's cell is its column, and a window's is a glyph
     /// wide. Reporting it is the frontend's job, since only it knows its own
     /// font; deciding what goes where stays here.
     pub cell_columns: u32,
+    /// How many text lines tall the panel area is.
+    ///
+    /// Deliberately *not* the track count: a panel is drawn over the whole
+    /// editing area - ruler, video pane and lanes - and clamping it to the
+    /// lanes would cut a which-key list off at however many tracks the
+    /// project happens to have.
+    pub cell_rows: u32,
 }
 
 impl Default for Surface {
@@ -46,6 +53,7 @@ impl Default for Surface {
             rows: 4,
             thumbnail_columns: 0,
             cell_columns: 80,
+            cell_rows: 4,
         }
     }
 }

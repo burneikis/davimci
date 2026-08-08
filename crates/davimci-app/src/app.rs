@@ -294,9 +294,10 @@ pub struct App {
     /// How wide the frontend draws one thumbnail, in columns; zero means it
     /// draws none.
     thumbnail_columns: u32,
-    /// How many character cells wide the frontend's timeline area is - the
-    /// unit plugin panels are placed in.
+    /// How many character cells wide and tall the frontend's panel area is -
+    /// the units plugin panels are placed in.
     cell_columns: u32,
+    cell_rows: u32,
     /// The `:` line's buffer, history and completion vocabulary. Owned here
     /// rather than in a frontend so every host shows the same line, with the
     /// same completions, as it is typed.
@@ -345,6 +346,7 @@ impl App {
             thumbnails: Thumbnails::default(),
             thumbnail_columns: 0,
             cell_columns: 0,
+            cell_rows: 0,
             command: CommandLine::new(crate::cmdline::default_vocabulary()),
             command_open: false,
             pending_pick: None,
@@ -421,6 +423,7 @@ impl App {
     pub fn resize(&mut self, surface: Surface) {
         self.thumbnail_columns = surface.thumbnail_columns;
         self.cell_columns = surface.cell_columns;
+        self.cell_rows = surface.cell_rows;
         self.viewport.resize(surface.columns, surface.rows);
         self.follow();
     }
@@ -520,6 +523,7 @@ impl App {
             thumbnails: (!self.thumbnails.is_empty()).then_some(&self.thumbnails),
             thumbnail_columns: self.thumbnail_columns,
             cell_columns: self.cell_columns,
+            cell_rows: self.cell_rows,
             panels: (!self.panels.is_empty()).then_some(&self.panels),
         };
         ViewState::build(&self.session, self.viewport, &self.jump_cfg, &inputs)

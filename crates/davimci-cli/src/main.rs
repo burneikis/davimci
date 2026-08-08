@@ -353,6 +353,7 @@ fn run_session(ws: Workspace, script: &str, ticks: u32) -> Result<()> {
             // thumbnails either.
             thumbnail_columns: 0,
             cell_columns: 100,
+            cell_rows: 8,
         },
         script,
     );

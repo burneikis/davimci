@@ -81,6 +81,9 @@ pub struct Metrics {
     /// Advance of one digit in the ruler's smaller number font, used to
     /// decide which relative numbers fit without overlapping.
     pub number_char_width: u32,
+    /// Height of one line of plugin-panel text. A panel is text, so its rows
+    /// are text lines rather than the much taller track lanes.
+    pub panel_line_height: u32,
 }
 
 impl Default for Metrics {
@@ -94,6 +97,7 @@ impl Default for Metrics {
             video: VideoHeight::Auto,
             char_width: 8,
             number_char_width: 6,
+            panel_line_height: 20,
         }
     }
 }
@@ -242,8 +246,28 @@ impl Layout {
             // the strip tiles without gaps or overlap.
             thumbnail_columns: (self.metrics.row_height.max(1) * 16 / 9).max(1),
             // A panel is text, so it is measured in glyphs rather than in
-            // the pixel-wide columns the timeline is drawn in.
+            // the pixel-wide columns the timeline is drawn in, and in text
+            // lines rather than in track lanes - it is drawn over the whole
+            // editing area, ruler and video pane included.
             cell_columns: (self.tracks.width / self.metrics.char_width.max(1)).max(1),
+            cell_rows: (self.panel_area().height / self.metrics.panel_line_height.max(1)).max(1),
+        }
+    }
+
+    /// The region plugin panels may cover: everything above the status and
+    /// command lines, so a panel is bounded by the window rather than by how
+    /// many tracks the project happens to have.
+    #[must_use]
+    pub fn panel_area(&self) -> Rect {
+        let bottom = self
+            .completions
+            .or(self.command)
+            .map_or(self.status.y, |r| r.y);
+        Rect {
+            x: self.tracks.x,
+            y: self.video.y,
+            width: self.tracks.width,
+            height: (bottom - self.video.y).max(0) as u32,
         }
     }
 
@@ -285,13 +309,11 @@ pub fn paint(view: &ViewState, layout: &Layout, chrome: &Chrome) -> DrawList {
 /// One plugin panel, its cell rectangle scaled to the window's font.
 fn paint_panel(d: &mut DrawList, layout: &Layout, panel: &PanelView) {
     let cw = layout.metrics.char_width.max(1);
-    let row_h = layout.metrics.row_height.max(1);
+    let row_h = layout.metrics.panel_line_height.max(1);
+    let area = layout.panel_area();
     let rect = Rect {
-        x: layout
-            .tracks
-            .x
-            .saturating_add((panel.rect.column * cw) as i32),
-        y: layout.lane_y(panel.rect.row as usize),
+        x: area.x.saturating_add((panel.rect.column * cw) as i32),
+        y: area.y.saturating_add((panel.rect.row * row_h) as i32),
         width: panel.rect.columns * cw,
         height: panel.rect.rows * row_h,
     };
@@ -819,6 +841,31 @@ fn centred(window: Rect, row_h: u32) -> Rect {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression: a panel was bounded by the track lanes, so a which-key
+    /// list longer than the project's track count was cut off at the bottom.
+    #[test]
+    fn the_panel_area_is_the_editing_area_measured_in_text_lines() {
+        let layout = Layout::compute(800, 600, Metrics::default(), false, false);
+        let surface = layout.surface();
+        assert!(
+            surface.cell_rows as usize > surface.rows,
+            "a panel gets no more room than the lanes: {} lines vs {} lanes",
+            surface.cell_rows,
+            surface.rows
+        );
+        // And the area it is measured against stays clear of the chrome.
+        let area = layout.panel_area();
+        assert!(area.y >= layout.window.y);
+        assert!(
+            area.y + area.height as i32 <= layout.status.y,
+            "the panel area overlaps the status line"
+        );
+        assert!(
+            area.height >= layout.tracks.height,
+            "the panel area is no bigger than the lanes"
+        );
+    }
 
     #[test]
     fn regions_tile_the_window_without_overlapping() {
