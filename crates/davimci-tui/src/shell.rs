@@ -50,6 +50,8 @@ pub struct Tui {
     /// between renders matches what is actually on screen.
     command_rows: u16,
     last_lines: Vec<Line<'static>>,
+    /// Caret position for the screen in `last_lines`, when one is wanted.
+    cursor: Option<(u16, u16)>,
     quit: bool,
     /// `:set previewheight`, before the cap a small terminal imposes.
     preview_height: Height,
@@ -78,6 +80,7 @@ impl Tui {
             modals: Modals::new(),
             command_rows: 0,
             last_lines: Vec::new(),
+            cursor: None,
             quit: false,
             preview_height: Height::Off,
             numbers: Numbers::Off,
@@ -247,6 +250,13 @@ impl Tui {
         &self.last_lines
     }
 
+    /// Where the caret goes on the screen just rendered, if the `:` line is
+    /// open. Column and row, both zero-based.
+    #[must_use]
+    pub fn cursor(&self) -> Option<(u16, u16)> {
+        self.cursor
+    }
+
     /// The same rows as plain text, which is what the snapshot tests read.
     #[must_use]
     pub fn last_rows(&self) -> Vec<String> {
@@ -340,6 +350,7 @@ impl Frontend for Tui {
         self.modals.sync(view);
         self.command_rows = render::command_rows(view);
         self.last_lines = self.rows(view);
+        self.cursor = render::cursor(view, self.height);
         Ok(())
     }
 }

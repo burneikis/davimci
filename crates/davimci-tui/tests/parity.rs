@@ -98,11 +98,18 @@ fn preview_does_not_change_the_view() {
     let (plain, plain_rows) = through_tui(surface, SCRIPT);
     let (with_preview, preview_rows) = through_tui_with_preview(surface, SCRIPT, Height::Rows(4));
     assert_eq!(plain, with_preview, "the preview band changed the view");
-    // The band's own rows are the only difference on screen, and they are
-    // blank until a frame has been composed.
-    assert_eq!(preview_rows.len(), plain_rows.len() + 4);
+    // Both fill the terminal, because the status line is anchored to its last
+    // row; the band's rows are blank until a frame has been composed, and the
+    // written rows are the same ones in the same order.
+    assert_eq!(preview_rows.len(), plain_rows.len());
     assert!(preview_rows[..4].iter().all(|r| r.trim().is_empty()));
-    assert_eq!(&preview_rows[4..], &plain_rows[..]);
+    let written = |rows: &[String]| -> Vec<String> {
+        rows.iter()
+            .filter(|r| !r.trim().is_empty())
+            .cloned()
+            .collect()
+    };
+    assert_eq!(written(&preview_rows), written(&plain_rows));
 }
 
 /// The keys must survive translation too: a frontend that swallowed one

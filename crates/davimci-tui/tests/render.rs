@@ -38,6 +38,9 @@ fn the_normal_view_snapshots() {
             ">V1      ││a██████b██████████████  █c█████                  \n",
             " A1      ││music█████████████████                           \n",
             " V2      ││  █over██                                        \n",
+            "                                                            \n",
+            "                                                            \n",
+            "                                                            \n",
             "-- NORMAL (V1) --                                      0/500",
         ),
         "the terminal drew something the view state did not describe"
@@ -343,4 +346,50 @@ fn the_command_line_is_drawn_on_a_terminal_with_no_spare_rows() {
         drawn.iter().any(|r| r.starts_with(":w")),
         "the command line was pushed off the bottom: {drawn:?}"
     );
+}
+
+/// The status line and the `:` line sit on the last rows of the terminal,
+/// whatever the project's track count is.
+#[test]
+fn the_footer_is_anchored_to_the_bottom_of_the_terminal() {
+    let (width, height) = (60u16, 20u16);
+    let drawn = rows(&fixtures::normal(), width, height);
+    assert_eq!(drawn.len(), usize::from(height));
+    assert!(
+        drawn[usize::from(height) - 1].starts_with("-- NORMAL"),
+        "the status line is not on the last row: {drawn:?}"
+    );
+    assert!(
+        drawn[4..usize::from(height) - 1]
+            .iter()
+            .all(|r| r.trim().is_empty()),
+        "the rows between the tracks and the footer are not blank: {drawn:?}"
+    );
+}
+
+/// The caret follows the text being typed, so a terminal shows where the next
+/// character lands.
+#[test]
+fn the_caret_sits_in_the_command_line_while_it_is_typed() {
+    use davimci_app::CommandLineView;
+
+    let mut view = fixtures::normal();
+    assert_eq!(davimci_tui::render::cursor(&view, 20), None);
+
+    view.command_line = Some(CommandLineView {
+        buffer: "write".into(),
+        cursor: 3,
+        completions: Vec::new(),
+    });
+    // One row for the `:` line: it is the last row, and the caret is past the
+    // `:` and the three characters typed before it.
+    assert_eq!(davimci_tui::render::cursor(&view, 20), Some((4, 19)));
+
+    view.command_line = Some(CommandLineView {
+        buffer: "w".into(),
+        cursor: 1,
+        completions: vec!["write".into()],
+    });
+    // A completion row is drawn under the `:` line, which moves up.
+    assert_eq!(davimci_tui::render::cursor(&view, 20), Some((2, 18)));
 }

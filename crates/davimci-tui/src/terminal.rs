@@ -201,9 +201,19 @@ impl Terminal {
     /// rows the picture covers were drawn blank on purpose: `ratatui` knows
     /// nothing about an image and would otherwise overwrite it on the next
     /// diff.
-    pub fn draw(&mut self, lines: &[Line<'_>], preview: Option<&[u8]>) -> io::Result<()> {
+    pub fn draw(
+        &mut self,
+        lines: &[Line<'_>],
+        preview: Option<&[u8]>,
+        cursor: Option<(u16, u16)>,
+    ) -> io::Result<()> {
         self.inner.draw(|frame| {
             frame.render_widget(Paragraph::new(lines.to_vec()), frame.area());
+            // Shown only while something is being typed: a block caret parked
+            // on the timeline would read as a second playhead.
+            if let Some((column, row)) = cursor {
+                frame.set_cursor_position((column, row));
+            }
         })?;
         if let Some(bytes) = preview {
             let mut out = io::stdout();

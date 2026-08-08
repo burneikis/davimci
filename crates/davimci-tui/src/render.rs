@@ -86,6 +86,21 @@ pub fn command_rows(view: &ViewState) -> u16 {
     }
 }
 
+/// Where the terminal caret belongs: in the `:` line while it is open, and
+/// nowhere otherwise.
+///
+/// The column counts characters, matching how the row itself is laid out, and
+/// the row is derived from the bottom of the screen because the command line
+/// is anchored there.
+#[must_use]
+pub fn cursor(view: &ViewState, height: u16) -> Option<(u16, u16)> {
+    let cmd = view.command_line.as_ref()?;
+    let typed = cmd.buffer.get(..cmd.cursor).unwrap_or(&cmd.buffer);
+    let column = u16::try_from(typed.chars().count()).unwrap_or(u16::MAX);
+    let row = height.saturating_sub(command_rows(view));
+    Some((column.saturating_add(1), row))
+}
+
 /// One screen, top row first. The preview band sits above the ruler; a
 /// graphics protocol leaves its rows blank here and writes over them, which
 /// is why they are still counted.
@@ -154,6 +169,12 @@ pub fn lines(
     // bottom, which is exactly where the user is typing.
     let body = usize::from(height.saturating_sub(1).saturating_sub(cmd_rows));
     out.truncate(body);
+    // The status and `:` lines are anchored to the last rows of the terminal,
+    // so they do not float halfway up a screen that has more rows than the
+    // project has tracks.
+    while out.len() < body {
+        out.push(Line::from(Span::raw(fit("", width))));
+    }
 
     let mut tail = vec![status(view, width)];
     tail.extend(command_line(view, width));

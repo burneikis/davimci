@@ -115,7 +115,7 @@ pub fn run(mut app: App, mut editor: Editor) -> Result<()> {
         }
         // A failed draw loses a frame, not the session (Phase 0: recoverable
         // errors degrade locally).
-        if let Err(e) = term.draw(tui.last_lines(), tui.preview_escape()) {
+        if let Err(e) = term.draw(tui.last_lines(), tui.preview_escape(), tui.cursor()) {
             app.notify(davimci_app::Message::error(format!(
                 "the terminal could not be redrawn: {e}"
             )));
