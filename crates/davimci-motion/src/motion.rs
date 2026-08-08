@@ -128,6 +128,28 @@ pub enum BuiltinMotion {
     Predicate(Predicate, Direction),
 }
 
+impl BuiltinMotion {
+    /// Which way along the timeline this motion travels, when it travels along
+    /// it at all.
+    ///
+    /// A visual mode needs this to start the search from the edge of the
+    /// selection it is about to push, rather than from the point the cursor
+    /// happens to sit on inside it.
+    #[must_use]
+    pub fn time_direction(&self) -> Option<Direction> {
+        match self {
+            Self::Frame(dir)
+            | Self::JumpPoint(dir)
+            | Self::ClipBoundary(dir)
+            | Self::Marker(dir)
+            | Self::Predicate(_, dir) => Some(*dir),
+            Self::ClipEnd | Self::TimelineEnd => Some(Direction::Forward),
+            Self::TimelineStart => Some(Direction::Backward),
+            Self::TrackStep(_) | Self::TrackCycle(_) | Self::MatchingEdit | Self::Mark(_) => None,
+        }
+    }
+}
+
 impl Motion for BuiltinMotion {
     fn resolve(&self, ctx: &MotionCtx<'_>, count: u32) -> Result<Resolved, MotionError> {
         let n = count.max(1);

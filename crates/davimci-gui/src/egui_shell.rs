@@ -38,6 +38,7 @@ pub fn fill_color(fill: Fill) -> Color32 {
         Fill::TrackLane => Color32::from_rgb(30, 30, 36),
         Fill::TrackLaneFocused => Color32::from_rgb(40, 40, 52),
         Fill::TrackHeader => Color32::from_rgb(44, 44, 54),
+        Fill::TrackHeaderFocused => Color32::from_rgb(62, 62, 78),
         Fill::Clip => Color32::from_rgb(70, 110, 160),
         Fill::ClipSelected => Color32::from_rgb(120, 170, 230),
         Fill::ClipOffline => Color32::from_rgb(150, 60, 60),
@@ -45,6 +46,9 @@ pub fn fill_color(fill: Fill) -> Color32 {
         Fill::Waveform => Color32::from_rgb(150, 200, 180),
         Fill::Selection => Color32::from_rgba_unmultiplied(120, 170, 230, 60),
         Fill::Playhead => Color32::from_rgb(240, 220, 90),
+        // Brighter than the playhead it sits on, because it is the one column
+        // of it that says where an edit lands.
+        Fill::Cursor => Color32::from_rgb(255, 245, 170),
         Fill::TickMajor => Color32::from_rgb(150, 150, 160),
         Fill::TickMinor => Color32::from_rgb(80, 80, 90),
         Fill::StatusLine => Color32::from_rgb(18, 18, 22),
@@ -241,11 +245,31 @@ pub fn claim_input(ui: &mut Ui, rect: EguiRect) {
 /// platform layout, so they are taken from there; named keys and Control
 /// chords arrive as `Event::Key`, because `Text` is not emitted for either.
 /// Whitespace text is dropped so `Space` is not counted twice.
+///
+/// `taking_text` says whether a modal is spelling out a line. The window
+/// layer never sees `Ctrl+V`: the winit integration swallows it and emits
+/// `Event::Paste` instead, so a paste is the only evidence the chord was
+/// pressed. Outside a text modal it is read back as `<C-v>`, which is what
+/// the timeline grammar binds it to; inside one it is the pasted text. The
+/// one case this cannot recover is `Ctrl+V` with an empty clipboard, where
+/// no event is emitted at all.
 #[must_use]
-pub fn translate_events(events: &[egui::Event]) -> Vec<(RawKey, Modifiers)> {
+pub fn translate_events(events: &[egui::Event], taking_text: bool) -> Vec<(RawKey, Modifiers)> {
     let mut out = Vec::new();
     for event in events {
         match event {
+            egui::Event::Paste(text) if taking_text => {
+                for c in text.chars().filter(|c| !c.is_whitespace()) {
+                    out.push((RawKey::Char(c), Modifiers::default()));
+                }
+            }
+            egui::Event::Paste(_) => out.push((
+                RawKey::Char('v'),
+                Modifiers {
+                    ctrl: true,
+                    ..Modifiers::default()
+                },
+            )),
             egui::Event::Text(text) => {
                 for c in text.chars().filter(|c| !c.is_whitespace()) {
                     out.push((RawKey::Char(c), Modifiers::default()));
@@ -300,7 +324,7 @@ mod tests {
             egui::Event::Text(" ".into()),
             egui::Event::Text("w".into()),
         ];
-        let keys = translate_events(&events);
+        let keys = translate_events(&events, false);
         assert_eq!(
             keys.iter().map(|(k, _)| k.clone()).collect::<Vec<_>>(),
             vec![RawKey::Char('d'), RawKey::Char('w')]
@@ -319,7 +343,7 @@ mod tests {
                 modifiers: egui::Modifiers::NONE,
             },
         ];
-        let keys = translate_events(&events);
+        let keys = translate_events(&events, false);
         assert_eq!(keys.len(), 1);
         assert_eq!(keys[0].0, RawKey::Space);
     }
@@ -333,9 +357,33 @@ mod tests {
             repeat: false,
             modifiers: egui::Modifiers::CTRL,
         }];
-        let keys = translate_events(&events);
+        let keys = translate_events(&events, false);
         assert_eq!(keys[0].0, RawKey::Char('v'));
         assert!(keys[0].1.ctrl);
+    }
+
+    /// Regression: winit turns `Ctrl+V` into a paste before egui ever reports
+    /// a key, so visual-block mode was unreachable in the window.
+    #[test]
+    fn a_paste_outside_a_text_modal_is_the_visual_block_chord() {
+        let keys = translate_events(&[egui::Event::Paste("clip.mp4".into())], false);
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys[0].0, RawKey::Char('v'));
+        assert!(keys[0].1.ctrl);
+    }
+
+    #[test]
+    fn a_paste_into_a_text_modal_is_the_text() {
+        let keys = translate_events(&[egui::Event::Paste("a b".into())], true);
+        let typed: String = keys
+            .iter()
+            .filter_map(|(k, _)| match k {
+                RawKey::Char(c) => Some(*c),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(typed, "ab");
+        assert!(keys.iter().all(|(_, m)| !m.ctrl));
     }
 
     #[test]
@@ -347,7 +395,7 @@ mod tests {
             repeat: false,
             modifiers: egui::Modifiers::NONE,
         }];
-        assert!(translate_events(&events).is_empty());
+        assert!(translate_events(&events, false).is_empty());
     }
 
     #[test]

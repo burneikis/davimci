@@ -32,6 +32,12 @@ anchored, which is what `o` swaps.
 The unit under the active end is recomputed after every motion, so in `V` a
 motion that lands inside a clip snaps outward to that clip's bounds.
 
+A motion along time starts from the **edge of what the active end already
+covers**, in the direction of travel, not from the point inside it. In `V` on a
+whole clip, `h` therefore lands before that clip rather than on its own start
+boundary, which the selection already reaches. Every press moves the selection;
+a press that selects what was already selected is a bug.
+
 ### `:set visualstart=frame|jump`
 
 What `v` and `<C-v>` anchor to on entry, and what each end covers as it moves.
@@ -54,6 +60,19 @@ rule in all three modes.
 block selection can skip a track. A later `j` or `k` recomputes the contiguous
 span and so discards those holes: toggle after moving, not before.
 
+So `v` and `<C-v>` cover the same frames given the same motions; the only
+difference is that `<C-v>` can hold a track set with holes in it, which is the
+one thing `v` can never express. Reach for `<C-v>` when you want V1 and A2 but
+not A1.
+
+### `<C-v>` in the window
+
+The window never receives `Ctrl+V` as a key: the winit layer takes it as the
+platform paste chord and emits a paste event instead. `translate_events` reads a
+paste back as `<C-v>` whenever no modal is spelling out a line, and as the
+pasted text when one is. The single case this cannot recover is `Ctrl+V` with an
+empty clipboard, where no event is emitted at all.
+
 `it` / `at` in visual replace the track set with the group under the cursor.
 
 ## What is drawn
@@ -66,3 +85,12 @@ and tints the covered part of each clip; the terminal inverts the covered cells,
 so an empty region of a covered lane still reads as selected.
 
 The mode line carries the extent: `-- VISUAL 12f (V1,A1) --`.
+
+## Where the cursor is
+
+The playhead is one time for the whole timeline, so it is drawn down every
+lane - which on its own never says which track an edit would land on. The
+*cursor* is that answer: the playhead column on the focused lane, drawn bright
+where the rest of the column is dim, with the focused track's header lit and its
+name marked (`>V1` in the terminal). Everything anchored "under the cursor",
+including entry into every visual mode, means that lane at that frame.

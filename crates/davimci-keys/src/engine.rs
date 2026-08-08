@@ -14,15 +14,15 @@ use davimci_core::{
     Timeline, TrackId, Transition,
 };
 use davimci_motion::{
-    BuiltinMotion, JumpConfig, Motion as MotionTrait, MotionCtx, Object as ObjectTrait, Resolved,
-    Scope, TextObject, TimeRange, Zoom,
+    BuiltinMotion, Direction, JumpConfig, Motion as MotionTrait, MotionCtx, Object as ObjectTrait,
+    Resolved, Scope, TextObject, TimeRange, Zoom,
 };
 
 use crate::action::{Action, CenterIntent, Operator, Target, TransportPolicy, ZoomIntent};
 use crate::error::KeysError;
 use crate::key::Key;
 use crate::keymap::Keymap;
-use crate::mode::{Anchor, Mode, ModeChanged, ModeState, VisualStart};
+use crate::mode::{Anchor, Mode, ModeChanged, ModeState, VisualSelection, VisualStart};
 use crate::parser::{Parser, Step};
 
 /// A transport action, handed to the backend clock rather than the undo log.
@@ -421,10 +421,12 @@ impl Engine {
             let mut ctx = MotionCtx::new(tl, &jumps);
             // In a VISUAL mode the end that moves is the selection's active
             // end, not the playhead, which stays where the selection was
-            // anchored.
+            // anchored. The search starts at the edge of what that end already
+            // covers, so `l` on a whole selected clip lands past it rather
+            // than on a boundary the selection is already sitting on.
             if let Some(v) = self.mode.visual() {
                 ctx = ctx.from(davimci_motion::Position {
-                    frame: v.active.frame,
+                    frame: visual_motion_origin(v, motion.time_direction()),
                     track: v.active.track,
                 });
             }
@@ -1033,6 +1035,20 @@ fn delta_of(from: Frame, to: Frame) -> i64 {
 }
 
 /// The edge of the clip under `frame` nearest to `frame`.
+/// Where a motion starts when it is pushing the active end of a selection.
+///
+/// The end covers a span, not a point, so a search from the point inside it
+/// can land on a boundary the selection already reaches - one press that
+/// changes nothing. Starting from the covered edge facing the motion makes
+/// every press move the selection.
+fn visual_motion_origin(v: &VisualSelection, dir: Option<Direction>) -> Frame {
+    match dir {
+        Some(Direction::Forward) => Frame(v.active_span.end.get().saturating_sub(1)),
+        Some(Direction::Backward) => v.active_span.start,
+        None => v.active.frame,
+    }
+}
+
 fn nearest_edge(
     tl: &Timeline,
     track: TrackId,

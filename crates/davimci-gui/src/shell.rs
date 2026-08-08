@@ -121,6 +121,15 @@ impl Gui {
         self.modals.command_is_open()
     }
 
+    /// Whether a modal is currently spelling out text, so a paste is text
+    /// rather than the `<C-v>` the timeline grammar would read it as.
+    #[must_use]
+    pub fn takes_text(&self) -> bool {
+        self.modals.command_is_open()
+            || self.modals.picker().is_some()
+            || self.modals.subtitle().is_some()
+    }
+
     #[must_use]
     pub fn picker(&self) -> Option<&MediaPicker> {
         self.modals.picker()

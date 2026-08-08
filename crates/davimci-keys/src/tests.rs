@@ -605,6 +605,27 @@ fn visualstart_jump_anchors_on_the_interval_under_the_cursor() {
     assert_eq!((sel.start.get(), sel.end.get()), (0, 100));
 }
 
+/// A press that changes nothing is a bug: the active end covers a span, so
+/// `h`/`l` search from the edge of that span rather than from inside it.
+#[test]
+fn h_and_l_in_visual_step_past_the_selection_not_within_it() {
+    let mut e = Engine::new();
+    let mut s = three_lanes();
+    // `V` inside `b` takes the whole of `b`; `h` must reach `a`, not stop on
+    // b's own start boundary, which the selection already includes.
+    feed(&mut e, &mut s, "150<Right>Vh");
+    let sel = e.selection().expect("visual line is live");
+    assert_eq!((sel.start.get(), sel.end.get()), (0, 200));
+
+    // Same with an interval unit: one press, one interval.
+    let mut e = Engine::new();
+    let mut s = three_lanes();
+    e.set_visual_start(crate::mode::VisualStart::Jump);
+    feed(&mut e, &mut s, "150<Right>vh");
+    let sel = e.selection().expect("visual mode is live");
+    assert_eq!((sel.start.get(), sel.end.get()), (0, 200));
+}
+
 #[test]
 fn visual_line_in_a_gap_selects_the_gap_not_one_frame() {
     let mut e = Engine::new();

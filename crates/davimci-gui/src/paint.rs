@@ -45,6 +45,8 @@ pub enum Fill {
     TrackLane,
     TrackLaneFocused,
     TrackHeader,
+    /// The header of the track the cursor is on.
+    TrackHeaderFocused,
     Clip,
     ClipSelected,
     ClipOffline,
@@ -55,6 +57,8 @@ pub enum Fill {
     /// One column of an audio lane's envelope.
     Waveform,
     Playhead,
+    /// The playhead on the focused lane: where an edit would actually land.
+    Cursor,
     TickMajor,
     TickMinor,
     StatusLine,

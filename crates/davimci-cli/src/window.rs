@@ -149,7 +149,7 @@ impl eframe::App for Window {
         // Input: egui events in, davimci key tokens out. The `Gui` routes
         // modals; the grammar never sees a keystroke a modal owns.
         let events = ctx.input(|i| i.events.clone());
-        for (raw, mods) in egui_shell::translate_events(&events) {
+        for (raw, mods) in egui_shell::translate_events(&events, self.gui.takes_text()) {
             self.gui.push(GuiEvent::Key(raw, mods));
         }
         // A press, not a release: clicking the timeline seeks there

@@ -33,9 +33,30 @@ fn the_normal_view_paints_a_stable_draw_list() {
     let list = paint_view(&view, &layout(800, 600), &Chrome::default());
     assert_eq!(
         summarise(&list),
-        "Background=2 Clip=5 ClipLabel=5 Playhead=1 Ruler=1 Status=1 StatusLine=1 \
-TickMajor=5 TickMinor=3 TrackHeader=3 TrackLane=2 TrackLaneFocused=1 TrackName=3"
+        "Background=2 Clip=5 ClipLabel=5 Cursor=1 Playhead=1 Ruler=1 Status=1 StatusLine=1 \
+TickMajor=5 TickMinor=3 TrackHeader=2 TrackHeaderFocused=1 TrackLane=2 TrackLaneFocused=1 \
+TrackName=3"
     );
+}
+
+/// The playhead spans every lane, so on its own it never says which track an
+/// edit would land on. The cursor is that answer, and it belongs to exactly
+/// one lane.
+#[test]
+fn the_cursor_marks_the_focused_lane_and_only_that_lane() {
+    let view = fixtures::normal();
+    let l = layout(800, 600);
+    let list = paint_view(&view, &l, &Chrome::default());
+    let cursors = list.rects(Fill::Cursor);
+    assert_eq!(cursors.len(), 1, "one cursor, on one track");
+    let row = view
+        .tracks
+        .iter()
+        .position(|t| t.focused)
+        .expect("a track has focus");
+    assert_eq!(cursors[0].y, l.lane_y(row));
+    assert_eq!(cursors[0].height, l.metrics.row_height);
+    assert_eq!(list.rects(Fill::TrackHeaderFocused).len(), 1);
 }
 
 #[test]

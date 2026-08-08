@@ -349,7 +349,14 @@ fn paint_lanes(d: &mut DrawList, layout: &Layout, view: &ViewState) {
             width: layout.headers.width,
             height: row_h,
         };
-        d.rect(header, Fill::TrackHeader);
+        d.rect(
+            header,
+            if track.focused {
+                Fill::TrackHeaderFocused
+            } else {
+                Fill::TrackHeader
+            },
+        );
         let mut name = track.name.clone();
         if track.muted {
             name.push('M');
@@ -467,7 +474,12 @@ fn paint_selection(d: &mut DrawList, layout: &Layout, view: &ViewState) {
     }
 }
 
-/// One pixel through the ruler and every lane.
+/// One pixel through the ruler and every lane, and a thicker cursor on the
+/// lane the playhead is actually on.
+///
+/// The playhead spans the stack because it is one time for the whole
+/// timeline, which leaves nothing saying *where* an edit would land. The
+/// cursor says it.
 fn paint_playhead(d: &mut DrawList, layout: &Layout, view: &ViewState) {
     let Some(col) = view.playhead.column else {
         return;
@@ -481,6 +493,20 @@ fn paint_playhead(d: &mut DrawList, layout: &Layout, view: &ViewState) {
         },
         Fill::Playhead,
     );
+    if let Some(row) = view.tracks.iter().position(|t| t.focused) {
+        let y = layout.lane_y(row);
+        if y < layout.tracks.y.saturating_add(layout.tracks.height as i32) {
+            d.rect(
+                Rect {
+                    x: layout.tracks.x.saturating_add(col as i32).saturating_sub(1),
+                    y,
+                    width: 3,
+                    height: layout.metrics.row_height,
+                },
+                Fill::Cursor,
+            );
+        }
+    }
 }
 
 fn paint_status(d: &mut DrawList, layout: &Layout, view: &ViewState) {

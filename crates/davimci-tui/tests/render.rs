@@ -36,8 +36,8 @@ fn the_normal_view_snapshots() {
         concat!(
             "time     │▼──────┼┬───────┬─────┼─┬┼─────┼──────────────────\n",
             ">V1      ││a██████b██████████████  █c█████                  \n",
-            " A1      │█music█████████████████                           \n",
-            " V2      │   █over██                                        \n",
+            " A1      ││music█████████████████                           \n",
+            " V2      ││  █over██                                        \n",
             "-- NORMAL (V1) --                                      0/500",
         ),
         "the terminal drew something the view state did not describe"

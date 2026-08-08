@@ -210,11 +210,16 @@ fn lane(view: &ViewState, track: &davimci_app::TrackView, columns: u16) -> Line<
         }
     }
 
-    if track.focused
-        && let Some(column) = view.playhead.column
+    // One time for the whole timeline, so the playhead runs down every lane;
+    // the lane it is bright on is the one an edit would land on.
+    if let Some(column) = view.playhead.column
         && let Some(cell) = cells.get_mut(column as usize)
     {
-        *cell = ('\u{2502}', Style::default().fg(Color::Yellow).bold());
+        *cell = if track.focused {
+            ('\u{2502}', Style::default().fg(Color::Yellow).bold())
+        } else {
+            ('\u{2502}', Style::default().fg(Color::DarkGray))
+        };
     }
 
     let mut spans = vec![Span::styled(
