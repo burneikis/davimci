@@ -2,24 +2,13 @@
 - strip down to core features, everything else should be built as a plugin, include default plugins for common features (first decide what features are core, and what can be plugins)
 
 # AI
-- optional detached preview window for the TUI (`--preview-window`): a bare,
-  undecorated, non-focusable `winit` window in `davimci-cli` showing the same
-  texture the GUI uploads, off by default, terminal keeps keyboard focus, and
-  closing it falls back to inline preview instead of ending the session
-- ask for `.davimci.lua` trust in the window rather than on the terminal, once the app has a modal path
-- `:set proxy on|off` is not in the `:set` registry; proxies have no runtime
-  switch yet
-- a burned-in subtitle is not asserted by a pixel diff: MLT's text producers
-  need a display, so the slow test only proves the text stayed out of the
-  streams and the sidecar
-- `an_exported_file_has_the_duration_of_the_timeline` fails on a 5s timeline:
-  the file comes out 5.088s. Pre-dates the hardening pass; the export writes
-  a few frames more than the timeline holds
-
-- the first backward step of every run decodes `backstep_run` frames inline in
-  `show_playhead`, so held-down `h` hitches once every `backstep_run` frames;
-  the run wants prefetching onto a worker like `Scrub`, which needs a second
-  graph while the transport is idle
+- `the_whole_spec_one_workflow_survives_a_real_import_and_export` fails: the
+  split propagates to the linked audio tracks, so A1-A3 come out with two
+  clips where the test expects one. Either the expectation or the grouping is
+  wrong - decide which before changing either
+- a proxy is generated per import and swapped in by a relink, so it costs an
+  undo entry the user did not ask for; it wants a write path that is a
+  command but not a history step
 
 # AI - deferred (not v1)
 - GPU/hardware acceleration (decode, planar upload, zero-copy import, hardware

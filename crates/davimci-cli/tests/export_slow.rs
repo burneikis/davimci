@@ -55,6 +55,49 @@ fn stream_count(path: &Path, kind: &str) -> usize {
     .count()
 }
 
+/// One decoded frame as raw RGB, so an assertion can be about pixels rather
+/// than about stream counts.
+fn frame_pixels(path: &Path, index: u64) -> Vec<u8> {
+    let out = Command::new("ffmpeg")
+        .args(["-v", "error", "-i"])
+        .arg(path)
+        .args([
+            "-vf",
+            &format!("select=eq(n\\,{index})"),
+            "-fps_mode",
+            "passthrough",
+            "-frames:v",
+            "1",
+            "-pix_fmt",
+            "rgb24",
+            "-f",
+            "rawvideo",
+            "-",
+        ])
+        .output()
+        .expect("ffmpeg should be installed for slow tests");
+    assert!(
+        !out.stdout.is_empty(),
+        "no frame {index} in {}: {}",
+        path.display(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    out.stdout
+}
+
+/// Subpixels the two frames disagree about by more than encoder noise.
+///
+/// A burned-in glyph moves a channel by most of its range; inter-frame
+/// prediction off a changed reference moves it by a few dozen units at
+/// most. The threshold is what keeps the second from reading as the first.
+fn visibly_different(a: &[u8], b: &[u8]) -> usize {
+    assert_eq!(a.len(), b.len(), "the two frames are not the same size");
+    a.iter()
+        .zip(b)
+        .filter(|(x, y)| x.abs_diff(**y) > 100)
+        .count()
+}
+
 /// Build a real editor over a real MLT backend, with `media` imported.
 fn editor_with(media: &Path) -> (App, Editor) {
     let mut ws = Workspace::new(std::env::temp_dir()).without_autosave();
@@ -281,6 +324,9 @@ fn subtitle_modes_burn_write_or_mux_and_are_told_apart_by_ffprobe() {
     use davimci_backend::{AudioCodec, Container, Preset, SubtitleMode, VideoCodec};
 
     let src = fixture("counter_720p.mkv");
+    // Where each mode's file lands, so the burned one can be diffed against
+    // the one that carried the same cue without burning it.
+    let mut written: std::collections::BTreeMap<&str, PathBuf> = std::collections::BTreeMap::new();
     for (name, mode) in [
         ("subs_burned", SubtitleMode::Burned),
         ("subs_sidecar", SubtitleMode::Sidecar),
@@ -334,6 +380,7 @@ fn subtitle_modes_burn_write_or_mux_and_are_told_apart_by_ffprobe() {
         );
         drain_export(&mut app, &mut editor);
         assert!(out.exists(), "{name}: the export produced no file");
+        written.insert(name, out.clone());
 
         match mode {
             SubtitleMode::Burned => {
@@ -362,7 +409,45 @@ fn subtitle_modes_burn_write_or_mux_and_are_told_apart_by_ffprobe() {
             }
             SubtitleMode::None => unreachable!(),
         }
-        let _ = std::fs::remove_file(&out);
         let _ = std::fs::remove_file(&srt);
+    }
+
+    // The claim "burned" makes is about the picture, so the picture is what
+    // is asserted: the same cue muxed as a stream is the control, since both
+    // files come off the same timeline through the same encoder settings.
+    let burned = written.remove("subs_burned").expect("a burned export");
+    let control = written.remove("subs_embedded").expect("an embedded export");
+    let burned_cue = frame_pixels(&burned, 0);
+    let control_cue = frame_pixels(&control, 0);
+    let cue = visibly_different(&burned_cue, &control_cue);
+    assert!(
+        cue >= 5_000,
+        "burning changed {cue} subpixels of the cue's frame: the text was never drawn"
+    );
+    // Burned *onto* the picture, not over it: a text card that replaced the
+    // frame would change nearly every subpixel rather than the glyphs.
+    assert!(
+        cue * 2 < burned_cue.len(),
+        "{cue} of {} subpixels changed: the text card covered the picture",
+        burned_cue.len()
+    );
+    // The cue covers frames 0..30 of a 60 fps timeline, so frame 150 is well
+    // clear of it and must carry no text at all.
+    let after = frame_pixels(&burned, 150);
+    let clean = frame_pixels(&control, 150);
+    let leaked = visibly_different(&after, &clean);
+    // Not zero: the two files diverge from frame 0, so x264 predicts frame
+    // 150 off different references and a handful of subpixels drift. Text
+    // is thousands of subpixels, so the two cannot be confused.
+    assert!(
+        leaked * 100 < cue,
+        "{leaked} subpixels differ after the cue ended against {cue} during it: \
+         the burn is not confined to the cue"
+    );
+    for path in [burned, control] {
+        let _ = std::fs::remove_file(path);
+    }
+    for path in written.values() {
+        let _ = std::fs::remove_file(path);
     }
 }

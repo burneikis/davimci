@@ -185,6 +185,15 @@ impl Engine {
         }
     }
 
+    /// Replace the table the grammar consults.
+    ///
+    /// Config can arrive after startup - a project-local file the user has
+    /// just trusted - and a binding that is not in this table is not a
+    /// binding.
+    pub fn set_keymap(&mut self, keymap: Keymap) {
+        self.keymap = keymap;
+    }
+
     #[must_use]
     pub fn with_keymap(keymap: Keymap) -> Self {
         Self {

@@ -42,7 +42,10 @@ impl Resource {
             // The placeholder is deliberately not black: offline media must
             // be visible as a fault, not mistaken for a gap.
             Self::Offline { .. } => "#ff202080".into(),
-            Self::Text(_) | Self::Colour => "#ff000000".into(),
+            // A text card is transparent: the glyphs are burned *onto* the
+            // picture, and an opaque card would replace it.
+            Self::Text(_) => "#00000000".into(),
+            Self::Colour => "#ff000000".into(),
         }
     }
 }
@@ -305,6 +308,29 @@ impl Projection {
     #[must_use]
     pub fn audio_mix_tracks(&self) -> Vec<usize> {
         (1..self.tracks.len()).collect()
+    }
+
+    /// Indexes of the tracks whose picture has to be composited over what is
+    /// under them.
+    ///
+    /// A tractor shows the topmost visible track and drops everything below
+    /// it unless a blend is planted, so an overlay or a burned-in subtitle
+    /// would *replace* the picture instead of sitting on it. The lowest
+    /// visual track is the background and needs none.
+    #[must_use]
+    pub fn video_blend_tracks(&self) -> Vec<usize> {
+        self.tracks
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| {
+                matches!(
+                    t.kind,
+                    TrackKind::Video | TrackKind::Overlay | TrackKind::Text
+                )
+            })
+            .map(|(i, _)| i)
+            .skip(1)
+            .collect()
     }
 
     /// The channel bus for a separate-stream export, or `None` when there is
@@ -613,6 +639,27 @@ mod tests {
         assert_eq!(v1.entries[0].length(), 100);
         assert!(matches!(v1.entries[1], Entry::Blank { length } if length == Frame(50)));
         assert_eq!(v1.entries[2].length(), 50);
+    }
+
+    /// Regression: an overlay or a subtitle track used to *replace* the
+    /// picture, because a tractor shows its topmost visible track and
+    /// nothing planted a blend. Only the lowest visual track goes
+    /// unblended - it is the background.
+    #[test]
+    fn every_visual_track_above_the_first_is_blended_and_no_audio_track_is() {
+        let tl = fixture(&[
+            ("V1", &[(0, 100, "a")]),
+            ("A1", &[(0, 100, "music")]),
+            ("O1", &[(0, 50, "logo")]),
+            ("T1", &[(0, 30, "cue")]),
+        ]);
+        let p = Projection::of(&tl);
+        let names: Vec<&str> = p
+            .video_blend_tracks()
+            .into_iter()
+            .map(|i| p.tracks[i].name.as_str())
+            .collect();
+        assert_eq!(names, ["O1", "T1"]);
     }
 
     #[test]

@@ -570,3 +570,75 @@ fn a_focused_panel_owns_the_keyboard_and_esc_always_gives_it_back() {
         "the grammar never got the keyboard back"
     );
 }
+
+/// Project-local config is asked about in the frontend, not on the terminal
+/// the editor was launched from: the question reaches the view, nothing runs
+/// until it is answered, and a yes puts the config's bindings into the
+/// grammar.
+#[test]
+fn project_local_config_runs_only_after_the_question_is_answered_in_the_view() {
+    let config = Scratch::with_config(
+        "trust",
+        &[(
+            ".davimci.lua",
+            r#"require("davimci.keymap").map("normal", "gz", "editor.split_at_playhead")"#,
+        )],
+    );
+    let (plugins, pending) = Plugins::load_deferred(None, config.path());
+    let path = pending.expect("the project-local file was not noticed");
+
+    let session = Session::new(timeline());
+    let mut ws = Workspace::new(config.path().to_path_buf()).without_autosave();
+    ws.set_current_session(session.clone());
+    let presenter = Presenter::new(
+        PresentHost::Embedded,
+        Resolution {
+            width: 32,
+            height: 16,
+        },
+        Fps::FPS_60,
+    );
+    let mut editor = Editor::new(
+        ws,
+        Box::new(MockBackend::new(Resolution {
+            width: 8,
+            height: 4,
+        })),
+        presenter,
+    )
+    .with_plugins(plugins);
+    editor.ask_about_project_config(&path);
+    let mut app = App::new(session);
+    editor.prime(app.session());
+
+    // Nothing has been asked yet, and nothing has been run.
+    let before = clips(&app);
+    app.event(Event::Tick, &mut editor);
+    let question = app
+        .view()
+        .confirm
+        .expect("the trust question never reached the view");
+    assert!(question.question.contains(".davimci.lua"), "{question:?}");
+
+    // The question owns the keyboard: a key aimed at the timeline behind it
+    // is spent on the question instead.
+    feed(&mut app, &mut editor, "<Right>gz");
+    assert_eq!(clips(&app), before, "the untrusted config's binding ran");
+    assert!(
+        app.view().confirm.is_some(),
+        "a key that answers nothing closed the question"
+    );
+
+    feed(&mut app, &mut editor, "y");
+    app.event(Event::Tick, &mut editor);
+    assert!(
+        app.view().confirm.is_none(),
+        "the question survived its answer"
+    );
+    feed(&mut app, &mut editor, "<Right>gz");
+    assert_eq!(
+        clips(&app),
+        before + 1,
+        "a trusted binding did not reach the grammar"
+    );
+}

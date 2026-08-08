@@ -125,7 +125,19 @@ pub fn lines(
     }
     out.push(ruler(view, columns, numbers));
 
-    if overlay.is_open() {
+    // The question is drawn before every other modal and instead of the
+    // lanes: it owns the keyboard, so showing the timeline as though it were
+    // live would be a lie.
+    if let Some(confirm) = &view.confirm {
+        out.push(Line::from(Span::styled(
+            fit(&confirm.question, width),
+            Style::default().fg(Color::Yellow).bold(),
+        )));
+        out.push(Line::from(Span::styled(
+            fit("y to trust, any other key to refuse", width),
+            Style::default().fg(Color::DarkGray),
+        )));
+    } else if overlay.is_open() {
         let rows = height
             .saturating_sub(CHROME_ROWS)
             .saturating_sub(command_rows(view))

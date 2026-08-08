@@ -53,6 +53,10 @@ pub enum Setting {
     TimelineResolution(Resolution),
     /// `preview on|off` - a view setting, never an edit.
     Preview(bool),
+    /// `proxy on|off` - whether an import that qualifies gets a proxy. A
+    /// session policy: it changes what the next import does, never the
+    /// timeline, so it stays out of the undo log.
+    Proxy(bool),
     /// `previewheight auto|<rows>|<percent>%` - the terminal's inline preview
     /// band; `0` is off. Inert outside the terminal frontend.
     PreviewHeight(PreviewHeight),
@@ -138,6 +142,7 @@ impl Setting {
         matches!(
             self,
             Self::Preview(_)
+                | Self::Proxy(_)
                 | Self::PreviewHeight(_)
                 | Self::PreviewProtocol(_)
                 | Self::Numbers(_)
@@ -161,6 +166,7 @@ pub const PROPERTIES: &[&str] = &[
     "timeline.fps",
     "timeline.resolution",
     "preview",
+    "proxy",
     "previewheight",
     "previewprotocol",
     "numbers",
@@ -173,7 +179,7 @@ pub const PROPERTIES: &[&str] = &[
 #[must_use]
 pub fn values(prop: &str) -> Vec<String> {
     let words: &[&str] = match prop {
-        "preview" => &["on", "off"],
+        "preview" | "proxy" => &["on", "off"],
         "previewheight" => &["auto"],
         "previewprotocol" => &["auto", "kitty", "sixel", "blocks"],
         "numbers" => Numbers::NAMES,
@@ -191,6 +197,8 @@ pub fn values(prop: &str) -> Vec<String> {
 #[derive(Debug, Clone, Default)]
 pub struct CurrentSettings {
     pub preview: Option<bool>,
+    /// Whether proxies are generated for qualifying imports.
+    pub proxy: Option<bool>,
     pub preview_height: Option<PreviewHeight>,
     pub preview_protocol: Option<PreviewProtocol>,
     pub numbers: Option<Numbers>,
@@ -235,6 +243,9 @@ impl CurrentSettings {
             "timeline.resolution" => self.resolution.map(|r| r.to_string()),
             "preview" => self
                 .preview
+                .map(|on| if on { "on" } else { "off" }.to_string()),
+            "proxy" => self
+                .proxy
                 .map(|on| if on { "on" } else { "off" }.to_string()),
             "previewheight" => self.preview_height.map(PreviewHeight::value),
             "previewprotocol" => self.preview_protocol.map(|p| p.name().to_string()),
@@ -339,6 +350,11 @@ pub fn parse(prop: &str, value: &str) -> Result<Setting, CliError> {
         "preview" => match value {
             "on" | "true" | "1" => Ok(Setting::Preview(true)),
             "off" | "false" | "0" => Ok(Setting::Preview(false)),
+            _ => Err(bad(prop, "on or off")),
+        },
+        "proxy" => match value {
+            "on" | "true" | "1" => Ok(Setting::Proxy(true)),
+            "off" | "false" | "0" => Ok(Setting::Proxy(false)),
             _ => Err(bad(prop, "on or off")),
         },
         // The upper bound is half the screen, which only the terminal knows;
@@ -480,8 +496,6 @@ mod tests {
                     height: 720,
                 }),
             ),
-            ("preview", "off", Setting::Preview(false)),
-            ("preview", "on", Setting::Preview(true)),
             (
                 "previewheight",
                 "0",
@@ -532,6 +546,26 @@ mod tests {
         }
     }
 
+    /// The switches: on and off, however they are spelled.
+    #[test]
+    fn on_off_properties_parse_to_their_setting() {
+        let cases: &[(&str, &str, Setting)] = &[
+            ("preview", "off", Setting::Preview(false)),
+            ("preview", "on", Setting::Preview(true)),
+            ("preview", "1", Setting::Preview(true)),
+            ("proxy", "off", Setting::Proxy(false)),
+            ("proxy", "on", Setting::Proxy(true)),
+            ("proxy", "false", Setting::Proxy(false)),
+        ];
+        for (prop, value, want) in cases {
+            assert_eq!(
+                parse(prop, value).ok().as_ref(),
+                Some(want),
+                "{prop} {value}"
+            );
+        }
+    }
+
     #[test]
     fn visualstart_parses_both_units() {
         assert_eq!(
@@ -555,6 +589,7 @@ mod tests {
             ("timeline.fps", "0"),
             ("timeline.resolution", "1920"),
             ("preview", "maybe"),
+            ("proxy", "sometimes"),
             ("previewheight", "tall"),
             ("previewheight", "-1"),
             ("previewheight", "101%"),
@@ -578,6 +613,7 @@ mod tests {
     #[test]
     fn view_settings_never_enter_the_undo_log() {
         assert!(parse("preview", "off").unwrap().is_view_only());
+        assert!(parse("proxy", "off").unwrap().is_view_only());
         assert!(parse("previewheight", "6").unwrap().is_view_only());
         assert!(parse("previewprotocol", "kitty").unwrap().is_view_only());
         assert!(parse("numbers", "relative").unwrap().is_view_only());

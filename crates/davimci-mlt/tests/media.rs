@@ -171,6 +171,59 @@ fn stepping_backwards_decodes_each_frame_once_and_is_exact() {
     );
 }
 
+/// Regression: the first backward step of every run used to decode that run
+/// on the caller's thread, so a held `h` hitched once every `backstep_run`
+/// frames. The run below what is cached is decoded by a worker with a graph
+/// of its own while the transport is idle, so the walk arrives to find the
+/// pictures already there.
+#[test]
+fn a_backward_walk_finds_the_next_run_already_decoded() {
+    let _mlt = davimci_mlt::test_support::media_lock();
+    let res = Resolution {
+        width: 640,
+        height: 480,
+    };
+    let tl = timeline_of("scene_cut.mkv", 240, res);
+    let mut b = MltBackend::new(tl.props).unwrap();
+    b.set_timeline(&tl).unwrap();
+
+    let run = b.backstep_run;
+    let start = 200u64;
+    b.frame_at(Frame(start), PreviewScale::Half).unwrap();
+    // The first backward step decodes its own run inline and asks the
+    // worker for the one below it.
+    b.frame_at(Frame(start - 1), PreviewScale::Half).unwrap();
+
+    // The worker has a whole run to decode; give it longer than it needs
+    // before asserting that it did.
+    for _ in 0..100 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        b.frame_at(Frame(start - 2), PreviewScale::Half).unwrap();
+        if b.prefetched >= run as usize {
+            break;
+        }
+    }
+    assert!(
+        b.prefetched >= run as usize,
+        "the worker delivered {} of {run} frames: the run below is still decoded inline",
+        b.prefetched
+    );
+
+    // Walking off the bottom of the first run is served from what the
+    // worker brought, so every step is a cache hit.
+    let hits = b.cache_hits;
+    let steps = run + 2;
+    for n in (start - 2 - steps..start - 2).rev() {
+        let f = b.frame_at(Frame(n), PreviewScale::Half).unwrap();
+        assert_eq!(f.position, Frame(n));
+    }
+    assert_eq!(
+        b.cache_hits - hits,
+        steps as usize,
+        "a step off the bottom of the run still decoded on the caller's thread"
+    );
+}
+
 /// Regression: a quarter-scale thumbnail pulled between two preview steps
 /// used to clear the frame cache and stand in for the playhead, so the next
 /// backward step both missed and was taken for a forward one - a GOP per

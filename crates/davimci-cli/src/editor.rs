@@ -39,6 +39,9 @@ use crate::workspace::Workspace;
 /// at draw time.
 const THUMBNAIL_HEIGHT: u32 = 40;
 
+/// The id the project-local config question is raised under.
+const TRUST_CONFIRM: u64 = 1;
+
 /// Everything the editor needs that is not the frontend.
 pub struct Editor {
     workspace: Workspace,
@@ -57,6 +60,9 @@ pub struct Editor {
     exporter: Exporter,
     /// Background analysis of the audio tracks (Phase 9e).
     analyser: Analyser,
+    /// `:set proxy`: the policy, the encodes it started, and which proxy
+    /// stands in for which original.
+    proxies: crate::proxy::Proxies,
     /// Job updates waiting for the app to collect on the next tick.
     job_updates: Vec<JobUpdate>,
     /// Envelopes finished since the app last collected them.
@@ -101,6 +107,15 @@ pub struct Editor {
     preview_height: Option<PreviewHeight>,
     preview_protocol: PreviewProtocol,
     numbers: Numbers,
+    /// A project-local `.davimci.lua` the user has not been asked about
+    /// yet. Nothing of it has been read; the question goes to the frontend
+    /// and only a yes runs it.
+    pending_trust: Option<std::path::PathBuf>,
+    /// True once the question has been handed to the app, so it is asked
+    /// once rather than on every tick.
+    trust_asked: bool,
+    /// A keymap rebuilt after config loaded late, taken by the app.
+    pending_keymap: Option<davimci_keys::Keymap>,
     /// Set by `:set visualstart`, taken by the app on the next poll: the
     /// setting is parsed here and enforced by the key engine.
     visual_start: davimci_keys::VisualStart,
@@ -127,6 +142,7 @@ impl Editor {
     ) -> Self {
         Self {
             analyser: Analyser::new(workspace.root()),
+            proxies: crate::proxy::Proxies::new(workspace.root()),
             workspace,
             backend,
             presenter,
@@ -152,6 +168,9 @@ impl Editor {
             preview_height: None,
             preview_protocol: PreviewProtocol::Auto,
             numbers: Numbers::Off,
+            pending_trust: None,
+            trust_asked: false,
+            pending_keymap: None,
             visual_start: davimci_keys::VisualStart::default(),
             pending_visual_start: None,
             quit: false,
@@ -164,15 +183,32 @@ impl Editor {
     /// Tab completion list what the config defined, and a preset the backend
     /// cannot build is reported now rather than at render time.
     #[must_use]
-    pub fn with_plugins(mut self, mut plugins: Plugins) -> Self {
-        let (presets, problems) = plugins.presets();
+    pub fn with_plugins(mut self, plugins: Plugins) -> Self {
+        self.plugins = plugins;
+        self.install_registrations();
+        self
+    }
+
+    /// Put the project-local config to the user, in the frontend.
+    ///
+    /// The file is untouched until the answer comes back through
+    /// [`Host::confirmed`]: this only records what to ask about.
+    pub fn ask_about_project_config(&mut self, path: &std::path::Path) {
+        self.pending_trust = Some(path.to_path_buf());
+        self.trust_asked = false;
+    }
+
+    /// Install what a freshly loaded config registered.
+    ///
+    /// Presets and transition types are pushed rather than looked up lazily,
+    /// so `:presets` and Tab completion list what the config defined and a
+    /// preset the backend cannot build is reported now, not at render time.
+    fn install_registrations(&mut self) {
+        let (presets, problems) = self.plugins.presets();
         for preset in presets {
             self.exporter.presets_mut().define(preset);
         }
-        // Transition types go to the backend, which is the only layer that
-        // knows what a service is. A backend without a registry
-        // says so once, and those types keep degrading to a dissolve.
-        for def in plugins.transitions() {
+        for def in self.plugins.transitions() {
             let name = def.name.clone();
             if let Err(e) = self.backend.register_transition(def) {
                 self.notices.push(Message::warning(format!(
@@ -181,9 +217,7 @@ impl Editor {
             }
         }
         self.notices.extend(problems);
-        self.notices.extend(plugins.take_notices());
-        self.plugins = plugins;
-        self
+        self.notices.extend(self.plugins.take_notices());
     }
 
     #[must_use]
@@ -243,12 +277,14 @@ impl Editor {
                 if let Some(reason) = self.before_export(&name, &path.display().to_string()) {
                     return Some(Err(CliError::ExportRefused { reason }));
                 }
-                Some(self.exporter.start(
-                    self.backend.as_mut(),
-                    path,
-                    preset.as_deref(),
-                    session.timeline(),
-                ))
+                let shipped = match self.shipping_timeline(session) {
+                    Ok(tl) => tl,
+                    Err(e) => return Some(Err(e)),
+                };
+                Some(
+                    self.exporter
+                        .start(self.backend.as_mut(), path, preset.as_deref(), &shipped),
+                )
             }
             ExCommand::Render { preset } => {
                 let container = match self.exporter.presets().get(preset) {
@@ -264,12 +300,14 @@ impl Editor {
                 if let Some(reason) = self.before_export(preset, &out.display().to_string()) {
                     return Some(Err(CliError::ExportRefused { reason }));
                 }
-                Some(self.exporter.start(
-                    self.backend.as_mut(),
-                    &out,
-                    Some(preset),
-                    session.timeline(),
-                ))
+                let shipped = match self.shipping_timeline(session) {
+                    Ok(tl) => tl,
+                    Err(e) => return Some(Err(e)),
+                };
+                Some(
+                    self.exporter
+                        .start(self.backend.as_mut(), &out, Some(preset), &shipped),
+                )
             }
             // `:set preview off` is a view setting, so it never enters the
             // undo log; it belongs here because the preview is the editor's.
@@ -278,6 +316,11 @@ impl Editor {
             }
             // Inert here by design: both frontends read this every loop and
             // turn it into rows or pixels themselves.
+            // A session policy, not an edit: it decides what the *next*
+            // import decodes from, so it never reaches the undo log.
+            ExCommand::Set(crate::setting::Setting::Proxy(on)) => {
+                Some(Ok(self.proxies.set_enabled(*on)))
+            }
             ExCommand::Set(crate::setting::Setting::PreviewHeight(height)) => {
                 self.preview_height = Some(*height);
                 Some(Ok(height.describe()))
@@ -298,6 +341,56 @@ impl Editor {
             ExCommand::Presets => Some(Ok(self.exporter.list_presets().join("  |  "))),
             ExCommand::CancelRender => Some(self.exporter.cancel(self.backend.as_mut())),
             _ => None,
+        }
+    }
+
+    /// The timeline an export ships: every proxy relinked to the original
+    /// it stands for, checked by the guard that must never see one.
+    ///
+    /// Rendering a proxy would quietly ship 540p, so this is not a
+    /// convenience - it is the invariant the whole proxy path rests on.
+    fn shipping_timeline(&self, session: &Session) -> Result<davimci_core::Timeline, CliError> {
+        let tl = self.proxies.with_originals(session.timeline())?;
+        self.proxies.check_export(&tl)?;
+        Ok(tl)
+    }
+
+    /// Swap in the proxies that finished encoding.
+    ///
+    /// A relink is an edit like any other, so it goes through
+    /// `Session::exec` and `u` puts the original back.
+    fn adopt_finished_proxies(&mut self, session: &mut Session) {
+        let (updates, swaps) = self.proxies.poll();
+        self.job_updates.extend(updates);
+        for (source, proxy) in swaps {
+            let clips: Vec<ClipId> = session
+                .timeline()
+                .tracks()
+                .iter()
+                .flat_map(davimci_core::Track::clips)
+                .filter(|c| c.media.as_ref().is_some_and(|m| m.path == source))
+                .map(|c| c.id)
+                .collect();
+            if clips.is_empty() {
+                continue;
+            }
+            let cmd = EditCommand::Sequence(
+                clips
+                    .iter()
+                    .map(|clip| EditCommand::Relink {
+                        clip: *clip,
+                        path: proxy.clone(),
+                        offline: false,
+                    })
+                    .collect(),
+            );
+            match session.exec(&cmd) {
+                Ok(_) => self.notices.push(Message::info(format!(
+                    "{} clip(s) are now decoding from a proxy",
+                    clips.len()
+                ))),
+                Err(e) => self.notices.push(Message::error(e.to_string())),
+            }
         }
     }
 
@@ -346,6 +439,7 @@ impl Editor {
         let clip = tl.track(head.track).and_then(|t| t.clip_at(head.frame));
         crate::setting::CurrentSettings {
             preview: Some(self.preview),
+            proxy: Some(self.proxies.enabled()),
             preview_height: self.preview_height,
             preview_protocol: Some(self.preview_protocol),
             numbers: Some(self.numbers),
@@ -537,6 +631,16 @@ impl Editor {
             None => plan.command,
         };
         session.exec(&command)?;
+
+        // A proxy is decided per source, and only after the import
+        // succeeded: encoding one for a file that failed to import would be
+        // minutes of CPU for nothing.
+        let proxying = self
+            .proxies
+            .queue_for_import(&info, session.timeline().props);
+        if let Some(msg) = proxying {
+            self.notices.push(Message::info(msg));
+        }
 
         let verb = match intent {
             MediaIntent::Insert => "inserted",
@@ -880,12 +984,14 @@ impl Editor {
         if let Some(reason) = self.before_export(preset, &path.display().to_string()) {
             return out.say(Message::error(reason));
         }
-        out.report(self.exporter.start(
-            self.backend.as_mut(),
-            &path,
-            Some(preset),
-            session.timeline(),
-        ));
+        let shipped = match self.shipping_timeline(session) {
+            Ok(tl) => tl,
+            Err(e) => return out.say(Message::error(e.to_string())),
+        };
+        out.report(
+            self.exporter
+                .start(self.backend.as_mut(), &path, Some(preset), &shipped),
+        );
     }
 
     /// A motion is a pure query: it answers a frame and the editor moves, so
@@ -1097,6 +1203,55 @@ impl Host for Editor {
 
     fn jobs(&mut self) -> Vec<JobUpdate> {
         std::mem::take(&mut self.job_updates)
+    }
+
+    fn take_confirms(&mut self) -> Vec<davimci_app::Confirm> {
+        if self.trust_asked {
+            return Vec::new();
+        }
+        let Some(path) = self.pending_trust.clone() else {
+            return Vec::new();
+        };
+        self.trust_asked = true;
+        vec![davimci_app::Confirm::new(
+            TRUST_CONFIRM,
+            format!(
+                "{} wants to run project-local config. Trust it? [y/N]",
+                path.display()
+            ),
+        )]
+    }
+
+    /// The answer to the project-local config question.
+    ///
+    /// A no leaves the file unread, and says so once: silence would look
+    /// like the config had loaded. A yes runs it restricted and rebuilds the
+    /// keymap, since a binding that is not in the table is not a binding.
+    fn confirmed(&mut self, id: davimci_app::ConfirmId, granted: bool, _session: &mut Session) {
+        if id != davimci_app::ConfirmId(TRUST_CONFIRM) {
+            return;
+        }
+        let Some(path) = self.pending_trust.take() else {
+            return;
+        };
+        if !granted {
+            self.notices.push(Message::warning(format!(
+                "{} was not loaded: project-local config runs only when trusted",
+                path.display()
+            )));
+            return;
+        }
+        let dir = path.parent().map_or_else(
+            || self.workspace.root().to_path_buf(),
+            std::path::Path::to_path_buf,
+        );
+        self.plugins.grant_project_local(&dir);
+        self.install_registrations();
+        self.pending_keymap = Some(self.plugins.keymap());
+    }
+
+    fn take_keymap(&mut self) -> Option<davimci_keys::Keymap> {
+        self.pending_keymap.take()
     }
 
     fn command_vocabulary(&mut self, session: &Session) -> Option<davimci_app::CommandVocabulary> {
@@ -1357,6 +1512,7 @@ impl Host for Editor {
         let (updates, waves) = self.analyser.poll();
         self.job_updates.extend(updates);
         self.pending_waveforms.extend(waves);
+        self.adopt_finished_proxies(session);
         if let Some(frame) = result.playhead {
             let track = session.timeline().playhead().track;
             // Playback moves the playhead; that is navigation, never an edit.

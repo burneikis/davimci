@@ -229,7 +229,7 @@ fn run_commands_with_editor(ws: Workspace, commands: &[String]) {
 /// Open the editor window.
 #[cfg(feature = "window")]
 fn run_window(ws: Workspace, numbers: davimci_cli::Numbers) -> Result<()> {
-    let (app, mut editor) = assemble(ws);
+    let (app, mut editor) = assemble_asking_in_frontend(ws, PresentHost::Embedded);
     editor.set_numbers(numbers);
     davimci_cli::Window::new(app, editor)
         .run()
@@ -241,7 +241,7 @@ fn run_window(ws: Workspace, numbers: davimci_cli::Numbers) -> Result<()> {
 fn run_tui(ws: Workspace, numbers: davimci_cli::Numbers) -> Result<()> {
     // A terminal cannot hold the picture, so the preview is detached before
     // the editor is assembled around it.
-    let (app, mut editor) = assemble_with(ws, PresentHost::Detached);
+    let (app, mut editor) = assemble_asking_in_frontend(ws, PresentHost::Detached);
     editor.set_numbers(numbers);
     davimci_cli::tui::run(app, editor)
 }
@@ -255,13 +255,32 @@ fn assemble(ws: Workspace) -> (App, Editor) {
     assemble_with(ws, PresentHost::Embedded)
 }
 
+/// Assemble for a frontend that can put a question on the screen, so
+/// project-local config is asked about in the window or the TUI rather than
+/// on whatever terminal the editor was launched from.
+fn assemble_asking_in_frontend(ws: Workspace, host: PresentHost) -> (App, Editor) {
+    let root = ws.root().to_path_buf();
+    let (plugins, pending) =
+        Plugins::load_deferred(davimci_lua::ConfigPaths::from_env().as_ref(), &root);
+    let (app, mut editor) = build(ws, host, plugins);
+    if let Some(path) = pending {
+        editor.ask_about_project_config(&path);
+    }
+    (app, editor)
+}
+
 fn assemble_with(ws: Workspace, host: PresentHost) -> (App, Editor) {
     let root = ws.root().to_path_buf();
-    let mut plugins = Plugins::load(
+    let plugins = Plugins::load(
         davimci_lua::ConfigPaths::from_env().as_ref(),
         &root,
         &AskOnTerminal,
     );
+    build(ws, host, plugins)
+}
+
+/// Assemble the editor around an already-loaded runtime.
+fn build(ws: Workspace, host: PresentHost, mut plugins: Plugins) -> (App, Editor) {
     let notices = plugins.take_notices();
     let keymap = plugins.keymap();
     let jump = plugins.timeline_config().jump;

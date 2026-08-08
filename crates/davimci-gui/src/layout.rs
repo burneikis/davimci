@@ -320,6 +320,11 @@ pub fn paint(view: &ViewState, layout: &Layout, chrome: &Chrome) -> DrawList {
     if let Some(picker) = &chrome.picker {
         paint_picker(&mut d, layout, picker);
     }
+    // A question is asked over everything, including the picker: nothing
+    // behind it may be acted on until it is answered.
+    if let Some(confirm) = &view.confirm {
+        paint_confirm(&mut d, layout, &confirm.question);
+    }
     // Plugin panels are placed by the app, in cells; the window only turns
     // cells into pixels. They go last so a panel is never hidden behind the
     // picture or a lane.
@@ -802,6 +807,29 @@ fn paint_waveform(
             Fill::Waveform,
         );
     }
+}
+
+/// The yes/no question, drawn over everything else.
+fn paint_confirm(d: &mut DrawList, layout: &Layout, question: &str) {
+    let row_h = layout.metrics.row_height.max(1);
+    let panel = centred(layout.window, row_h);
+    let panel = Rect {
+        height: row_h.saturating_mul(2),
+        ..panel
+    };
+    d.rect(panel, Fill::ModalBackground);
+    let line = |y: i32| Rect {
+        x: panel.x,
+        y,
+        width: panel.width,
+        height: row_h,
+    };
+    d.text(line(panel.y), TextRole::ModalTitle, question.to_string());
+    d.text(
+        line(panel.y + row_h as i32),
+        TextRole::ModalEntry,
+        "y to trust, any other key to refuse".to_string(),
+    );
 }
 
 fn paint_picker(d: &mut DrawList, layout: &Layout, picker: &PickerView) {

@@ -536,14 +536,13 @@ impl Workspace {
             // A transition is an undoable edit on the timeline and needs
             // neither backend nor analysis, so it runs here.
             ExCommand::Transition { kind, frames } => self.transition(kind.as_deref(), *frames),
-            // `:set preview` is the one setting the workspace cannot answer:
-            // it belongs to the preview, which only the editor owns, and the
-            // editor intercepts it before it arrives here.
-            ExCommand::Set(crate::setting::Setting::Preview(_)) => Err(CliError::Usage {
-                cmd: "set preview".into(),
-                usage: "on|off needs a running editor".into(),
-            }),
-            ExCommand::Set(setting) => self.set(setting, selection),
+            ExCommand::Set(setting) => match Self::editor_only(setting) {
+                Some(name) => Err(CliError::Usage {
+                    cmd: name.into(),
+                    usage: "on|off needs a running editor".into(),
+                }),
+                None => self.set(setting, selection),
+            },
             ExCommand::Relink { old, new } => self.relink(old.as_deref(), new),
             ExCommand::Group => self.group(),
             ExCommand::Ungroup => self.ungroup(),
@@ -702,10 +701,26 @@ impl Workspace {
             }
             // Handled by the editor; unreachable through this path.
             Setting::Preview(_) => Err(CliError::UnknownProperty("preview".into())),
+            Setting::Proxy(_) => Err(CliError::UnknownProperty("proxy".into())),
             Setting::PreviewHeight(_) => Err(CliError::UnknownProperty("previewheight".into())),
             Setting::PreviewProtocol(_) => Err(CliError::UnknownProperty("previewprotocol".into())),
             Setting::Numbers(_) => Err(CliError::UnknownProperty("numbers".into())),
             Setting::VisualStart(_) => Err(CliError::UnknownProperty("visualstart".into())),
+        }
+    }
+
+    /// The name of the `:set` property only a running editor can apply, if this
+    /// is one of them.
+    ///
+    /// One belongs to the preview and one to the importer; the editor intercepts
+    /// both before they arrive here, so reaching the workspace means there is no
+    /// editor to apply them to.
+    fn editor_only(setting: &crate::setting::Setting) -> Option<&'static str> {
+        use crate::setting::Setting;
+        match setting {
+            Setting::Preview(_) => Some("set preview"),
+            Setting::Proxy(_) => Some("set proxy"),
+            _ => None,
         }
     }
 
@@ -852,6 +867,7 @@ fn describe_setting(setting: &crate::setting::Setting) -> String {
         Setting::TimelineFps(fps) => format!("{fps}"),
         Setting::TimelineResolution(r) => format!("{r}"),
         Setting::Preview(on) => format!("preview {}", if *on { "on" } else { "off" }),
+        Setting::Proxy(on) => format!("proxy {}", if *on { "on" } else { "off" }),
         Setting::PreviewHeight(height) => height.describe(),
         Setting::PreviewProtocol(p) => format!("preview protocol {}", p.name()),
         Setting::Numbers(n) => n.describe().to_string(),

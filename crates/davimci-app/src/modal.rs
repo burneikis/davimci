@@ -13,6 +13,7 @@ use davimci_keys::MediaIntent;
 
 use crate::browse::list_dir;
 use crate::cmdline::CommandKey;
+use crate::confirm::{Confirm, answer_of};
 use crate::frontend::{Event, Response};
 use crate::panel::PanelId;
 use crate::picker::{Entry, MediaPicker, PickerEvent, PickerIntent};
@@ -42,6 +43,9 @@ pub struct Modals {
     /// `i` starts where the last one left off.
     browse_dir: PathBuf,
     subtitle: Option<SubtitleEdit>,
+    /// The yes/no question on screen, read from the view. First in line for
+    /// a keystroke: nothing behind it may run until it is answered.
+    confirm: Option<Confirm>,
     /// Whether the `:` line is open. The line itself lives in the app; a
     /// frontend only needs to know that the keyboard belongs to it.
     command_open: bool,
@@ -56,6 +60,7 @@ impl Default for Modals {
             picker: None,
             browse_dir: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             subtitle: None,
+            confirm: None,
             command_open: false,
             panel: None,
         }
@@ -89,10 +94,17 @@ impl Modals {
         self.panel
     }
 
+    /// The question on screen, if any.
+    #[must_use]
+    pub fn confirm(&self) -> Option<&Confirm> {
+        self.confirm.as_ref()
+    }
+
     /// True while some modal owns the keyboard.
     #[must_use]
     pub fn is_open(&self) -> bool {
-        self.picker.is_some()
+        self.confirm.is_some()
+            || self.picker.is_some()
             || self.subtitle.is_some()
             || self.command_open
             || self.panel.is_some()
@@ -139,6 +151,7 @@ impl Modals {
     /// guessing from the keys that went past.
     pub fn sync(&mut self, view: &ViewState) {
         self.command_open = view.command_line.is_some();
+        self.confirm.clone_from(&view.confirm);
         // Panels are drawn back to front, so the last focused one is the
         // one on top - the same panel the app hands keys to.
         self.panel = view.panels.iter().rev().find(|p| p.focus).map(|p| p.id);
@@ -151,6 +164,18 @@ impl Modals {
     /// events the keystroke produced; empty means the modal consumed it
     /// silently, which is how browsing a picker looks from outside.
     pub fn handle(&mut self, key: ModalKey) -> Option<Vec<Event>> {
+        // Asked first: a question guards something the user has not agreed
+        // to yet, so no other modal may take the keystroke that answers it.
+        if let Some(confirm) = self.confirm.as_ref() {
+            let id = confirm.id;
+            return Some(match answer_of(key) {
+                Some(granted) => {
+                    self.confirm = None;
+                    vec![Event::ConfirmAnswered { id, granted }]
+                }
+                None => Vec::new(),
+            });
+        }
         if self.picker.is_some() {
             return Some(self.handle_picker(key));
         }
@@ -295,6 +320,24 @@ fn entries_for(dir: &Path) -> Vec<Entry> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The question owns the keyboard, and only `y` grants.
+    #[test]
+    fn a_question_swallows_keys_until_it_is_answered() {
+        let mut m = Modals::new();
+        m.confirm = Some(Confirm::new(7, "Trust it?"));
+        assert_eq!(m.handle(ModalKey::Char('d')), Some(Vec::new()));
+        assert!(m.is_open(), "the question let go of the keyboard");
+        assert_eq!(
+            m.handle(ModalKey::Char('y')),
+            Some(vec![Event::ConfirmAnswered {
+                id: crate::confirm::ConfirmId(7),
+                granted: true,
+            }])
+        );
+        assert!(m.confirm().is_none());
+        assert_eq!(m.handle(ModalKey::Char('d')), None, "keys leaked");
+    }
 
     #[test]
     fn nothing_open_means_the_grammar_gets_the_key() {

@@ -6,7 +6,7 @@
 //! `davimci-keys`, presets into the export registry, events out of the
 //! editor, and every edit back through `Session::exec`.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use davimci_app::{Message, Severity};
 use davimci_backend::{AudioCodec, Container, Preset, SubtitleMode, TrackSelection, VideoCodec};
@@ -73,6 +73,37 @@ impl Plugins {
         let (_, notice) = plugins.runtime.load_project_local(project_dir, trust);
         plugins.notices.extend(notice);
         plugins
+    }
+
+    /// Load the user's config, and report the project-local file rather than
+    /// asking about it.
+    ///
+    /// The question belongs in the frontend - a window has no terminal to
+    /// answer on - so nothing project-local is read, compiled or run here;
+    /// the path comes back for the host to ask about and
+    /// [`Plugins::grant_project_local`] is the only way it ever runs.
+    #[must_use]
+    pub fn load_deferred(
+        paths: Option<&ConfigPaths>,
+        project_dir: &Path,
+    ) -> (Self, Option<PathBuf>) {
+        let mut plugins = Self::empty();
+        plugins.load_bundled();
+        if let Some(paths) = paths {
+            plugins.notices.extend(plugins.runtime.load_config(paths));
+        }
+        let path = project_dir.join(".davimci.lua");
+        let pending = path.is_file().then_some(path);
+        (plugins, pending)
+    }
+
+    /// Run the project-local config in `dir`, the user having said so.
+    ///
+    /// It still runs restricted: "I want this project's export presets" is
+    /// not "I want this directory to run `os.execute`".
+    pub fn grant_project_local(&mut self, dir: &Path) {
+        let (_, notice) = self.runtime.load_project_local(dir, &GrantOnce);
+        self.notices.extend(notice);
     }
 
     /// Run the bundled plugins. A bundled plugin that fails is a notice like
@@ -262,7 +293,20 @@ fn convert_preset(p: &davimci_lua::ExportPreset) -> Result<Preset, LuaError> {
     Ok(preset)
 }
 
+/// The answer a user has already given in the frontend.
+#[derive(Debug, Clone, Copy, Default)]
+struct GrantOnce;
+
+impl TrustPrompt for GrantOnce {
+    fn trust(&self, _path: &Path) -> Trust {
+        Trust::Granted
+    }
+}
+
 /// Asks on the terminal, and refuses when there is nobody to ask.
+///
+/// The fallback for a session with no frontend to ask in: `-c` scripts and
+/// `--script` runs, where the editor never draws anything.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct AskOnTerminal;
 

@@ -12,6 +12,7 @@ use davimci_keys::Mode;
 use davimci_keys::mode::VisualSelection;
 use davimci_motion::{JumpConfig, JumpPoints, Zoom};
 
+use crate::confirm::Confirm;
 use crate::job::Job;
 use crate::message::Message;
 use crate::panel::{PanelContent, PanelStore, PanelView};
@@ -50,6 +51,8 @@ pub struct ViewInputs<'a> {
     /// How many text lines tall the panel area is. Zero falls back to the
     /// viewport's rows.
     pub cell_rows: u32,
+    /// The yes/no question on screen, when the host has raised one.
+    pub confirm: Option<&'a Confirm>,
 }
 
 impl Default for ViewInputs<'_> {
@@ -70,6 +73,7 @@ impl Default for ViewInputs<'_> {
             panels: None,
             cell_columns: 0,
             cell_rows: 0,
+            confirm: None,
         }
     }
 }
@@ -183,6 +187,10 @@ pub struct ViewState {
     /// Plugin panels, already placed, back to front. A frontend draws these
     /// over everything else and decides nothing about where they sit.
     pub panels: Vec<PanelView>,
+    /// The question the user has to answer before anything else happens. A
+    /// frontend draws it and routes `y`/`n` to it; it decides neither what
+    /// is asked nor what the answer means.
+    pub confirm: Option<Confirm>,
 }
 
 impl ViewState {
@@ -291,6 +299,7 @@ impl ViewState {
             job: inputs.job.clone(),
             recording: inputs.recording,
             panels: place_panels(&viewport, inputs, playhead.frame),
+            confirm: inputs.confirm.cloned(),
         }
     }
 
@@ -388,6 +397,9 @@ impl ViewState {
         }
         if let Some(m) = &self.message {
             let _ = writeln!(s, "message {:?} {}", m.severity, m.text);
+        }
+        if let Some(c) = &self.confirm {
+            let _ = writeln!(s, "confirm {} {}", c.id.0, c.question);
         }
         s.push_str(&dump_panels(&self.panels));
         s

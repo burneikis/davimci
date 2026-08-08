@@ -12,6 +12,7 @@
 pub mod app;
 pub mod browse;
 pub mod cmdline;
+pub mod confirm;
 pub mod error;
 pub mod frontend;
 pub mod job;
@@ -35,6 +36,7 @@ pub use browse::{BrowseEntry, is_media, list_dir};
 pub use cmdline::{
     CommandKey, CommandLine, CommandLineEvent, CommandVocabulary, default_vocabulary,
 };
+pub use confirm::{Confirm, ConfirmId};
 pub use error::AppError;
 pub use frontend::{Event, Frontend, Response, Surface};
 pub use job::{Job, JobList, JobState, JobUpdate};

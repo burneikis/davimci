@@ -12,6 +12,7 @@ use davimci_keys::{CenterIntent, Engine, Key, Keymap, MediaIntent, Mode, ZoomInt
 use davimci_motion::{JumpConfig, TimeRange, Zoom};
 
 use crate::cmdline::{CommandKey, CommandLine, CommandLineEvent};
+use crate::confirm::{Confirm, ConfirmId, answer_of};
 use crate::error::AppError;
 use crate::frontend::{Event, Frontend, Response, Surface};
 use crate::job::{JobList, JobUpdate};
@@ -55,6 +56,31 @@ pub trait Host {
     /// the visual selection lives in the key engine, not in the host.
     fn transport(&mut self, cmd: TransportCmd, selection: Option<&Selection>) {
         let _ = (cmd, selection);
+    }
+
+    /// Questions the host wants asked in the frontend, taken once each.
+    ///
+    /// A host that has to ask before it may run something - project-local
+    /// config above all - raises the question here instead of on the
+    /// terminal, so the answer comes from whichever frontend the user is
+    /// actually looking at.
+    fn take_confirms(&mut self) -> Vec<Confirm> {
+        Vec::new()
+    }
+
+    /// The answer to a question the host raised. Called once per question,
+    /// with the id it was raised under.
+    fn confirmed(&mut self, id: ConfirmId, granted: bool, session: &mut Session) {
+        let _ = (id, granted, session);
+    }
+
+    /// A keymap the host rebuilt, taken once.
+    ///
+    /// Config can be loaded after startup - a project-local file the user
+    /// has just trusted - and the bindings it declares are only real once
+    /// they are in the table the grammar consults.
+    fn take_keymap(&mut self) -> Option<Keymap> {
+        None
     }
 
     /// A `:set` the host parsed but the key engine owns, taken once.
@@ -316,6 +342,10 @@ pub struct App {
     /// Panels plugins have open. View state, not project state: nothing here
     /// reaches the timeline or the undo log.
     panels: PanelStore,
+    /// Questions waiting for an answer, oldest first. The front one owns the
+    /// keyboard: a question about running someone else's code must not be
+    /// answerable by a keystroke aimed at the timeline behind it.
+    confirms: std::collections::VecDeque<Confirm>,
     /// The pending sequence last reported to the host, so `key_pending` fires
     /// on a change rather than on every keystroke.
     last_pending: Option<davimci_keys::Pending>,
@@ -354,6 +384,7 @@ impl App {
             editing_text: None,
             pending_selection: None,
             panels: PanelStore::default(),
+            confirms: std::collections::VecDeque::new(),
             last_pending: None,
             batching: false,
             deferred_moved: false,
@@ -525,6 +556,7 @@ impl App {
             cell_columns: self.cell_columns,
             cell_rows: self.cell_rows,
             panels: (!self.panels.is_empty()).then_some(&self.panels),
+            confirm: self.confirms.front(),
         };
         ViewState::build(&self.session, self.viewport, &self.jump_cfg, &inputs)
     }
@@ -561,8 +593,46 @@ impl App {
         Response::Continue
     }
 
+    /// Raise a question. Shown until it is answered; the timeline behind it
+    /// keeps its keyboard only once nothing is pending.
+    pub fn ask(&mut self, confirm: Confirm) {
+        self.confirms.push_back(confirm);
+    }
+
+    /// The question currently on screen, if any.
+    #[must_use]
+    pub fn pending_confirm(&self) -> Option<&Confirm> {
+        self.confirms.front()
+    }
+
+    /// Answer the question on screen. An answer for a question that is no
+    /// longer the pending one is dropped: it was aimed at something else.
+    pub fn answer_confirm(&mut self, id: ConfirmId, granted: bool, host: &mut dyn Host) {
+        if self.confirms.front().map(|c| c.id) != Some(id) {
+            return;
+        }
+        self.confirms.pop_front();
+        host.confirmed(id, granted, &mut self.session);
+        self.adopt_host_keymap(host);
+    }
+
+    /// Install a keymap the host rebuilt after loading more config.
+    fn adopt_host_keymap(&mut self, host: &mut dyn Host) {
+        if let Some(keymap) = host.take_keymap() {
+            self.engine.set_keymap(keymap);
+        }
+    }
+
     /// Feed one key. The single entry point for every frontend's input path.
     pub fn key(&mut self, key: Key, host: &mut dyn Host) -> Response {
+        // A pending question owns the keyboard before anything else: it is
+        // asked because nothing may proceed until it is answered.
+        if let Some(id) = self.confirms.front().map(|c| c.id) {
+            if let Some(granted) = modal_key_of(key).and_then(answer_of) {
+                self.answer_confirm(id, granted, host);
+            }
+            return Response::Continue;
+        }
         // While the `:` line is open it owns the keyboard, exactly as a
         // modal does. A frontend that routes modal keys itself sends
         // `Event::CommandKey`; a scripted or terminal frontend just sends
@@ -652,6 +722,10 @@ impl App {
             Event::CommandCancelled => {
                 self.close_command_line();
                 self.pending_selection = None;
+                Response::Continue
+            }
+            Event::ConfirmAnswered { id, granted } => {
+                self.answer_confirm(id, granted, host);
                 Response::Continue
             }
             Event::MediaChosen(path) => self.import_chosen_media(&path, host),
@@ -815,6 +889,9 @@ impl App {
         }
         for (clip, thumbnail) in host.thumbnails() {
             self.thumbnails.insert(clip, thumbnail);
+        }
+        for confirm in host.take_confirms() {
+            self.confirms.push_back(confirm);
         }
     }
 

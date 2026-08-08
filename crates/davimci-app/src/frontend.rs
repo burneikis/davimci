@@ -9,6 +9,7 @@ use davimci_core::ClipId;
 use davimci_keys::{Key, MediaIntent};
 
 use crate::cmdline::CommandKey;
+use crate::confirm::ConfirmId;
 use crate::error::AppError;
 use crate::modal::ModalKey;
 use crate::panel::PanelId;
@@ -96,6 +97,12 @@ pub enum Event {
     },
     /// The subtitle editor closed without changing anything.
     TextEditCancelled,
+    /// A yes/no question was answered. The frontend routes the keystroke;
+    /// the app owns what the answer means.
+    ConfirmAnswered {
+        id: ConfirmId,
+        granted: bool,
+    },
     /// One keystroke into a focused plugin panel. The app owns which panel
     /// has focus, so a frontend only reports the key.
     PanelKey {

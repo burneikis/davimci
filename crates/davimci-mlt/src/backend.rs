@@ -49,6 +49,8 @@ struct Graph {
     /// does: dropping one while the tractor still points at it would be a
     /// use-after-free.
     _mixes: Vec<Transition>,
+    /// The video blends, kept alive for the same reason as `_mixes`.
+    _blends: Vec<Transition>,
     /// Clip-to-clip transitions, each a nested tractor with its
     /// own planted transition. Kept for the same reason as `_mixes`, and
     /// keyed by the incoming clip so a patch that removes one can drop it
@@ -315,6 +317,152 @@ impl Drop for Scrub {
     }
 }
 
+/// What the backstep prefetcher is doing, shared with its worker.
+#[derive(Debug, Default)]
+struct PrefetchState {
+    /// The run to decode next, replacing whatever was queued: the user's
+    /// latest position is the only one worth decoding for.
+    want: Option<(Frame, Frame)>,
+    /// The run being decoded right now, so a caller that needs a frame from
+    /// it waits for it instead of decoding it a second time.
+    busy: Option<(Frame, Frame)>,
+    /// Decoded frames waiting to be taken into the frame cache.
+    ready: Vec<VideoFrame>,
+    stop: bool,
+}
+
+/// Backward-step pictures, decoded before they are asked for.
+///
+/// A backward step decodes the run *leading up to* the target, which is one
+/// seek and a dozen sequential decodes - tens of milliseconds on the thread
+/// drawing the UI, once per run. Held `h` therefore hitched every
+/// `backstep_run` frames. The worker decodes the next run down from a graph
+/// of its own while the transport is idle, so by the time the walk reaches
+/// it the pictures are already there.
+#[derive(Debug)]
+struct Prefetch {
+    shared: Arc<(Mutex<PrefetchState>, std::sync::Condvar)>,
+    /// The scale it decodes at; a different one needs a different worker,
+    /// since a cached picture is only valid for the scale it was made at.
+    scale: PreviewScale,
+    worker: Option<JoinHandle<()>>,
+}
+
+impl Prefetch {
+    fn spawn(graph: Graph, scale: PreviewScale, res: Resolution) -> Self {
+        let shared = Arc::new((
+            Mutex::new(PrefetchState::default()),
+            std::sync::Condvar::new(),
+        ));
+        let handoff = Handoff(graph);
+        let mine = Arc::clone(&shared);
+        let worker = std::thread::spawn(move || {
+            // The wrapper moves, not its field: it is what carries the
+            // promise that only this thread touches the graph.
+            let handoff = handoff;
+            let mut graph = handoff.0;
+            let (lock, signal) = &*mine;
+            loop {
+                let run = {
+                    let Ok(mut state) = lock.lock() else {
+                        return;
+                    };
+                    while !state.stop && state.want.is_none() {
+                        let Ok((next, _)) = signal.wait_timeout(state, Duration::from_millis(50))
+                        else {
+                            return;
+                        };
+                        state = next;
+                    }
+                    if state.stop {
+                        return;
+                    }
+                    let run = state.want.take();
+                    state.busy = run;
+                    run
+                };
+                let Some((start, end)) = run else {
+                    continue;
+                };
+                let decoded = decode_run(&mut graph, start, end, res).unwrap_or_default();
+                let Ok(mut state) = lock.lock() else {
+                    return;
+                };
+                state.ready.extend(decoded);
+                state.busy = None;
+                signal.notify_all();
+            }
+        });
+        Self {
+            shared,
+            scale,
+            worker: Some(worker),
+        }
+    }
+
+    /// Ask for `start..=end` next. A run that was queued and not started is
+    /// replaced: the newest position is the only one worth decoding for.
+    fn request(&self, start: Frame, end: Frame) {
+        let (lock, signal) = &*self.shared;
+        if let Ok(mut state) = lock.lock() {
+            state.want = Some((start, end));
+            signal.notify_all();
+        }
+    }
+
+    /// Frames decoded since the last call.
+    fn take_ready(&self) -> Vec<VideoFrame> {
+        let (lock, _) = &*self.shared;
+        lock.lock()
+            .map(|mut s| std::mem::take(&mut s.ready))
+            .unwrap_or_default()
+    }
+
+    /// Wait for the run covering `frame`, if one is being decoded.
+    ///
+    /// Bounded: a worker that is wedged costs one late picture, never the
+    /// event loop. Returns whatever landed while waiting.
+    fn wait_for(&self, frame: Frame, timeout: Duration) -> Vec<VideoFrame> {
+        let (lock, signal) = &*self.shared;
+        let Ok(mut state) = lock.lock() else {
+            return Vec::new();
+        };
+        let covers =
+            |run: Option<(Frame, Frame)>| run.is_some_and(|(s, e)| s <= frame && frame <= e);
+        if !covers(state.busy) && !covers(state.want) {
+            return std::mem::take(&mut state.ready);
+        }
+        let deadline = std::time::Instant::now() + timeout;
+        while covers(state.busy) || covers(state.want) {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            if left.is_zero() {
+                break;
+            }
+            let Ok((next, _)) = signal.wait_timeout(state, left) else {
+                return Vec::new();
+            };
+            state = next;
+        }
+        std::mem::take(&mut state.ready)
+    }
+}
+
+impl Drop for Prefetch {
+    fn drop(&mut self) {
+        {
+            let (lock, signal) = &*self.shared;
+            if let Ok(mut state) = lock.lock() {
+                state.stop = true;
+                state.want = None;
+            }
+            signal.notify_all();
+        }
+        if let Some(w) = self.worker.take() {
+            let _ = w.join();
+        }
+    }
+}
+
 /// An export in flight.
 #[derive(Debug)]
 struct Render {
@@ -344,6 +492,12 @@ pub struct MltBackend {
     pub patches: usize,
     /// Decoded stills, so a backward step is a lookup rather than a seek.
     frames: FrameCache,
+    /// The worker decoding the next backward run before it is asked for,
+    /// alive only while the transport is idle.
+    prefetch: Option<Prefetch>,
+    /// The lowest frame of the contiguous backward run currently cached.
+    /// What the prefetcher works down from.
+    run_floor: Option<u64>,
     /// The last frame asked of [`RenderBackend::frame_at`], which is how a
     /// backward step is recognised as one.
     last_request: Option<Frame>,
@@ -354,6 +508,10 @@ pub struct MltBackend {
     /// assert that walking backwards decodes each frame once.
     pub decodes: usize,
     pub cache_hits: usize,
+    /// Frames the prefetcher had ready before they were asked for. The media
+    /// tests assert this: a backward walk that hitches is one whose runs were
+    /// decoded on the caller's thread instead.
+    pub prefetched: usize,
 }
 
 impl MltBackend {
@@ -381,9 +539,32 @@ impl MltBackend {
         scale: PreviewScale,
         stepping_back: bool,
     ) -> Result<VideoFrame> {
-        if let Some(hit) = self.frames.get(frame, scale) {
+        self.adopt_prefetched(scale);
+        if let Some(hit) = self.frames.get(frame, scale).cloned() {
             self.cache_hits = self.cache_hits.saturating_add(1);
-            return Ok(hit.clone());
+            if stepping_back {
+                self.prefetch_below(scale);
+            }
+            return Ok(hit);
+        }
+        // A run the worker is already decoding is waited for rather than
+        // decoded again: it started before the walk got here, so it is
+        // usually a wait of nothing at all.
+        if stepping_back && let Some(prefetch) = self.prefetch.as_ref() {
+            let ready = prefetch.wait_for(frame, Duration::from_millis(250));
+            for decoded in ready {
+                self.decodes = self.decodes.saturating_add(1);
+                self.run_floor = Some(
+                    self.run_floor
+                        .map_or(decoded.position.get(), |f| f.min(decoded.position.get())),
+                );
+                self.frames.insert(scale, decoded);
+            }
+            if let Some(hit) = self.frames.get(frame, scale).cloned() {
+                self.cache_hits = self.cache_hits.saturating_add(1);
+                self.prefetch_below(scale);
+                return Ok(hit);
+            }
         }
         let start = if stepping_back {
             frame
@@ -398,8 +579,13 @@ impl MltBackend {
             reason: "no timeline has been given to the render backend yet".into(),
         })?;
         let run = decode_run(graph, Frame(start), frame, res)?;
-        keep_run(&mut self.frames, &mut self.decodes, scale, frame, run)
-            .ok_or(BackendError::Seek { frame: frame.get() })
+        let served = keep_run(&mut self.frames, &mut self.decodes, scale, frame, run)
+            .ok_or(BackendError::Seek { frame: frame.get() })?;
+        if stepping_back {
+            self.run_floor = Some(start);
+            self.prefetch_below(scale);
+        }
+        Ok(served)
     }
 
     /// Create a backend for a timeline's profile.
@@ -422,10 +608,13 @@ impl MltBackend {
             rebuilds: 0,
             patches: 0,
             frames: FrameCache::default(),
+            prefetch: None,
+            run_floor: None,
             last_request: None,
             backstep_run: 12,
             decodes: 0,
             cache_hits: 0,
+            prefetched: 0,
         })
     }
 
@@ -440,6 +629,65 @@ impl MltBackend {
     fn invalidate_frames(&mut self) {
         self.frames.clear();
         self.last_request = None;
+        // The prefetcher's graph is a copy of the one that just changed, so
+        // everything it has decoded or is decoding is a picture of a
+        // timeline that no longer exists.
+        self.prefetch = None;
+        self.run_floor = None;
+    }
+
+    /// Take whatever the prefetcher has decoded into the frame cache.
+    fn adopt_prefetched(&mut self, scale: PreviewScale) {
+        let Some(prefetch) = self.prefetch.as_ref() else {
+            return;
+        };
+        if prefetch.scale != scale {
+            return;
+        }
+        let ready = prefetch.take_ready();
+        for frame in ready {
+            self.decodes = self.decodes.saturating_add(1);
+            self.prefetched = self.prefetched.saturating_add(1);
+            self.run_floor = Some(
+                self.run_floor
+                    .map_or(frame.position.get(), |f| f.min(frame.position.get())),
+            );
+            self.frames.insert(scale, frame);
+        }
+    }
+
+    /// Keep a worker decoding the run below what is cached.
+    ///
+    /// Only while the transport is idle: during playback the picture comes
+    /// from the preview consumer, and a second decoding graph would compete
+    /// with it for the disk and the CPU it is pacing against.
+    fn prefetch_below(&mut self, scale: PreviewScale) {
+        if self.preview.is_some() {
+            self.prefetch = None;
+            return;
+        }
+        let Some(floor) = self.run_floor.filter(|f| *f > 0) else {
+            return;
+        };
+        let run = self.backstep_run.max(1);
+        let end = Frame(floor.saturating_sub(1));
+        let start = Frame(end.get().saturating_sub(run - 1));
+        if self.prefetch.as_ref().is_none_or(|p| p.scale != scale) {
+            let Some(projection) = self.projection.clone() else {
+                return;
+            };
+            let Ok(graph) = self.build_graph(&projection) else {
+                return;
+            };
+            self.prefetch = Some(Prefetch::spawn(
+                graph,
+                scale,
+                scale.apply(self.props.resolution),
+            ));
+        }
+        if let Some(prefetch) = self.prefetch.as_ref() {
+            prefetch.request(start, end);
+        }
     }
 
     fn require_graph(&mut self) -> Result<&mut Graph> {
@@ -485,6 +733,23 @@ impl MltBackend {
                 .map_err(BackendError::from)?;
             playlists.push(pl);
         }
+        // Without a blend per visual track a tractor shows the topmost one
+        // and drops what is under it, so a burned-in subtitle or an overlay
+        // would replace the picture instead of sitting on it.
+        let mut blends = Vec::new();
+        for b in projection.video_blend_tracks() {
+            let Some(blend) = video_blend(&self.profile) else {
+                continue;
+            };
+            blend
+                .properties()
+                .set_int("always_active", 1)
+                .map_err(BackendError::from)?;
+            tractor
+                .plant(&blend, 0, mlt_int(b))
+                .map_err(BackendError::from)?;
+            blends.push(blend);
+        }
         // Without a `mix` per track a tractor plays the audio of one track
         // and drops the rest, so this is what makes a multi-track project
         // audible at all, not only exportable.
@@ -512,6 +777,7 @@ impl MltBackend {
             playlists,
             root,
             _mixes: mixes,
+            _blends: blends,
             nested,
         })
     }
@@ -619,6 +885,9 @@ impl MltBackend {
                 // Some builds lack the Qt text producer; the property is set
                 // regardless so the placeholder still carries the payload.
                 let _ = props.set("text", t);
+                // The card behind the glyphs has to be transparent, or the
+                // blend below composites an opaque rectangle over the video.
+                let _ = props.set("bgcolour", "#00000000");
             }
             if let Resource::Offline { path } = &entry.resource {
                 props
@@ -823,6 +1092,19 @@ fn rational_fps(rate: f64) -> Option<Fps> {
     }
     // Fall back to thousandths, still exact and still rational.
     Fps::new(whole((rate * 1000.0).round()), 1000).ok()
+}
+
+/// The alpha-aware video blend this build of MLT can offer.
+///
+/// The names are tried in the order kdenlive tries them: `cairoblend` is the
+/// one that honours alpha everywhere, `qtblend` is the Qt build's, and
+/// `composite` is in every MLT there has ever been. A build with none of
+/// them keeps the topmost track, which is the old behaviour rather than a
+/// broken graph.
+fn video_blend(profile: &Profile) -> Option<Transition> {
+    ["frei0r.cairoblend", "qtblend", "composite"]
+        .iter()
+        .find_map(|service| Transition::new(profile, service).ok())
 }
 
 /// Decode `start..=target` from `graph` in one pass.
