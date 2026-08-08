@@ -344,54 +344,48 @@ impl Editor {
         }
     }
 
-    /// The timeline an export ships: every proxy relinked to the original
-    /// it stands for, checked by the guard that must never see one.
+    /// The timeline an export ships, checked by the guard that must never
+    /// see a proxy.
     ///
-    /// Rendering a proxy would quietly ship 540p, so this is not a
-    /// convenience - it is the invariant the whole proxy path rests on.
+    /// It is the session's own timeline: a proxy is substituted on the way
+    /// to the preview graph and never enters the model, so there is nothing
+    /// to relink back. The guard stays because rendering 540p by accident is
+    /// the one proxy failure a user would not notice until it is published.
     fn shipping_timeline(&self, session: &Session) -> Result<davimci_core::Timeline, CliError> {
-        let tl = self.proxies.with_originals(session.timeline())?;
+        let tl = session.timeline().clone();
         self.proxies.check_export(&tl)?;
         Ok(tl)
     }
 
-    /// Swap in the proxies that finished encoding.
+    /// Take the proxies that finished encoding and reproject onto them.
     ///
-    /// A relink is an edit like any other, so it goes through
-    /// `Session::exec` and `u` puts the original back.
-    fn adopt_finished_proxies(&mut self, session: &mut Session) {
+    /// No command, no undo entry: the timeline does not change. What changes
+    /// is which file the preview graph decodes, which is why the projection
+    /// is rebuilt rather than the model edited.
+    fn adopt_finished_proxies(&mut self, session: &Session) {
         let (updates, swaps) = self.proxies.poll();
         self.job_updates.extend(updates);
-        for (source, proxy) in swaps {
-            let clips: Vec<ClipId> = session
-                .timeline()
-                .tracks()
-                .iter()
-                .flat_map(davimci_core::Track::clips)
-                .filter(|c| c.media.as_ref().is_some_and(|m| m.path == source))
-                .map(|c| c.id)
-                .collect();
-            if clips.is_empty() {
-                continue;
-            }
-            let cmd = EditCommand::Sequence(
-                clips
-                    .iter()
-                    .map(|clip| EditCommand::Relink {
-                        clip: *clip,
-                        path: proxy.clone(),
-                        offline: false,
-                    })
-                    .collect(),
-            );
-            match session.exec(&cmd) {
-                Ok(_) => self.notices.push(Message::info(format!(
-                    "{} clip(s) are now decoding from a proxy",
-                    clips.len()
-                ))),
-                Err(e) => self.notices.push(Message::error(e.to_string())),
-            }
+        if swaps.is_empty() {
+            return;
         }
+        let landed = swaps
+            .iter()
+            .filter(|(source, _)| {
+                session
+                    .timeline()
+                    .tracks()
+                    .iter()
+                    .flat_map(davimci_core::Track::clips)
+                    .any(|c| c.media.as_ref().is_some_and(|m| &m.path == source))
+            })
+            .count();
+        if landed == 0 {
+            return;
+        }
+        self.project(session);
+        self.notices.push(Message::info(format!(
+            "{landed} source(s) are now decoding from a proxy"
+        )));
     }
 
     /// `:set preview on|off`.
@@ -771,7 +765,10 @@ impl Editor {
     /// rather than killing the session - an unprojectable timeline is still
     /// an editable one (Phase 0: degrade locally).
     fn project(&mut self, session: &Session) {
-        if let Err(e) = self.backend.set_timeline(session.timeline()) {
+        // The one place a proxy stands in for its original: everything above
+        // this line is the timeline the user edited.
+        let projected = self.proxies.with_proxies(session.timeline());
+        if let Err(e) = self.backend.set_timeline(&projected) {
             self.notices.push(Message::error(e.to_string()));
         }
     }

@@ -220,6 +220,24 @@ impl ProxyMap {
             .map_or(path, |(_, original)| original.as_str())
     }
 
+    /// The proxy standing in for a source, if one has finished encoding.
+    ///
+    /// The inverse of [`ProxyMap::original_of`], and what the preview
+    /// resolves a clip's media through: the timeline itself holds the
+    /// original, so a proxy is never saved, exported or undone.
+    #[must_use]
+    pub fn proxy_for<'a>(&'a self, source: &str) -> Option<&'a str> {
+        self.entries
+            .iter()
+            .find(|(_, original)| original == source)
+            .map(|(proxy, _)| proxy.as_str())
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
     #[must_use]
     pub fn is_proxy(&self, path: &str) -> bool {
         self.entries.iter().any(|(proxy, _)| proxy == path)
@@ -399,5 +417,20 @@ mod tests {
             "/media/original.mkv"
         );
         assert_eq!(proxies.original_of("/media/other.mkv"), "/media/other.mkv");
+    }
+
+    /// The preview resolves the other way: the timeline names the original,
+    /// and the graph asks what stands in for it.
+    #[test]
+    fn the_preview_looks_up_the_proxy_standing_in_for_a_source() {
+        let mut proxies = ProxyMap::default();
+        assert!(proxies.is_empty());
+        proxies.insert("/cache/abc.proxy.mov", "/media/original.mkv");
+        assert!(!proxies.is_empty());
+        assert_eq!(
+            proxies.proxy_for("/media/original.mkv"),
+            Some("/cache/abc.proxy.mov")
+        );
+        assert_eq!(proxies.proxy_for("/media/other.mkv"), None);
     }
 }

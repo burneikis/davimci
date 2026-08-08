@@ -1,11 +1,16 @@
 //! Proxy media, wired to a live session.
 //!
 //! `davimci-analysis` decides *whether* a file needs a proxy and *how* to
-//! encode it; this is the layer that runs that decision for an import,
-//! swaps the proxy in when it lands, and swaps the original back for an
-//! export. `:set proxy on|off` is the switch, so a session that wants the
-//! originals decoded is one command away.
+//! encode it; this is the layer that runs that decision for an import and
+//! resolves a clip's media through the result.
+//!
+//! A proxy is a decoding detail, not an edit: the timeline always names the
+//! original, and the substitution happens on the way to the preview graph.
+//! That is what keeps a background encode out of the undo log, out of `.`,
+//! out of the project file and out of every export. `:set proxy on|off` is
+//! the switch.
 
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -170,29 +175,41 @@ impl Proxies {
         (std::mem::take(&mut self.updates), swaps)
     }
 
-    /// The timeline as it must be rendered: every proxy replaced by the
-    /// original it stands for.
+    /// The timeline as the *preview* decodes it: every source that has a
+    /// finished proxy replaced by that proxy.
     ///
-    /// Export never ships a proxy. This is the mechanism, and
-    /// [`Proxies::check_export`] is the assertion that it worked.
-    pub fn with_originals(&self, tl: &Timeline) -> Result<Timeline, CliError> {
-        let mut out = tl.clone();
+    /// The substitution lives here and nowhere else. The timeline the
+    /// session holds always names the original, so a proxy is never
+    /// recorded in the undo log, never repeated by `.`, never written to the
+    /// project file and never exported. Borrowed until there is something to
+    /// swap, so a session without proxies pays nothing.
+    #[must_use]
+    pub fn with_proxies<'a>(&self, tl: &'a Timeline) -> Cow<'a, Timeline> {
+        if self.map.is_empty() {
+            return Cow::Borrowed(tl);
+        }
         let swaps: Vec<(davimci_core::ClipId, String)> = tl
             .tracks()
             .iter()
             .flat_map(davimci_core::Track::clips)
             .filter_map(|c| {
                 let media = c.media.as_ref()?;
-                let original = self.map.original_of(&media.path);
-                (original != media.path).then(|| (c.id, original.to_string()))
+                let proxy = self.map.proxy_for(&media.path)?;
+                Path::new(proxy)
+                    .is_file()
+                    .then(|| (c.id, proxy.to_string()))
             })
             .collect();
-        for (clip, original) in swaps {
-            let offline = !Path::new(&original).exists();
-            out.set_media_source(clip, &original, offline)
-                .map_err(CliError::from)?;
+        if swaps.is_empty() {
+            return Cow::Borrowed(tl);
         }
-        Ok(out)
+        let mut out = tl.clone();
+        for (clip, proxy) in swaps {
+            // A proxy that will not relink leaves the clip on its original,
+            // which decodes slower and is otherwise identical.
+            let _ = out.set_media_source(clip, &proxy, false);
+        }
+        Cow::Owned(out)
     }
 
     /// The built-in `BeforeExport` check: no clip may resolve to a proxy.
@@ -295,10 +312,16 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// Export relinks to the original, and the guard agrees once it has.
+    /// The substitution is the preview's alone: the session's timeline still
+    /// names the original, so nothing an export, a save or an undo looks at
+    /// has ever seen a proxy.
     #[test]
-    fn an_export_relinks_every_proxy_back_to_its_original() {
-        let root = dir("export");
+    fn a_proxy_reaches_the_preview_and_no_further() {
+        let root = dir("preview");
+        let proxy = root.join("abc.proxy.mov");
+        std::fs::write(&proxy, b"stand-in").unwrap();
+        let proxy = proxy.display().to_string();
+
         let mut proxies = Proxies::new(&root);
         let mut tl = davimci_core::testing::multi_audio_fixture(1, Some(1));
         let track = tl
@@ -308,29 +331,32 @@ mod tests {
             .unwrap()
             .id;
         let clip = tl.track(track).unwrap().clips()[0].id;
-        tl.set_media_source(clip, "/cache/abc.proxy.mov", false)
-            .unwrap();
+        tl.set_media_source(clip, "/media/uhd.mkv", false).unwrap();
+
+        let media_of = |tl: &Timeline| {
+            tl.track(track).unwrap().clips()[0]
+                .media
+                .as_ref()
+                .map(|m| m.path.clone())
+                .unwrap()
+        };
+
+        // Before the encode lands, nothing is substituted and nothing is
+        // cloned.
+        assert!(matches!(proxies.with_proxies(&tl), Cow::Borrowed(_)));
+
         proxies.adopt(&Ready {
             source: "/media/uhd.mkv".into(),
-            proxy: "/cache/abc.proxy.mov".into(),
+            proxy: proxy.clone(),
         });
-
-        assert!(
-            proxies.check_export(&tl).is_err(),
-            "a proxy reached the render"
-        );
-        let shipped = proxies.with_originals(&tl).unwrap();
+        assert_eq!(media_of(&proxies.with_proxies(&tl)), proxy);
         assert_eq!(
-            shipped
-                .track(track)
-                .unwrap()
-                .clips()
-                .iter()
-                .filter_map(|c| c.media.as_ref().map(|m| m.path.clone()))
-                .collect::<Vec<_>>(),
-            vec!["/media/uhd.mkv".to_string()]
+            media_of(&tl),
+            "/media/uhd.mkv",
+            "the substitution reached the timeline the session holds"
         );
-        proxies.check_export(&shipped).unwrap();
+        // The guard sees the timeline an export ships, which is that one.
+        proxies.check_export(&tl).unwrap();
         let _ = std::fs::remove_dir_all(&root);
     }
 }

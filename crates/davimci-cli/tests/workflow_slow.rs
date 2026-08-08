@@ -205,9 +205,13 @@ fn the_whole_spec_one_workflow_survives_a_real_import_and_export() {
         shape,
         vec![
             "V1 2 clip(s)".to_string(),
-            "A1 1 clip(s)".to_string(),
-            "A2 1 clip(s)".to_string(),
-            "A3 1 clip(s)".to_string(),
+            // Import groups the streams of one file together, so the split
+            // and the ripple delete on V1 land on the audio that came in
+            // with it. Two clips per audio track is the group working; one
+            // would mean the picture and its sound had drifted apart.
+            "A1 2 clip(s)".to_string(),
+            "A2 2 clip(s)".to_string(),
+            "A3 2 clip(s)".to_string(),
             // The fixture carries two subtitle streams of its own; the cue
             // this workflow adds lands on a third text track.
             "T1 0 clip(s)".to_string(),
