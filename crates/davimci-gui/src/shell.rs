@@ -121,8 +121,8 @@ impl Gui {
         self.modals.command_is_open()
     }
 
-    /// Whether a modal is currently spelling out text, so a paste is text
-    /// rather than the `<C-v>` the timeline grammar would read it as.
+    /// Whether a modal is currently spelling out text, which is the only
+    /// place a pasted line has anywhere to go.
     #[must_use]
     pub fn takes_text(&self) -> bool {
         self.modals.command_is_open()

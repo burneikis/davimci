@@ -33,9 +33,9 @@ fn scrolled_view_keeps_the_playhead_on_screen() {
 }
 
 #[test]
-fn visual_block_reports_every_selected_track_in_the_mode_line() {
-    let view = fixtures::visual_block();
-    assert_eq!(view.mode_line, "-- VISUAL-BLOCK 181f (V1,A1) --");
+fn a_selection_reports_every_selected_track_in_the_mode_line() {
+    let view = fixtures::visual_across_tracks();
+    assert_eq!(view.mode_line, "-- VISUAL 181f (V1,A1) --");
     let sel = view.selection.expect("visual mode has a selection");
     assert_eq!((sel.start.get(), sel.end.get()), (60, 241));
     assert_eq!(sel.tracks.len(), 2);
@@ -43,7 +43,7 @@ fn visual_block_reports_every_selected_track_in_the_mode_line() {
 
 #[test]
 fn selection_marks_only_overlapping_clips_on_selected_tracks() {
-    let view = fixtures::visual_block();
+    let view = fixtures::visual_across_tracks();
     let selected: Vec<&str> = view
         .tracks
         .iter()
@@ -57,7 +57,7 @@ fn selection_marks_only_overlapping_clips_on_selected_tracks() {
 
 #[test]
 fn a_partly_covered_clip_reports_only_the_covered_columns() {
-    let view = fixtures::visual_block();
+    let view = fixtures::visual_across_tracks();
     let sel = view.selection.clone().expect("visual mode has a selection");
     let (first, last) = sel.columns.expect("the selection is on screen");
     for c in view.tracks.iter().flat_map(|t| t.clips.iter()) {

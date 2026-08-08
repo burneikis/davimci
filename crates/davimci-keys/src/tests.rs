@@ -507,10 +507,8 @@ fn typing_it_in_visual_narrows_the_selection_to_the_focused_track() {
         ("A1", &[(0, 100, "m")]),
     ]));
     let tracks: Vec<_> = s.timeline().tracks().iter().map(|t| t.id).collect();
-    feed(&mut e, &mut s, "<C-v>");
-    // Block mode can cover several tracks; `it` cuts it back to one.
-    e.execute_action(crate::action::Action::ToggleVisualTrack, &mut s);
-    assert_eq!(e.selection().map(|s| s.tracks.len()), Some(1));
+    feed(&mut e, &mut s, "vj");
+    assert_eq!(e.selection().map(|s| s.tracks.len()), Some(2));
     let out = feed(&mut e, &mut s, "it");
     assert!(matches!(out.last(), Some(Outcome::Moved)), "{out:?}");
     assert_eq!(e.selection().map(|s| s.tracks), Some(vec![tracks[0]]));

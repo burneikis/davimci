@@ -59,7 +59,7 @@ fn the_ruler_marks_the_playhead_and_the_clip_boundaries() {
 
 #[test]
 fn a_selection_is_drawn_on_every_selected_track() {
-    let view = fixtures::visual_block();
+    let view = fixtures::visual_across_tracks();
     let mut tui = Tui::new(60, 10);
     let lines = tui.rows(&view);
     tui.render(&view).unwrap();
@@ -80,7 +80,7 @@ fn a_selection_is_drawn_on_every_selected_track() {
 
 #[test]
 fn only_the_covered_columns_of_a_clip_are_inverted() {
-    let view = fixtures::visual_block();
+    let view = fixtures::visual_across_tracks();
     let (first, last) = view
         .selection
         .as_ref()

@@ -61,7 +61,7 @@ fn the_cursor_marks_the_focused_lane_and_only_that_lane() {
 
 #[test]
 fn a_selection_paints_one_band_per_selected_track() {
-    let view = fixtures::visual_block();
+    let view = fixtures::visual_across_tracks();
     let list = paint_view(&view, &layout(800, 600), &Chrome::default());
     let bands = list.rects(Fill::Selection);
     assert_eq!(bands.len(), 2, "one band per track in the block");
@@ -142,12 +142,12 @@ fn every_golden_view_paints_at_extreme_sizes_without_panicking() {
 
 #[test]
 fn the_status_line_carries_the_mode_line() {
-    let view = fixtures::visual_block();
+    let view = fixtures::visual_across_tracks();
     let list = paint_view(&view, &layout(800, 600), &Chrome::default());
     assert!(
         list.texts()
             .iter()
-            .any(|t| t.starts_with("-- VISUAL-BLOCK 181f (V1,A1) --")),
+            .any(|t| t.starts_with("-- VISUAL 181f (V1,A1) --")),
         "{:?}",
         list.texts()
     );

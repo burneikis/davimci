@@ -195,8 +195,6 @@ pub enum Action {
     EnterVisual(Mode),
     /// `o` inside a `VISUAL*` mode.
     SwapVisualEnds,
-    /// Toggle a track in/out of a `VISUAL-BLOCK` selection.
-    ToggleVisualTrack,
     /// `it` / `at` typed while a selection is live: narrow the selection to
     /// the focused track, or to its link group.
     NarrowSelection {
@@ -275,7 +273,6 @@ impl Action {
             | Self::MacroReplay(..)
             | Self::JumpMark(_)
             | Self::SwapVisualEnds
-            | Self::ToggleVisualTrack
             | Self::NarrowSelection { .. }
             | Self::TrimEdgeStep { .. }
             | Self::GainAdjust(_)

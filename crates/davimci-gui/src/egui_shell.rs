@@ -246,13 +246,10 @@ pub fn claim_input(ui: &mut Ui, rect: EguiRect) {
 /// chords arrive as `Event::Key`, because `Text` is not emitted for either.
 /// Whitespace text is dropped so `Space` is not counted twice.
 ///
-/// `taking_text` says whether a modal is spelling out a line. The window
-/// layer never sees `Ctrl+V`: the winit integration swallows it and emits
-/// `Event::Paste` instead, so a paste is the only evidence the chord was
-/// pressed. Outside a text modal it is read back as `<C-v>`, which is what
-/// the timeline grammar binds it to; inside one it is the pasted text. The
-/// one case this cannot recover is `Ctrl+V` with an empty clipboard, where
-/// no event is emitted at all.
+/// `taking_text` says whether a modal is spelling out a line, which is the
+/// only place a paste means anything: the timeline grammar has no paste of
+/// its own, and `p` reads the yank register rather than the system
+/// clipboard.
 #[must_use]
 pub fn translate_events(events: &[egui::Event], taking_text: bool) -> Vec<(RawKey, Modifiers)> {
     let mut out = Vec::new();
@@ -263,13 +260,6 @@ pub fn translate_events(events: &[egui::Event], taking_text: bool) -> Vec<(RawKe
                     out.push((RawKey::Char(c), Modifiers::default()));
                 }
             }
-            egui::Event::Paste(_) => out.push((
-                RawKey::Char('v'),
-                Modifiers {
-                    ctrl: true,
-                    ..Modifiers::default()
-                },
-            )),
             egui::Event::Text(text) => {
                 for c in text.chars().filter(|c| !c.is_whitespace()) {
                     out.push((RawKey::Char(c), Modifiers::default()));
@@ -351,25 +341,22 @@ mod tests {
     #[test]
     fn ctrl_chords_become_ctrl_keys() {
         let events = vec![egui::Event::Key {
-            key: egui::Key::V,
+            key: egui::Key::R,
             physical_key: None,
             pressed: true,
             repeat: false,
             modifiers: egui::Modifiers::CTRL,
         }];
         let keys = translate_events(&events, false);
-        assert_eq!(keys[0].0, RawKey::Char('v'));
+        assert_eq!(keys[0].0, RawKey::Char('r'));
         assert!(keys[0].1.ctrl);
     }
 
-    /// Regression: winit turns `Ctrl+V` into a paste before egui ever reports
-    /// a key, so visual-block mode was unreachable in the window.
+    /// A paste with no line being typed has nowhere to go, and must not be
+    /// mistaken for the keys that spell its contents.
     #[test]
-    fn a_paste_outside_a_text_modal_is_the_visual_block_chord() {
-        let keys = translate_events(&[egui::Event::Paste("clip.mp4".into())], false);
-        assert_eq!(keys.len(), 1);
-        assert_eq!(keys[0].0, RawKey::Char('v'));
-        assert!(keys[0].1.ctrl);
+    fn a_paste_outside_a_text_modal_is_dropped() {
+        assert!(translate_events(&[egui::Event::Paste("clip.mp4".into())], false).is_empty());
     }
 
     #[test]

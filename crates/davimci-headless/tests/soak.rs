@@ -28,8 +28,8 @@ use davimci_keys::Key;
 const ALPHABET: &[&str] = &[
     "h", "l", "j", "k", "w", "b", "e", "0", "$", "G", "gg", "{", "}", "%", "s", "gs", "x", "d",
     "gd", "y", "c", "p", "P", "gp", "gP", "u", "<C-r>", ".", "t", "gt", "T", "gT", "f", "+", "-",
-    "v", "V", "<C-v>", "o", "i", "a", "w", "ic", "ac", "it", "at", "is", "m", "`", "q", "@", "1",
-    "2", "3", "\"", "z", "<Esc>", "<Space>", "<Left>", "<Right>",
+    "v", "V", "o", "i", "a", "w", "ic", "ac", "it", "at", "is", "m", "`", "q", "@", "1", "2", "3",
+    "\"", "z", "<Esc>", "<Space>", "<Left>", "<Right>",
 ];
 
 struct Rng(u64);

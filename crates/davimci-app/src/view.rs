@@ -526,7 +526,6 @@ fn mode_line(tl: &davimci_core::Timeline, inputs: &ViewInputs<'_>) -> String {
         Mode::Normal => "NORMAL",
         Mode::Visual => "VISUAL",
         Mode::VisualLine => "VISUAL-LINE",
-        Mode::VisualBlock => "VISUAL-BLOCK",
         Mode::Insert => "INSERT",
         Mode::Command => "COMMAND",
     };

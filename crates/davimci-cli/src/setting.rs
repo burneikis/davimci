@@ -61,7 +61,7 @@ pub enum Setting {
     /// `numbers none|absolute|relative` - how the terminal ruler labels its
     /// jump points. Inert outside the terminal frontend.
     Numbers(Numbers),
-    /// `visualstart frame|jump` - what `v` and `<C-v>` cover at each end of
+    /// `visualstart frame|jump` - what `v` covers at each end of
     /// the selection. `V` is always the clip. A view setting: it shapes the
     /// next selection and never edits.
     VisualStart(VisualStart),

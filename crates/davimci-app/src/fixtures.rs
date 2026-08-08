@@ -57,30 +57,32 @@ pub fn scrolled() -> ViewState {
     ViewState::build(&s, vp, &JumpConfig::default(), &ViewInputs::default())
 }
 
-/// `VISUAL-BLOCK` across two tracks - the widest selection description the
-/// view state can carry.
+/// A `VISUAL` selection across two tracks - the widest selection description
+/// the view state can carry.
 #[must_use]
-pub fn visual_block() -> ViewState {
+pub fn visual_across_tracks() -> ViewState {
     let mut s = session();
     let v1 = track_id(s.timeline(), "V1");
     let a1 = track_id(s.timeline(), "A1");
     let _ = s.set_playhead(Frame(100), v1);
-    let mut sel = VisualSelection {
-        anchor: Anchor {
+    // Described through the same constructor the grammar drives, so the
+    // fixture can only name a selection the key engine could also reach.
+    let order: Vec<_> = s.timeline().tracks().iter().map(|t| t.id).collect();
+    let sel = VisualSelection::spanning(
+        Anchor {
             frame: Frame(60),
             track: v1,
         },
-        active: Anchor {
+        davimci_motion::TimeRange::new(Frame(60), Frame(61)),
+        Anchor {
             frame: Frame(240),
-            track: v1,
+            track: a1,
         },
-        anchor_span: davimci_motion::TimeRange::new(Frame(60), Frame(61)),
-        active_span: davimci_motion::TimeRange::new(Frame(240), Frame(241)),
-        tracks: vec![v1],
-    };
-    sel.toggle_track(a1);
+        davimci_motion::TimeRange::new(Frame(240), Frame(241)),
+        &order,
+    );
     let inputs = ViewInputs {
-        mode: Mode::VisualBlock,
+        mode: Mode::Visual,
         selection: Some(&sel),
         ..ViewInputs::default()
     };
@@ -127,7 +129,7 @@ pub fn all() -> Vec<(&'static str, ViewState)> {
     vec![
         ("normal", normal()),
         ("scrolled", scrolled()),
-        ("visual_block", visual_block()),
+        ("visual_across_tracks", visual_across_tracks()),
         ("zoomed_out", zoomed_out()),
         ("waveform", waveform()),
     ]

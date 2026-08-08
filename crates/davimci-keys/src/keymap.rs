@@ -221,10 +221,6 @@ pub fn default_bindings() -> Vec<(Vec<Key>, LeafAction)> {
         // -- visual mode --
         (k("v"), standalone(Action::EnterVisual(Mode::Visual))),
         (k("V"), standalone(Action::EnterVisual(Mode::VisualLine))),
-        (
-            k("<C-v>"),
-            standalone(Action::EnterVisual(Mode::VisualBlock)),
-        ),
         (k("o"), standalone(Action::SwapVisualEnds)),
         // -- marks --
         (k("m"), LeafAction::NeedsArg(ArgKind::SetMark)),

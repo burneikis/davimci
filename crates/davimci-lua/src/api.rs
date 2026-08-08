@@ -107,52 +107,52 @@ fn keymap_module(lua: &Lua, state: &Shared) -> mlua::Result<Table> {
     let st = Rc::clone(state);
     let map = lua.create_function(
         move |_, (mode, lhs, rhs, opts): (String, String, Value, Option<Table>)| {
-        let Some(mode) = parse_mode(&mode) else {
-            return Err(err(LuaError::Config(format!(
-                "'{mode}' is not a mode (known: normal, visual, visual-line, visual-block, insert, command)"
-            ))));
-        };
-        let keys = Key::parse_str(&lhs);
-        if keys.is_empty() {
-            return Err(err(LuaError::Config(
-                "a keymap needs a left-hand side to bind".into(),
-            )));
-        }
-        let mut st = st.borrow_mut();
-        let rhs = match rhs {
-            Value::String(s) => {
-                let cmd = s.to_str()?.to_string();
-                if parse_editor_command(&cmd).is_none() {
+            let Some(mode) = parse_mode(&mode) else {
+                return Err(err(LuaError::Config(format!(
+                    "'{mode}' is not a mode (known: normal, visual, visual-line, insert, command)"
+                ))));
+            };
+            let keys = Key::parse_str(&lhs);
+            if keys.is_empty() {
+                return Err(err(LuaError::Config(
+                    "a keymap needs a left-hand side to bind".into(),
+                )));
+            }
+            let mut st = st.borrow_mut();
+            let rhs = match rhs {
+                Value::String(s) => {
+                    let cmd = s.to_str()?.to_string();
+                    if parse_editor_command(&cmd).is_none() {
+                        return Err(err(LuaError::Config(format!(
+                            "keymap '{lhs}' names '{cmd}', which is not an editor command"
+                        ))));
+                    }
+                    Rhs::Command(cmd)
+                }
+                Value::Function(f) => {
+                    let id = st.next_id();
+                    st.callbacks.insert(id, f);
+                    Rhs::Callback(id)
+                }
+                other => {
                     return Err(err(LuaError::Config(format!(
-                        "keymap '{lhs}' names '{cmd}', which is not an editor command"
+                        "keymap '{lhs}' must map to a command string or a function, not {}",
+                        other.type_name()
                     ))));
                 }
-                Rhs::Command(cmd)
-            }
-            Value::Function(f) => {
-                let id = st.next_id();
-                st.callbacks.insert(id, f);
-                Rhs::Callback(id)
-            }
-            other => {
-                return Err(err(LuaError::Config(format!(
-                    "keymap '{lhs}' must map to a command string or a function, not {}",
-                    other.type_name()
-                ))));
-            }
-        };
-        let interrupt = match &opts {
-            Some(t) => t.get::<Option<bool>>("interrupt")?.unwrap_or(false),
-            None => false,
-        };
-        st.keymaps.retain(|b| !(b.mode == mode && b.keys == keys));
-        st.keymaps.push(KeyBinding {
-            mode,
-            keys,
-            rhs,
-            interrupt,
-        });
-        Ok(())
+            };
+            let interrupt = match &opts {
+                Some(t) => t.get::<Option<bool>>("interrupt")?.unwrap_or(false),
+                None => false,
+            };
+            st.keymaps.retain(|b| !(b.mode == mode && b.keys == keys));
+            st.keymaps.push(KeyBinding {
+                mode,
+                keys,
+                rhs,
+                interrupt,
+            });
+            Ok(())
         },
     )?;
     t.set("map", map)?;

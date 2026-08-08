@@ -110,19 +110,19 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_v_is_the_visual_block_token() {
+    fn a_ctrl_chord_names_one_token() {
         assert_eq!(
-            translate(&RawKey::Char('v'), Modifiers::ctrl()),
-            Some(Key::Ctrl('v'))
+            translate(&RawKey::Char('r'), Modifiers::ctrl()),
+            Some(Key::Ctrl('r'))
         );
-        // Ctrl+Shift+V still names `Ctrl-v`: the grammar has no shifted
+        // Ctrl+Shift+R still names `Ctrl-r`: the grammar has no shifted
         // control tokens.
         let m = Modifiers {
             ctrl: true,
             shift: true,
             ..none()
         };
-        assert_eq!(translate(&RawKey::Char('V'), m), Some(Key::Ctrl('v')));
+        assert_eq!(translate(&RawKey::Char('R'), m), Some(Key::Ctrl('r')));
     }
 
     #[test]

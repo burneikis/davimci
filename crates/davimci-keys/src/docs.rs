@@ -36,8 +36,8 @@ pub fn keymap_markdown() -> String {
          Run `just docs` after changing a binding.\n\n\
          Counts, registers, marks and text objects are grammar, not bindings:\n\
          `3dw`, `\"ay`, `` `a `` and `dic` compose out of the entries below.\n\n\
-         What the three visual modes select, and how `j`/`k` widen a selection\n\
-         across tracks, is in `docs/visual-mode.md`.\n",
+         What `v` and `V` select, and how `j`/`k` widen a selection across\n\
+         tracks, is in `docs/visual-mode.md`.\n",
     );
     let mut current = "";
     for (keys, text, section) in rows {
@@ -171,15 +171,10 @@ fn standalone(a: &Action) -> (&'static str, String) {
             visual,
             match mode {
                 Mode::VisualLine => "select whole clips (visual-line)".into(),
-                Mode::VisualBlock => "select frames across tracks (visual-block)".into(),
                 _ => "select from the frame under the cursor (visual)".into(),
             },
         ),
         Action::SwapVisualEnds => (visual, "swap the ends of the selection".into()),
-        Action::ToggleVisualTrack => (
-            visual,
-            "add or remove one track, so a block selection can skip one".into(),
-        ),
         Action::NarrowSelection { group } => (
             visual,
             if *group {

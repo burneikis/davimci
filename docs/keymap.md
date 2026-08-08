@@ -6,8 +6,8 @@ Run `just docs` after changing a binding.
 Counts, registers, marks and text objects are grammar, not bindings:
 `3dw`, `"ay`, `` `a `` and `dic` compose out of the entries below.
 
-What the three visual modes select, and how `j`/`k` widen a selection
-across tracks, is in `docs/visual-mode.md`.
+What `v` and `V` select, and how `j`/`k` widen a selection across
+tracks, is in `docs/visual-mode.md`.
 
 ## Audio
 
@@ -115,4 +115,3 @@ across tracks, is in `docs/visual-mode.md`.
 | `o` | swap the ends of the selection |
 | `v` | select from the frame under the cursor (visual) |
 | `V` | select whole clips (visual-line) |
-| `<C-v>` | select frames across tracks (visual-block) |

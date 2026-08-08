@@ -126,7 +126,6 @@ pub(crate) fn parse_mode(name: &str) -> Option<Mode> {
         "normal" | "n" => Mode::Normal,
         "visual" | "v" => Mode::Visual,
         "visual-line" | "V" => Mode::VisualLine,
-        "visual-block" => Mode::VisualBlock,
         "insert" | "i" => Mode::Insert,
         "command" | "c" => Mode::Command,
         _ => return None,
@@ -140,7 +139,7 @@ mod tests {
     #[test]
     fn mode_names_cover_the_fsm() {
         assert_eq!(parse_mode("normal"), Some(Mode::Normal));
-        assert_eq!(parse_mode("visual-block"), Some(Mode::VisualBlock));
+        assert_eq!(parse_mode("visual-line"), Some(Mode::VisualLine));
         assert_eq!(parse_mode("nrmal"), None);
     }
 

@@ -17,7 +17,6 @@ pub enum Mode {
     Normal,
     Visual,
     VisualLine,
-    VisualBlock,
     Insert,
     Command,
 }
@@ -32,7 +31,6 @@ impl Mode {
             Self::Normal => "normal",
             Self::Visual => "visual",
             Self::VisualLine => "visual-line",
-            Self::VisualBlock => "visual-block",
             Self::Insert => "insert",
             Self::Command => "command",
         }
@@ -40,7 +38,7 @@ impl Mode {
 
     #[must_use]
     pub fn is_visual(self) -> bool {
-        matches!(self, Mode::Visual | Mode::VisualLine | Mode::VisualBlock)
+        matches!(self, Mode::Visual | Mode::VisualLine)
     }
 }
 
@@ -59,7 +57,7 @@ pub struct Anchor {
     pub track: TrackId,
 }
 
-/// What `v` and `<C-v>` cover at each end: `:set visualstart`.
+/// What `v` covers at each end: `:set visualstart`.
 ///
 /// `V` ignores it - its unit is always the clip.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -113,9 +111,8 @@ pub struct VisualSelection {
     pub anchor_span: TimeRange,
     /// The span the active end covers.
     pub active_span: TimeRange,
-    /// The set of tracks the selection covers, in timeline order. `j`/`k`
-    /// make it the contiguous span between the two ends' tracks; block mode
-    /// may then punch holes in it with an explicit toggle.
+    /// The set of tracks the selection covers: the contiguous span between
+    /// the two ends' tracks, in timeline order.
     pub tracks: Vec<TrackId>,
 }
 
@@ -130,6 +127,22 @@ impl VisualSelection {
         }
     }
 
+    /// A selection described outright, rather than keyed in a press at a
+    /// time. The two ends fix the track span, so this can only describe a
+    /// selection the grammar could also produce.
+    #[must_use]
+    pub fn spanning(
+        anchor: Anchor,
+        anchor_span: TimeRange,
+        active: Anchor,
+        active_span: TimeRange,
+        order: &[TrackId],
+    ) -> Self {
+        let mut sel = Self::new(anchor, anchor_span);
+        sel.extend(active, active_span, order);
+        sel
+    }
+
     /// `o`: swap the active end. The units travel with the ends they belong
     /// to, or a swap would silently reshape the selection.
     pub fn swap(&mut self) {
@@ -142,16 +155,6 @@ impl VisualSelection {
         let a = self.anchor_span;
         let b = self.active_span;
         TimeRange::new(a.start.min(b.start), a.end.max(b.end))
-    }
-
-    pub fn toggle_track(&mut self, track: TrackId) {
-        if let Some(i) = self.tracks.iter().position(|t| *t == track) {
-            if self.tracks.len() > 1 {
-                self.tracks.remove(i);
-            }
-        } else {
-            self.tracks.push(track);
-        }
     }
 
     fn extend(&mut self, to: Anchor, span: TimeRange, order: &[TrackId]) {
@@ -253,12 +256,6 @@ impl ModeState {
         }
     }
 
-    pub fn toggle_visual_track(&mut self, track: TrackId) {
-        if let Some(v) = &mut self.visual {
-            v.toggle_track(track);
-        }
-    }
-
     /// Any transition that is not visual entry/exit or `Esc`, e.g. `c` +
     /// motion dropping into `INSERT`, or `:` entering `COMMAND`.
     pub fn enter(&mut self, to: Mode) -> ModeChanged {
@@ -300,7 +297,7 @@ mod tests {
         TimeRange::new(at.frame, Frame(at.frame.get() + 1))
     }
 
-    const ORDER: &[TrackId] = &[TrackId(1), TrackId(2), TrackId(3), TrackId(4)];
+    const ORDER: &[TrackId] = &[TrackId(1), TrackId(2), TrackId(3), TrackId(4), TrackId(5)];
 
     #[test]
     fn visual_toggles_off_on_the_same_key() {
@@ -328,13 +325,7 @@ mod tests {
 
     #[test]
     fn escape_always_returns_to_normal() {
-        for start in [
-            Mode::Visual,
-            Mode::VisualLine,
-            Mode::VisualBlock,
-            Mode::Insert,
-            Mode::Command,
-        ] {
+        for start in [Mode::Visual, Mode::VisualLine, Mode::Insert, Mode::Command] {
             let mut m = ModeState::new();
             m.enter(start);
             assert_eq!(m.mode(), start);
@@ -403,14 +394,15 @@ mod tests {
     fn a_horizontal_motion_leaves_the_track_set_alone() {
         let mut m = ModeState::new();
         let start = on(10, 2);
-        m.toggle_visual(Mode::VisualBlock, start, frame_unit(start));
-        m.toggle_visual_track(TrackId(4));
-        let along = on(40, 2);
+        m.toggle_visual(Mode::Visual, start, frame_unit(start));
+        let down = on(10, 4);
+        m.extend_visual(down, frame_unit(down), ORDER);
+        let along = on(40, 4);
         m.extend_visual(along, frame_unit(along), ORDER);
         let Some(v) = m.visual() else {
             unreachable!("still visual");
         };
-        assert_eq!(v.tracks, vec![TrackId(2), TrackId(4)]);
+        assert_eq!(v.tracks, vec![TrackId(2), TrackId(3), TrackId(4)]);
     }
 
     #[test]

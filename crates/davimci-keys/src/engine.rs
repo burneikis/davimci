@@ -212,7 +212,7 @@ impl Engine {
 
     /// What one end of a selection covers at `at`, in the current mode.
     ///
-    /// The whole difference between `v`, `V` and `<C-v>` lives here, which is
+    /// The whole difference between `v` and `V` lives here, which is
     /// why it is one function: `V` covers the clip (or the gap) under the
     /// end, and the other two cover whatever `visualstart` names.
     fn unit_span(&self, kind: Mode, at: Anchor, session: &Session) -> TimeRange {
@@ -380,11 +380,6 @@ impl Engine {
             }
             Action::SwapVisualEnds => {
                 self.mode.swap_visual_ends();
-                Outcome::Moved
-            }
-            Action::ToggleVisualTrack => {
-                let t = session.timeline().playhead().track;
-                self.mode.toggle_visual_track(t);
                 Outcome::Moved
             }
             Action::NarrowSelection { group } => self.do_narrow_selection(group, session),

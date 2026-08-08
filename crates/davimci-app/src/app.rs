@@ -396,7 +396,7 @@ impl App {
         self.engine.set_zoom(zoom);
     }
 
-    /// `:set visualstart`: what `v` and `<C-v>` cover at each end.
+    /// `:set visualstart`: what `v` covers at each end.
     pub fn set_visual_start(&mut self, start: davimci_keys::VisualStart) {
         self.engine.set_visual_start(start);
     }
