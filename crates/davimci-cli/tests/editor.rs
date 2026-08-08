@@ -638,6 +638,25 @@ fn a_tick_decodes_one_thumbnail_and_leaves_the_playhead_where_it_was() {
 
 // audio operations
 
+/// Acceleration changes how pixels are produced, never what the timeline
+/// holds, so `:set decode` leaves the undo log and the timeline alone - and
+/// a backend without hardware says so in one complete sentence rather than
+/// failing.
+#[test]
+fn setting_the_decode_policy_is_not_an_edit_and_degrades_to_software() {
+    let (mut app, mut editor) = editor();
+    let before = app.session().history().current();
+    let timeline = app.session().timeline().clone();
+
+    app.event(Event::Command(":set decode auto".into()), &mut editor);
+
+    assert_eq!(app.session().history().current(), before);
+    assert_eq!(app.session().timeline(), &timeline);
+    let status = editor.acceleration();
+    assert!(!status.is_hardware(), "the mock backend has no hardware");
+    assert!(status.detail.ends_with('.'), "{}", status.detail);
+}
+
 /// `:gain` sets an absolute level on the clip under the playhead, and it is
 /// an ordinary undoable edit.
 #[test]

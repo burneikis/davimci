@@ -51,30 +51,49 @@ composite is small until track count grows.
 Ordered by payoff per unit of risk. Do not reorder without a benchmark that
 justifies it.
 
-### 1. Hardware decode with CPU-visible frames
+### 1. Hardware decode with CPU-visible frames - landed
 
-Let MLT's `avformat` producer use ffmpeg hwaccel (VAAPI on Linux, the obvious
-first target) and read frames back into system memory as today.
+MLT's `avformat` producer uses ffmpeg hwaccel (VAAPI on Linux) and frames are
+read back into system memory as today.
 
-- Biggest single win, and the only phase that touches the dominant cost.
-- Frames stay byte-comparable, so every existing snapshot and parity test keeps
-  working unchanged.
-- Confined to producer construction in `crates/davimci-mlt/src/backend.rs`
-  (`probe`, and the projection's `avformat` producers).
-- Needs a capability probe at startup: try to open the device, and on any
-  failure record the reason and stay on software decode for the session.
-- Readback is a real cost. If hwaccel plus readback is not faster than software
-  decode for a given codec and resolution, prefer software for that codec. The
-  decision is per source, not global.
+What is in the tree:
+
+- `davimci-backend::accel` holds the vocabulary - `DecodePolicy` and
+  `AccelerationStatus` - and `RenderBackend::set_decode_policy` /
+  `acceleration`, both infallible, since an unusable device is recoverable.
+- `davimci-mlt::hwaccel::Acceleration` is the probe and the per-source
+  decision: a render node must exist, the codec must be long-GOP, and the
+  picture must be at least 1280x720, or the source decodes in software. The
+  probe takes its device list as an argument, so no-device, wrong-codec and
+  mid-session-failure all have unit coverage without a GPU.
+- `MltBackend` sets `hwaccel`/`hwaccel_device` on `avformat` producers it
+  builds, which works after construction because MLT initialises the video
+  codec on the first frame, not on open.
+- `:set decode cpu|auto`, defaulting to `cpu`. Changing it rebuilds the
+  graph, because a producer that has already decoded has already read the
+  property.
+
+First numbers, `counter_1080p60.mkv`, 120 sequential full-scale pulls,
+Radeon render node, from `decode_cost_per_frame_is_reported_for_both_paths`:
+software 9.52 ms/frame, VAAPI 9.31 ms/frame. Readback plus the RGBA
+conversion dominates at 1080p, which is the plan's own warning made concrete
+and the reason the default stays `cpu`. 4K long-GOP numbers are still wanted
+before the default moves.
+
+Left open:
+
+- 4K long-GOP numbers, and the readback cost measured on its own.
+- The hardware frames are not bit-exact with software, so the slow test
+  compares them under `HARDWARE_DECODE_TOLERANCE`, which exists for that path
+  and no other.
 
 ### 2. Cheaper preview pixels
 
 Independent of any GPU work, and the reason a lot of GPU work may prove
 unnecessary.
 
-- Wire the existing proxy machinery (`davimci-analysis::proxy`) to a runtime
-  switch: `:set proxy on|off` is already listed as missing from the `:set`
-  registry.
+- Done: the proxy machinery (`davimci-analysis::proxy`) is on the runtime
+  switch `:set proxy on|off`.
 - Automatic `PreviewScale` reduction under sustained frame drops, restored when
   playback catches up. Scrubbing already drops resolution; playback should too.
 - Skip the presenter's full-resolution RGBA allocation when nothing but the
@@ -123,8 +142,8 @@ memory) and never touch it with the CPU.
 One user-visible knob per decision, all runtime, none of them project state:
 
 - `:set decode cpu|auto` - `auto` uses hardware decode where the probe says it
-  helps. Default `auto` once phase 1 has numbers; `cpu` until then.
-- `:set proxy on|off` - phase 2.
+  helps. Default `cpu`: the 1080p numbers do not yet justify `auto`.
+- `:set proxy on|off` - phase 2, wired.
 - `:set encode cpu|auto` - phase 5.
 
 Environment overrides stay debug aids, not the primary interface. Acceleration

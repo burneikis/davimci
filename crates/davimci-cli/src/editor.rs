@@ -16,7 +16,7 @@ use davimci_app::{
     AppError, Host, JobState, JobUpdate, Message, PluginEffects, Thumbnail, ThumbnailRequest,
     Waveform,
 };
-use davimci_backend::{PreviewScale, RenderBackend};
+use davimci_backend::{DecodePolicy, PreviewScale, RenderBackend};
 use davimci_cmd::{EditCommand, Session};
 use davimci_core::{ClipId, Frame, Selection, TrackId};
 use davimci_keys::MediaIntent;
@@ -101,6 +101,9 @@ pub struct Editor {
     /// `:set preview off`: no frame is pulled or composed, which
     /// is what makes a no-display session possible.
     preview: bool,
+    /// `:set decode cpu|auto`: what the session has *asked* for. What it
+    /// gets is the backend's business, since a probe may refuse.
+    decode: DecodePolicy,
     /// `:set previewheight` and `:set previewprotocol`. Held here
     /// with the other view settings and read by the terminal session; inert
     /// for the window, which has a texture instead of a band.
@@ -169,6 +172,7 @@ impl Editor {
             last_export: None,
             known_clips: std::collections::BTreeSet::new(),
             preview: true,
+            decode: DecodePolicy::default(),
             preview_height: None,
             preview_protocol: PreviewProtocol::Auto,
             numbers: Numbers::Off,
@@ -325,6 +329,14 @@ impl Editor {
             ExCommand::Set(crate::setting::Setting::Proxy(on)) => {
                 Some(Ok(self.proxies.set_enabled(*on)))
             }
+            // Acceleration is never a command: it changes how pixels are
+            // produced, not what the timeline holds. The backend answers
+            // with what it is actually doing, which may be software.
+            ExCommand::Set(crate::setting::Setting::Decode(policy)) => {
+                self.decode = *policy;
+                let status = self.backend.set_decode_policy(*policy);
+                Some(Ok(status.detail))
+            }
             ExCommand::Set(crate::setting::Setting::PreviewHeight(height)) => {
                 self.preview_height = Some(*height);
                 Some(Ok(height.describe()))
@@ -419,6 +431,16 @@ impl Editor {
         self.preview
     }
 
+    /// What the backend is actually decoding with, as a complete sentence.
+    ///
+    /// Asked of the backend rather than remembered here: `:set decode auto`
+    /// on a machine with no usable device is a session that keeps decoding
+    /// in software, and a report that echoed the request would hide that.
+    #[must_use]
+    pub fn acceleration(&self) -> davimci_backend::AccelerationStatus {
+        self.backend.acceleration()
+    }
+
     /// What `:set previewheight` asks for, or `None` if it was never set.
     #[must_use]
     pub fn preview_height(&self) -> Option<PreviewHeight> {
@@ -441,6 +463,7 @@ impl Editor {
         let clip = tl.track(head.track).and_then(|t| t.clip_at(head.frame));
         crate::setting::CurrentSettings {
             preview: Some(self.preview),
+            decode: Some(self.decode),
             proxy: Some(self.proxies.enabled()),
             preview_height: self.preview_height,
             preview_protocol: Some(self.preview_protocol),

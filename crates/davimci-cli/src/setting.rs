@@ -6,6 +6,7 @@
 //! only layers that own a session or a preview.
 
 pub use davimci_app::Numbers;
+pub use davimci_backend::DecodePolicy;
 use davimci_core::{ClipProps, Fps, Frame, Resolution, Transition};
 pub use davimci_keys::VisualStart;
 
@@ -53,6 +54,10 @@ pub enum Setting {
     TimelineResolution(Resolution),
     /// `preview on|off` - a view setting, never an edit.
     Preview(bool),
+    /// `decode cpu|auto` - whether the backend may decode in hardware. A
+    /// session policy about how pixels are produced, never about what the
+    /// timeline holds, so it never enters the undo log.
+    Decode(DecodePolicy),
     /// `proxy on|off` - whether an import that qualifies gets a proxy. A
     /// session policy: it changes what the next import does, never the
     /// timeline, so it stays out of the undo log.
@@ -142,6 +147,7 @@ impl Setting {
         matches!(
             self,
             Self::Preview(_)
+                | Self::Decode(_)
                 | Self::Proxy(_)
                 | Self::PreviewHeight(_)
                 | Self::PreviewProtocol(_)
@@ -166,6 +172,7 @@ pub const PROPERTIES: &[&str] = &[
     "timeline.fps",
     "timeline.resolution",
     "preview",
+    "decode",
     "proxy",
     "previewheight",
     "previewprotocol",
@@ -180,6 +187,7 @@ pub const PROPERTIES: &[&str] = &[
 pub fn values(prop: &str) -> Vec<String> {
     let words: &[&str] = match prop {
         "preview" | "proxy" => &["on", "off"],
+        "decode" => DecodePolicy::NAMES,
         "previewheight" => &["auto"],
         "previewprotocol" => &["auto", "kitty", "sixel", "blocks"],
         "numbers" => Numbers::NAMES,
@@ -197,6 +205,8 @@ pub fn values(prop: &str) -> Vec<String> {
 #[derive(Debug, Clone, Default)]
 pub struct CurrentSettings {
     pub preview: Option<bool>,
+    /// Whether the backend may decode in hardware.
+    pub decode: Option<DecodePolicy>,
     /// Whether proxies are generated for qualifying imports.
     pub proxy: Option<bool>,
     pub preview_height: Option<PreviewHeight>,
@@ -244,6 +254,7 @@ impl CurrentSettings {
             "preview" => self
                 .preview
                 .map(|on| if on { "on" } else { "off" }.to_string()),
+            "decode" => self.decode.map(|d| d.name().to_string()),
             "proxy" => self
                 .proxy
                 .map(|on| if on { "on" } else { "off" }.to_string()),
@@ -352,6 +363,9 @@ pub fn parse(prop: &str, value: &str) -> Result<Setting, CliError> {
             "off" | "false" | "0" => Ok(Setting::Preview(false)),
             _ => Err(bad(prop, "on or off")),
         },
+        "decode" => DecodePolicy::parse(value)
+            .map(Setting::Decode)
+            .ok_or_else(|| bad(prop, "cpu or auto")),
         "proxy" => match value {
             "on" | "true" | "1" => Ok(Setting::Proxy(true)),
             "off" | "false" | "0" => Ok(Setting::Proxy(false)),
@@ -567,6 +581,20 @@ mod tests {
     }
 
     #[test]
+    fn decode_parses_its_two_policies_and_stays_out_of_the_undo_log() {
+        assert_eq!(
+            parse("decode", "cpu").ok(),
+            Some(Setting::Decode(DecodePolicy::Cpu))
+        );
+        assert_eq!(
+            parse("decode", "auto").ok(),
+            Some(Setting::Decode(DecodePolicy::Auto))
+        );
+        assert!(parse("decode", "cpu").unwrap().is_view_only());
+        assert!(values("decode").contains(&"auto".to_string()));
+    }
+
+    #[test]
     fn visualstart_parses_both_units() {
         assert_eq!(
             parse("visualstart", "frame").ok(),
@@ -590,6 +618,7 @@ mod tests {
             ("timeline.resolution", "1920"),
             ("preview", "maybe"),
             ("proxy", "sometimes"),
+            ("decode", "gpu"),
             ("previewheight", "tall"),
             ("previewheight", "-1"),
             ("previewheight", "101%"),

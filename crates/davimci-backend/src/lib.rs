@@ -10,6 +10,7 @@
 //! which is what lets overlays exist and lets the GUI and TUI share one video
 //! path.
 
+pub mod accel;
 pub mod error;
 pub mod frame;
 pub mod job;
@@ -20,6 +21,7 @@ use std::path::Path;
 
 use davimci_core::{Fps, Frame, Resolution, Timeline};
 
+pub use accel::{AccelerationStatus, DecodePolicy};
 pub use error::{BackendError, Result};
 pub use frame::{PreviewScale, VideoFrame};
 pub use job::{RenderJob, RenderProgress, RenderSettings, RenderState, TransitionDef};
@@ -132,6 +134,21 @@ pub trait RenderBackend {
     /// registered.
     fn transition_names(&self) -> Vec<String> {
         Vec::new()
+    }
+
+    /// Ask for hardware decode, or ask to stay on the CPU.
+    ///
+    /// Infallible by construction: an unusable device is a recoverable
+    /// condition, so the backend degrades to software and says so in the
+    /// status it returns rather than failing the call.
+    fn set_decode_policy(&mut self, policy: DecodePolicy) -> AccelerationStatus {
+        let _ = policy;
+        AccelerationStatus::unsupported()
+    }
+
+    /// What acceleration is in use right now, for a health report.
+    fn acceleration(&self) -> AccelerationStatus {
+        AccelerationStatus::unsupported()
     }
 
     /// Begin an export. Progress is polled; the call itself does not block.

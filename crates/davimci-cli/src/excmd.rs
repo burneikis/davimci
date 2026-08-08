@@ -702,6 +702,7 @@ impl Workspace {
             // Handled by the editor; unreachable through this path.
             Setting::Preview(_) => Err(CliError::UnknownProperty("preview".into())),
             Setting::Proxy(_) => Err(CliError::UnknownProperty("proxy".into())),
+            Setting::Decode(_) => Err(CliError::UnknownProperty("decode".into())),
             Setting::PreviewHeight(_) => Err(CliError::UnknownProperty("previewheight".into())),
             Setting::PreviewProtocol(_) => Err(CliError::UnknownProperty("previewprotocol".into())),
             Setting::Numbers(_) => Err(CliError::UnknownProperty("numbers".into())),
@@ -720,6 +721,7 @@ impl Workspace {
         match setting {
             Setting::Preview(_) => Some("set preview"),
             Setting::Proxy(_) => Some("set proxy"),
+            Setting::Decode(_) => Some("set decode"),
             _ => None,
         }
     }
@@ -868,6 +870,7 @@ fn describe_setting(setting: &crate::setting::Setting) -> String {
         Setting::TimelineResolution(r) => format!("{r}"),
         Setting::Preview(on) => format!("preview {}", if *on { "on" } else { "off" }),
         Setting::Proxy(on) => format!("proxy {}", if *on { "on" } else { "off" }),
+        Setting::Decode(policy) => format!("decode {policy}"),
         Setting::PreviewHeight(height) => height.describe(),
         Setting::PreviewProtocol(p) => format!("preview protocol {}", p.name()),
         Setting::Numbers(n) => n.describe().to_string(),

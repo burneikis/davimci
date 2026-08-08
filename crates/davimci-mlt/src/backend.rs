@@ -21,8 +21,8 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use davimci_backend::{
-    BackendError, PreviewScale, RenderBackend, RenderJob, RenderProgress, RenderState, SourceInfo,
-    VideoFrame,
+    AccelerationStatus, BackendError, DecodePolicy, PreviewScale, RenderBackend, RenderJob,
+    RenderProgress, RenderState, SourceInfo, VideoFrame,
 };
 use davimci_core::{ClipId, Fps, Frame, Resolution, Timeline, TimelineProps};
 use davimci_mlt_sys as sys;
@@ -32,6 +32,7 @@ use crate::convert::{count, frames, mlt_int, size};
 use crate::ffi::{
     Consumer, EventHandle, Filter, Playlist, Producer, Profile, Tractor, Transition, attach_filter,
 };
+use crate::hwaccel::Acceleration;
 use crate::patch::{Patch, TrackOp, diff};
 use crate::projection::{
     AudioLayout, ClipEntry, Entry, Projection, Resource, StreamSelect, TrackProjection,
@@ -516,6 +517,15 @@ pub struct MltBackend {
     /// tests assert this: a backward walk that hitches is one whose runs were
     /// decoded on the caller's thread instead.
     pub prefetched: usize,
+    /// The decode policy and what the hardware probe found. Software decode
+    /// until the session opts in, so every default run - CI included - takes
+    /// the reference path.
+    accel: Acceleration,
+    /// How many producers were built with a hardware decoder attached, for
+    /// the benches and the slow tests: the policy is per source, so a count
+    /// is the only way to assert it took effect. A `Cell` because producers
+    /// are built behind a shared reference.
+    hardware_producers: std::cell::Cell<usize>,
 }
 
 impl MltBackend {
@@ -620,7 +630,58 @@ impl MltBackend {
             decodes: 0,
             cache_hits: 0,
             prefetched: 0,
+            accel: Acceleration::default(),
+            hardware_producers: std::cell::Cell::new(0),
         })
+    }
+
+    /// How many producers the current session opened with a hardware
+    /// decoder attached.
+    #[must_use]
+    pub fn hardware_producers(&self) -> usize {
+        self.hardware_producers.get()
+    }
+
+    /// Attach a hardware decoder to a freshly opened `avformat` producer,
+    /// when the probe says this source is worth it.
+    ///
+    /// Safe to do after construction: MLT opens the container when the
+    /// producer is created but does not initialise the video codec until the
+    /// first frame is pulled, which is where `hwaccel` is read. Frames still
+    /// come back through system memory, so they stay comparable with the
+    /// software path.
+    fn request_hardware_decode(&self, props: &mut crate::ffi::Properties<'_>) {
+        let codec = props.get("meta.media.0.codec.name").or_else(|| {
+            // Stream 0 is not always the video stream; the first video one is.
+            let streams = props.get_int("meta.media.nb_streams").max(0);
+            (0..streams)
+                .find(|i| {
+                    props.get(&format!("meta.media.{i}.stream.type")).as_deref() == Some("video")
+                })
+                .and_then(|i| props.get(&format!("meta.media.{i}.codec.name")))
+        });
+        let pixels = u64::from(
+            props
+                .get_int("meta.media.0.codec.width")
+                .max(0)
+                .unsigned_abs(),
+        ) * u64::from(
+            props
+                .get_int("meta.media.0.codec.height")
+                .max(0)
+                .unsigned_abs(),
+        );
+        let Some(choice) = self.accel.choose(codec.as_deref(), pixels) else {
+            return;
+        };
+        // A property MLT refuses is a source that keeps decoding in
+        // software, never a failed edit.
+        if props.set("hwaccel", choice.method).is_ok()
+            && props.set("hwaccel_device", &choice.device).is_ok()
+        {
+            self.hardware_producers
+                .set(self.hardware_producers.get() + 1);
+        }
     }
 
     /// The MLT XML for the current projection, for debugging and golden tests.
@@ -904,6 +965,9 @@ impl MltBackend {
                 // The card behind the glyphs has to be transparent, or the
                 // blend below composites an opaque rectangle over the video.
                 let _ = props.set("bgcolour", "#00000000");
+            }
+            if matches!(entry.resource, Resource::File(_)) {
+                self.request_hardware_decode(&mut props);
             }
             if let Resource::Offline { path } = &entry.resource {
                 props
@@ -1419,6 +1483,36 @@ impl RenderBackend for MltBackend {
         }
         self.projection = Some(next);
         Ok(())
+    }
+
+    /// Changing the policy rebuilds the graph, because `hwaccel` is read
+    /// when a producer first decodes and the producers in a live graph have
+    /// already done that. Cached stills were decoded under the old policy,
+    /// so they go too.
+    fn set_decode_policy(&mut self, policy: DecodePolicy) -> AccelerationStatus {
+        if policy == self.accel.policy() {
+            return self.accel.status();
+        }
+        let status = self.accel.set_policy(policy);
+        self.hardware_producers.set(0);
+        self.invalidate_frames();
+        if let Some(projection) = self.projection.take() {
+            // A rebuild that fails leaves the previous graph playing on the
+            // previous policy, which is a slower session rather than a
+            // broken one.
+            let rebuilt = self.rebuild(&projection).is_ok();
+            self.projection = Some(projection);
+            if !rebuilt {
+                return self
+                    .accel
+                    .record_failure("the render graph would not rebuild");
+            }
+        }
+        status
+    }
+
+    fn acceleration(&self) -> AccelerationStatus {
+        self.accel.status()
     }
 
     fn seek(&mut self, frame: Frame) -> Result<()> {

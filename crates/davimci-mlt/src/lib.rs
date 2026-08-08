@@ -23,6 +23,7 @@ mod cache;
 mod convert;
 pub mod error;
 pub mod ffi;
+pub mod hwaccel;
 pub mod patch;
 pub mod projection;
 #[cfg(feature = "slow-tests")]
@@ -32,5 +33,6 @@ pub mod xml;
 
 pub use backend::MltBackend;
 pub use error::MltError;
+pub use hwaccel::Acceleration;
 pub use projection::Projection;
 pub use xml::to_xml;

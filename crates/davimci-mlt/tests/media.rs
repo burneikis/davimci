@@ -340,6 +340,105 @@ fn editing_the_timeline_invalidates_cached_stills() {
     assert_eq!(b.cache_hits, hits, "a stale still survived an edit");
 }
 
+/// How far a hardware-decoded frame's mean channel may sit from the
+/// software-decoded one.
+///
+/// A separate, named tolerance for the hardware path only: VAAPI's colour
+/// conversion is not required to be bit-exact with swscale, so the software
+/// path stays the reference and keeps its exact assertions. Never apply this
+/// to a CPU-path comparison.
+const HARDWARE_DECODE_TOLERANCE: i32 = 4;
+
+/// A 1080p h264 fixture is exactly what phase 1 targets: long-GOP, above the
+/// readback threshold. Without a render device the test asserts the other
+/// half of the contract - that the session silently keeps decoding in
+/// software.
+#[test]
+fn hardware_decode_matches_software_decode_or_falls_back_to_it() {
+    let _mlt = davimci_mlt::test_support::media_lock();
+    let res = Resolution {
+        width: 1920,
+        height: 1080,
+    };
+    let tl = timeline_of("counter_1080p60.mkv", 600, res);
+
+    let mut cpu = MltBackend::new(tl.props).unwrap();
+    cpu.set_timeline(&tl).unwrap();
+    let software: Vec<[u8; 4]> = [0u64, 90, 300]
+        .iter()
+        .map(|f| {
+            cpu.frame_at(Frame(*f), PreviewScale::Full)
+                .unwrap()
+                .signature()
+        })
+        .collect();
+
+    let mut hw = MltBackend::new(tl.props).unwrap();
+    let status = hw.set_decode_policy(davimci_backend::DecodePolicy::Auto);
+    hw.set_timeline(&tl).unwrap();
+    let hardware: Vec<[u8; 4]> = [0u64, 90, 300]
+        .iter()
+        .map(|f| {
+            hw.frame_at(Frame(*f), PreviewScale::Full)
+                .unwrap()
+                .signature()
+        })
+        .collect();
+
+    if status.is_hardware() {
+        assert!(
+            hw.hardware_producers() > 0,
+            "a 1080p h264 source was not handed to the hardware decoder"
+        );
+    } else {
+        assert_eq!(hw.hardware_producers(), 0);
+        assert!(status.detail.ends_with('.'), "{}", status.detail);
+    }
+
+    for (want, got) in software.iter().zip(&hardware) {
+        for c in 0..4 {
+            let delta = i32::from(want[c]) - i32::from(got[c]);
+            assert!(
+                delta.abs() <= HARDWARE_DECODE_TOLERANCE,
+                "hardware decode disagreed with software: {want:?} vs {got:?}"
+            );
+        }
+    }
+}
+
+/// Phase 1's before/after number, printed rather than asserted: a wall clock
+/// is not a correctness claim, and a machine without a device has nothing to
+/// compare.
+#[test]
+fn decode_cost_per_frame_is_reported_for_both_paths() {
+    let _mlt = davimci_mlt::test_support::media_lock();
+    let res = Resolution {
+        width: 1920,
+        height: 1080,
+    };
+    let tl = timeline_of("counter_1080p60.mkv", 600, res);
+    let mut timings = Vec::new();
+    for policy in [
+        davimci_backend::DecodePolicy::Cpu,
+        davimci_backend::DecodePolicy::Auto,
+    ] {
+        let mut b = MltBackend::new(tl.props).unwrap();
+        let status = b.set_decode_policy(policy);
+        b.set_timeline(&tl).unwrap();
+        b.frame_at(Frame(0), PreviewScale::Full).unwrap();
+        let start = Instant::now();
+        for f in 1..=120u64 {
+            b.frame_at(Frame(f), PreviewScale::Full).unwrap();
+        }
+        let per_frame = start.elapsed().as_secs_f64() * 1000.0 / 120.0;
+        timings.push((policy, per_frame, status.is_hardware()));
+    }
+    for (policy, ms, hardware) in &timings {
+        println!("decode {policy}: {ms:.2} ms/frame (hardware: {hardware})");
+    }
+    assert_eq!(timings.len(), 2);
+}
+
 #[test]
 fn probe_reports_the_stream_graph_of_a_multitrack_mkv() {
     let _mlt = davimci_mlt::test_support::media_lock();

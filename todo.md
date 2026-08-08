@@ -3,8 +3,9 @@
 - move which-key to a plugin, make it not enabled by default
 
 # AI - deferred (not v1)
-- GPU/hardware acceleration (decode, planar upload, zero-copy import, hardware
-  encode) is planned in `docs/gpu_plan.md`
+- GPU/hardware acceleration is planned in `docs/gpu_plan.md`; hardware decode
+  (`:set decode cpu|auto`) has landed, planar upload, zero-copy import and
+  hardware encode have not
 - plugin distribution and package management
 - a custom subtitle layout engine in place of MLT's text producers
 
