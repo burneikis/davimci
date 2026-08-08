@@ -5,8 +5,8 @@
 # AI - deferred (not v1)
 - GPU/hardware acceleration (decode, planar upload, zero-copy import, hardware
   encode) is planned in `docs/gpu_plan.md`
-- a custom subtitle layout engine in place of MLT's text producers
 - plugin distribution and package management
+- a custom subtitle layout engine in place of MLT's text producers
 
 # Plugins
 - advanced audio: EQ, compression, noise reduction beyond `:duck`
