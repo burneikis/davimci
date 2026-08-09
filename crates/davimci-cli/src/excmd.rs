@@ -52,10 +52,11 @@ pub enum ExCommand {
     },
     /// `:track! ` - remove the focused track, which must be empty.
     RemoveTrack,
-    /// `:subtitle <text>` - a cue at the playhead on the focused text track.
-    /// A track the media did not bring has no cues to edit until something
-    /// makes one, and `i` edits a cue rather than creating it.
-    Subtitle(String),
+    /// `:text <text>` - a cue at the playhead on the focused text track,
+    /// which is a subtitle when the track is one. A track the media did not
+    /// bring has no cues to edit until something makes one, and `i` edits a
+    /// cue rather than creating it.
+    Text(String),
     /// `:group` - link the clips under the playhead into one group.
     Group,
     /// `:ungroup` - break the group holding the clip under the playhead.
@@ -99,7 +100,7 @@ pub enum ExCommand {
     Set(crate::setting::Setting),
 }
 
-/// How long a cue `:subtitle` writes lasts. A readable default that is
+/// How long a cue `:text` writes lasts. A readable default that is
 /// meant to be trimmed, not a claim about how long the line takes to say.
 pub const DEFAULT_CUE_MS: u64 = 2000;
 
@@ -228,11 +229,11 @@ pub fn parse(line: &str) -> Result<ExCommand, CliError> {
                 Err(line.usage(""))
             }
         }
-        "subtitle" | "sub" => {
+        "text" | "subtitle" | "sub" => {
             if line.tail.is_empty() {
                 Err(line.usage("<text>"))
             } else {
-                Ok(ExCommand::Subtitle(line.tail.to_string()))
+                Ok(ExCommand::Text(line.tail.to_string()))
             }
         }
         "group" => Ok(ExCommand::Group),
@@ -450,6 +451,7 @@ fn command_names() -> Vec<String> {
         "relink",
         "track",
         "track!",
+        "text",
         "subtitle",
         "sub",
         "group",
@@ -583,7 +585,7 @@ impl Workspace {
             ExCommand::Relink { old, new } => self.relink(old.as_deref(), new),
             ExCommand::AddTrack { kind, name } => self.add_track(*kind, name.clone()),
             ExCommand::RemoveTrack => self.remove_track(),
-            ExCommand::Subtitle(text) => self.subtitle(text),
+            ExCommand::Text(text) => self.text_cue(text),
             ExCommand::Group => self.group(),
             ExCommand::Ungroup => self.ungroup(),
         }
@@ -888,9 +890,9 @@ impl Workspace {
         Ok(ExOutcome::msg(format!("removed track {name}")))
     }
 
-    /// `:subtitle <text>`: a cue at the playhead, pushing later cues right so
+    /// `:text <text>`: a cue at the playhead, pushing later cues right so
     /// nothing already written is overwritten by typing a new line.
-    fn subtitle(&mut self, text: &str) -> Result<ExOutcome, CliError> {
+    fn text_cue(&mut self, text: &str) -> Result<ExOutcome, CliError> {
         let tl = self.current().timeline();
         let head = tl.playhead();
         let track = tl

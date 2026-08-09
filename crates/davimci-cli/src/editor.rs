@@ -138,9 +138,9 @@ pub struct Editor {
     /// setting is parsed here and enforced by the key engine.
     visual_start: davimci_keys::VisualStart,
     pending_visual_start: Option<davimci_keys::VisualStart>,
-    /// Whether `i` on a text track edits a subtitle, taken by the app. Only
-    /// the plugin that owns text tracks grants this, so the grammar never
-    /// has to know a subtitle workflow exists.
+    /// Whether `i` on a text track edits the cue under the playhead, taken by
+    /// the app. Only the plugin that owns text tracks grants this, so the
+    /// grammar never has to know a text workflow exists.
     pending_text_editing: Option<bool>,
     quit: bool,
 }
@@ -250,7 +250,7 @@ impl Editor {
         }
         self.notices.extend(problems);
         self.notices.extend(self.plugins.take_notices());
-        self.pending_text_editing = Some(self.plugins.is_active("subtitles"));
+        self.pending_text_editing = Some(self.plugins.is_active("text"));
     }
 
     /// Turn on the bundled plugins this project's own contents need.

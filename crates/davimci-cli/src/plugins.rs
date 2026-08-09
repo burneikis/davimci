@@ -133,12 +133,12 @@ pub const BUNDLED: &[Bundled] = &[
         },
     },
     Bundled {
-        name: "subtitles",
-        source: include_str!("../runtime/plugins/subtitles.lua"),
+        name: "text",
+        source: include_str!("../runtime/plugins/text.lua"),
         default_on: false,
         provides: Provides {
             transitions: &[],
-            motions: &["next_subtitle", "prev_subtitle"],
+            motions: &["next_text", "prev_text"],
             track_kinds: &["T"],
         },
     },

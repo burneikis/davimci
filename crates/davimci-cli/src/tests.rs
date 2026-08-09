@@ -124,8 +124,18 @@ fn the_ex_grammar_covers_the_spec_12_table() {
         (":track!", ExCommand::RemoveTrack),
         // A cue is a sentence, so it is the rest of the line, spaces and all.
         (
-            ":subtitle and then he said hello",
-            ExCommand::Subtitle("and then he said hello".into()),
+            ":text and then he said hello",
+            ExCommand::Text("and then he said hello".into()),
+        ),
+        // `:subtitle` predates `:text` and still writes the same cue, because
+        // a subtitle track is a text track.
+        (
+            ":subtitle a subtitle line",
+            ExCommand::Text("a subtitle line".into()),
+        ),
+        (
+            ":sub a subtitle line",
+            ExCommand::Text("a subtitle line".into()),
         ),
         (
             ":relink /old/a.mkv /new/a.mkv",
@@ -151,7 +161,7 @@ fn unknown_and_misused_commands_are_user_errors_with_a_sentence() {
         ":relink",
         ":track",
         ":track nonsense",
-        ":subtitle",
+        ":text",
     ] {
         let err = parse(line).unwrap_err();
         assert_eq!(err.class(), ErrorClass::User, "{line}");
@@ -952,7 +962,7 @@ fn a_text_track_can_be_created_and_written_into() {
 
     // A cue needs the text track focused; asking for one on V1 is refused
     // before anything is written.
-    let err = ws.run("subtitle hello", OnRecovery::Discard).unwrap_err();
+    let err = ws.run("text hello", OnRecovery::Discard).unwrap_err();
     assert_eq!(err.class(), ErrorClass::User);
     assert!(
         ws.current()
@@ -966,7 +976,7 @@ fn a_text_track_can_be_created_and_written_into() {
 
     ws.with_session(|s| s.set_playhead(davimci_core::Frame::ZERO, t1))
         .unwrap();
-    ws.run("subtitle hello there", OnRecovery::Discard).unwrap();
+    ws.run("text hello there", OnRecovery::Discard).unwrap();
     let clips = ws.current().timeline().track(t1).unwrap().clips().to_vec();
     assert_eq!(clips.len(), 1);
     assert_eq!(clips[0].text.as_deref(), Some("hello there"));

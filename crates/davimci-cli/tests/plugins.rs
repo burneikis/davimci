@@ -966,12 +966,12 @@ fn no_bundled_plugin_is_on_by_default_and_each_declares_what_it_owns() {
         Some("scenes")
     );
     assert_eq!(
-        davimci_cli::provider_of_motion("next_subtitle").map(|p| p.name),
-        Some("subtitles")
+        davimci_cli::provider_of_motion("next_text").map(|p| p.name),
+        Some("text")
     );
     assert_eq!(
         davimci_cli::provider_of_track_kind("T").map(|p| p.name),
-        Some("subtitles")
+        Some("text")
     );
     assert!(davimci_cli::provider_of_transition("dissolve").is_none());
     // Video and audio tracks are the editor, not a plugin's opinion.
@@ -979,22 +979,22 @@ fn no_bundled_plugin_is_on_by_default_and_each_declares_what_it_owns() {
     assert!(davimci_cli::provider_of_track_kind("A").is_none());
 }
 
-/// The subtitle workflow is a plugin, so its motions and its `]c` / `[c`
+/// The text-track workflow is a plugin, so its motions and its `]c` / `[c`
 /// bindings do not exist until it runs.
 #[test]
-fn subtitle_motions_arrive_only_with_the_subtitles_plugin() {
+fn text_motions_arrive_only_with_the_text_plugin() {
     let cfg = Scratch::with_config("subs-off", &[]);
     let mut plugins = Plugins::load(Some(&ConfigPaths::new(cfg.path())), cfg.path(), &DenyAll);
     let _ = plugins.take_notices();
-    assert!(!plugins.is_active("subtitles"));
-    assert!(!plugins.motion_names().iter().any(|m| m == "next_subtitle"));
+    assert!(!plugins.is_active("text"));
+    assert!(!plugins.motion_names().iter().any(|m| m == "next_text"));
 
     let owner = davimci_cli::provider_of_track_kind("T").expect("nothing owns text tracks");
     assert!(plugins.activate(owner));
     let notices = plugins.take_notices();
     assert!(notices.is_empty(), "{notices:?}");
-    assert!(plugins.motion_names().iter().any(|m| m == "next_subtitle"));
-    assert!(plugins.motion_names().iter().any(|m| m == "prev_subtitle"));
+    assert!(plugins.motion_names().iter().any(|m| m == "next_text"));
+    assert!(plugins.motion_names().iter().any(|m| m == "prev_text"));
     assert!(!matches!(
         plugins.keymap().lookup(&davimci_keys::Key::parse_str("]c")),
         davimci_keys::keymap::Lookup::NoMatch

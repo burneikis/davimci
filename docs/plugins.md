@@ -23,10 +23,10 @@ the only write path to something the model owns.
 - One transition type, `dissolve`. It is the fallback an unregistered name
   renders as, so a project always opens.
 - A clip's text payload and the commands that write it: `SetClipText`, and
-  `:track` / `:subtitle`, which make a track and put a cue on it. Creating
+  `:track` / `:text`, which make a track and put a cue on it. Creating
   what the model can hold is core however few people want it. What `i` means
   on a text track, and cue-to-cue movement, are not - those are the
-  `subtitles` plugin.
+  `text` plugin.
 - The view: timeline lanes, ruler, video pane, status line and `:` line
   (`davimci-app`, `davimci-present`, `davimci-gui`, `davimci-tui`).
 - The plugin surface itself: the Lua runtime, the event list, panels, and the
@@ -63,7 +63,7 @@ replace anything they set up.
 | `transitions` | off | `wipe_left`, `wipe_right`, `wipe_up`, `wipe_down`, `iris` | The video transition catalogue: a `luma` plus a geometry. |
 | `silence` | off | `next_silence`, `prev_silence` | Those motions and `]s` / `[s`, over a threshold you can change. |
 | `scenes` | off | `next_scene`, `prev_scene` | Those motions and `]v` / `[v`, over the detected cuts. |
-| `subtitles` | off | `next_subtitle`, `prev_subtitle`, `text` tracks | `]c` / `[c` cue to cue, and `i` on a text track editing the cue under the playhead instead of inserting media. Turns itself on when a text track appears, whether from an import or from `:track text`. |
+| `text` | off | `next_text`, `prev_text`, `text` tracks | `]c` / `[c` cue to cue, and `i` on a text track editing the cue under the playhead instead of inserting media. Subtitle tracks are text tracks, so imported cues land here too. Turns itself on when a text track appears, whether from an import or from `:track text`. |
 | `which-key` | off | - | Lists what can follow a half-typed key sequence. |
 
 **Every bundled plugin is off.** A default that is on in practice is core
@@ -80,7 +80,7 @@ turns it on when one of those names comes up.
 - **Opening a project** that uses `wipe_left` switches `transitions` on and
   says so in the status line. The file is what asks; the user did not have to
   know a plugin existed.
-- **Opening a project with a text track** switches `subtitles` on, so cues
+- **Opening a project with a text track** switches `text` on, so cues
   written elsewhere stay editable. The clip text and `SetClipText` are core -
   they are the model and its write path - but the workflow over them is not.
 - **Calling a motion** nothing registered names its owner: "the motion

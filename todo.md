@@ -3,7 +3,6 @@
 - plugin distribution and package management
 
 # Plugins
-- rename subtitles plugin to be 'text' plugin
 - advanced audio: EQ, compression, noise reduction beyond `:duck`
 - video effects beyond transform and transitions
 - ML-based scene detection hook
