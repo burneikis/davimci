@@ -36,4 +36,4 @@ pub use index::AnalysisIndex;
 pub use jobs::{JobEvent, JobId, JobRunner};
 pub use probe::{FfprobeProber, MediaInfo, Prober, StreamInfo, StreamKind};
 pub use proxy::{ProxyMap, ProxyPolicy, ProxySpec, export_guard};
-pub use subtitle::{Cue, parse_srt, to_srt};
+pub use subtitle::{Cue, extract_all, parse_srt, to_srt};

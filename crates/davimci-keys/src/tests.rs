@@ -366,7 +366,8 @@ fn soloing_a_muted_track_leaves_it_muted() {
 }
 
 /// `i` on a subtitle clip edits its text; anywhere else it asks for
-/// media. Same key, decided by what is under the playhead.
+/// media. Same key, decided by what is under the playhead - and only once
+/// the plugin that owns text tracks has granted text editing.
 #[test]
 fn i_edits_text_on_a_subtitle_track_and_picks_media_elsewhere() {
     use davimci_core::Frame;
@@ -386,6 +387,13 @@ fn i_edits_text_on_a_subtitle_track_and_picks_media_elsewhere() {
     );
 
     s.set_playhead(Frame::ZERO, t1).expect("T1 exists");
+    let out = feed(&mut e, &mut s, "i");
+    assert!(
+        matches!(out.last(), Some(Outcome::PickMedia(_))),
+        "without the subtitles plugin `i` has one meaning: {out:?}"
+    );
+
+    e.set_text_editing(true);
     let out = feed(&mut e, &mut s, "i");
     match out.last() {
         Some(Outcome::EditText { clip, text }) => {

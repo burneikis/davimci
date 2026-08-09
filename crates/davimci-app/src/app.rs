@@ -92,6 +92,15 @@ pub trait Host {
         None
     }
 
+    /// Whether `i` on a text track edits a subtitle, taken once.
+    ///
+    /// The plugin that owns text tracks is what switches this on, and the
+    /// host is the only layer that knows which plugins are running; the
+    /// grammar just needs the answer.
+    fn take_text_editing(&mut self) -> Option<bool> {
+        None
+    }
+
     /// The visual selection changed or was cleared. Only the loop
     /// cares: a loop that follows a selection ends when the selection does.
     fn selection_changed(&mut self, selection: Option<&Selection>) {
@@ -489,6 +498,16 @@ impl App {
         self.engine.set_visual_start(start);
     }
 
+    /// Let `i` on a text track open the subtitle under the playhead.
+    pub fn set_text_editing(&mut self, on: bool) {
+        self.engine.set_text_editing(on);
+    }
+
+    #[must_use]
+    pub fn text_editing(&self) -> bool {
+        self.engine.text_editing()
+    }
+
     #[must_use]
     pub fn visual_start(&self) -> davimci_keys::VisualStart {
         self.engine.visual_start()
@@ -613,18 +632,23 @@ impl App {
         }
         self.confirms.pop_front();
         host.confirmed(id, granted, &mut self.session);
-        self.adopt_host_keymap(host);
+        self.adopt_host_settings(host);
     }
 
-    /// Install a keymap the host rebuilt after loading more config.
-    fn adopt_host_keymap(&mut self, host: &mut dyn Host) {
+    /// Install what the host rebuilt after loading more config: bindings,
+    /// and the capabilities a plugin turning on has just granted.
+    fn adopt_host_settings(&mut self, host: &mut dyn Host) {
         if let Some(keymap) = host.take_keymap() {
             self.engine.set_keymap(keymap);
+        }
+        if let Some(on) = host.take_text_editing() {
+            self.engine.set_text_editing(on);
         }
     }
 
     /// Feed one key. The single entry point for every frontend's input path.
     pub fn key(&mut self, key: Key, host: &mut dyn Host) -> Response {
+        self.adopt_host_settings(host);
         // A pending question owns the keyboard before anything else: it is
         // asked because nothing may proceed until it is answered.
         if let Some(id) = self.confirms.front().map(|c| c.id) {

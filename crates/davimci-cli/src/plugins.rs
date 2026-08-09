@@ -59,12 +59,17 @@ pub struct Provides {
     pub transitions: &'static [&'static str],
     /// Motions, as a config or a macro names them.
     pub motions: &'static [&'static str],
+    /// Track kinds this plugin is the editing workflow for, as
+    /// [`davimci_core::TrackKind::prefix`] spells them. A project carrying
+    /// one is what asks for the plugin.
+    pub track_kinds: &'static [&'static str],
 }
 
 impl Provides {
     const NOTHING: Self = Self {
         transitions: &[],
         motions: &[],
+        track_kinds: &[],
     };
 }
 
@@ -82,6 +87,14 @@ pub fn provider_of_motion(name: &str) -> Option<&'static Bundled> {
     BUNDLED.iter().find(|p| p.provides.motions.contains(&name))
 }
 
+/// The bundled plugin that owns `tag` as a track kind, if any.
+#[must_use]
+pub fn provider_of_track_kind(tag: &str) -> Option<&'static Bundled> {
+    BUNDLED
+        .iter()
+        .find(|p| p.provides.track_kinds.contains(&tag))
+}
+
 /// The plugins every build ships with, run before the rest of the user
 /// config so a config can rebind or replace what they set up.
 ///
@@ -96,6 +109,7 @@ pub const BUNDLED: &[Bundled] = &[
         provides: Provides {
             transitions: &["wipe_left", "wipe_right", "wipe_up", "wipe_down", "iris"],
             motions: &[],
+            track_kinds: &[],
         },
     },
     Bundled {
@@ -105,6 +119,7 @@ pub const BUNDLED: &[Bundled] = &[
         provides: Provides {
             transitions: &[],
             motions: &["next_silence", "prev_silence"],
+            track_kinds: &[],
         },
     },
     Bundled {
@@ -114,6 +129,17 @@ pub const BUNDLED: &[Bundled] = &[
         provides: Provides {
             transitions: &[],
             motions: &["next_scene", "prev_scene"],
+            track_kinds: &[],
+        },
+    },
+    Bundled {
+        name: "subtitles",
+        source: include_str!("../runtime/plugins/subtitles.lua"),
+        default_on: false,
+        provides: Provides {
+            transitions: &[],
+            motions: &["next_subtitle", "prev_subtitle"],
+            track_kinds: &["T"],
         },
     },
     Bundled {

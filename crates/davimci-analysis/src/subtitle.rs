@@ -4,6 +4,7 @@
 //! Parsing is pure - SRT text in, cues out - so the import path can be tested
 //! without ffmpeg; [`extract`] is the only part that shells out.
 
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::Path;
 use std::process::Command;
@@ -127,6 +128,32 @@ pub fn extract(path: &Path, index: u32) -> Result<Vec<Cue>, AnalysisError> {
         });
     }
     Ok(parse_srt(&String::from_utf8_lossy(&out.stdout)))
+}
+
+/// Every subtitle stream in `info`, keyed by stream index, for
+/// [`crate::ImportOptions::subtitles`].
+///
+/// A stream that will not extract costs its own cues and nothing else: the
+/// import still lands, the track is still there, and the reason comes back
+/// to be shown. Refusing the whole file because one subtitle stream is in a
+/// codec ffmpeg cannot write as SRT would trade a video for a caption.
+#[must_use]
+pub fn extract_all(info: &crate::MediaInfo) -> (BTreeMap<u32, Vec<Cue>>, Vec<AnalysisError>) {
+    let path = Path::new(&info.path);
+    let mut cues = BTreeMap::new();
+    let mut problems = Vec::new();
+    for stream in &info.streams {
+        if stream.kind != crate::StreamKind::Subtitle {
+            continue;
+        }
+        match extract(path, stream.index) {
+            Ok(c) => {
+                cues.insert(stream.index, c);
+            }
+            Err(e) => problems.push(e),
+        }
+    }
+    (cues, problems)
 }
 
 #[cfg(test)]

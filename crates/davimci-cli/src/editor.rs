@@ -138,6 +138,10 @@ pub struct Editor {
     /// setting is parsed here and enforced by the key engine.
     visual_start: davimci_keys::VisualStart,
     pending_visual_start: Option<davimci_keys::VisualStart>,
+    /// Whether `i` on a text track edits a subtitle, taken by the app. Only
+    /// the plugin that owns text tracks grants this, so the grammar never
+    /// has to know a subtitle workflow exists.
+    pending_text_editing: Option<bool>,
     quit: bool,
 }
 
@@ -196,6 +200,7 @@ impl Editor {
             pending_keymap: None,
             visual_start: davimci_keys::VisualStart::default(),
             pending_visual_start: None,
+            pending_text_editing: None,
             quit: false,
         }
     }
@@ -245,21 +250,31 @@ impl Editor {
         }
         self.notices.extend(problems);
         self.notices.extend(self.plugins.take_notices());
+        self.pending_text_editing = Some(self.plugins.is_active("subtitles"));
     }
 
     /// Turn on the bundled plugins this project's own contents need.
     ///
     /// A saved project names transition types, and a type nothing registered
     /// renders as a dissolve - silently losing what the editor that wrote
-    /// the file could do. So the project is what asks: opening one that uses
-    /// a wipe switches the plugin that owns wipes on, and says so. A config
-    /// that disabled the plugin outright is still obeyed.
+    /// the file could do; a project with a text track opened without the
+    /// plugin that owns text tracks would have cues nothing could edit. So
+    /// the project is what asks: opening one that uses a wipe switches the
+    /// plugin that owns wipes on, and says so. A config that disabled the
+    /// plugin outright is still obeyed.
     fn activate_plugins_for(&mut self, session: &Session) {
-        // One message per plugin, naming the first type that needed it: a
+        // One message per plugin, naming the first thing that needed it: a
         // project with fifty wipes should not be fifty notices.
-        let mut wanted: std::collections::BTreeMap<&'static str, String> =
+        let mut wanted: std::collections::BTreeMap<&'static str, Need> =
             std::collections::BTreeMap::new();
         for track in session.timeline().tracks() {
+            if let Some(owner) = crate::plugins::provider_of_track_kind(track.kind.prefix())
+                && !self.plugins.is_active(owner.name)
+            {
+                wanted
+                    .entry(owner.name)
+                    .or_insert_with(|| Need::TrackKind(track.name.clone()));
+            }
             for clip in track.clips() {
                 let Some(kind) = clip.transition_in.as_ref().map(|t| t.kind.as_str()) else {
                     continue;
@@ -270,23 +285,28 @@ impl Editor {
                 if self.plugins.is_active(owner.name) {
                     continue;
                 }
-                wanted.entry(owner.name).or_insert_with(|| kind.to_string());
+                wanted
+                    .entry(owner.name)
+                    .or_insert_with(|| Need::Transition(kind.to_string()));
             }
         }
         if wanted.is_empty() {
             return;
         }
-        for (owner, kind) in wanted {
+        for (owner, need) in wanted {
             let Some(plugin) = crate::plugins::BUNDLED.iter().find(|p| p.name == owner) else {
                 continue;
             };
             if self.plugins.activate(plugin) {
                 self.notices.push(Message::info(format!(
-                    "enabled the bundled '{owner}' plugin: this project uses the transition '{kind}'"
+                    "enabled the bundled '{owner}' plugin: {}",
+                    need.because()
                 )));
             } else {
                 self.notices.push(Message::warning(format!(
-                    "this project uses the transition '{kind}', which the disabled '{owner}' plugin owns; it renders as a dissolve"
+                    "{}, {}",
+                    need.because(),
+                    need.cost(owner)
                 )));
             }
         }
@@ -727,6 +747,7 @@ impl Editor {
             }
         };
 
+        let (subtitles, unread) = davimci_analysis::extract_all(&info);
         let opts = ImportOptions {
             at,
             // The playhead is on a track; that is where the user is looking.
@@ -734,8 +755,14 @@ impl Editor {
             // Imported media pushes what follows aside rather than erasing
             // it; nothing is destroyed by picking a file.
             placement: Placement::Insert,
+            subtitles,
             ..ImportOptions::default()
         };
+        for problem in &unread {
+            self.notices.push(Message::warning(format!(
+                "a subtitle stream was imported without its cues: {problem}"
+            )));
+        }
         let ids = session.reserve_ids(davimci_analysis::ids_needed(&info, &opts));
         let plan = davimci_analysis::plan(session.timeline(), &info, &opts, &ids)?;
 
@@ -1292,6 +1319,35 @@ impl Editor {
     }
 }
 
+/// What in a project asked for a bundled plugin, and what it costs when the
+/// user has disabled that plugin anyway.
+enum Need {
+    /// A transition type only that plugin registers.
+    Transition(String),
+    /// A track of a kind that plugin is the workflow for, by track name.
+    TrackKind(String),
+}
+
+impl Need {
+    fn because(&self) -> String {
+        match self {
+            Self::Transition(kind) => format!("this project uses the transition '{kind}'"),
+            Self::TrackKind(track) => format!("this project has the text track {track}"),
+        }
+    }
+
+    fn cost(&self, owner: &str) -> String {
+        match self {
+            Self::Transition(_) => {
+                format!("which the disabled '{owner}' plugin owns; it renders as a dissolve")
+            }
+            Self::TrackKind(_) => format!(
+                "which the disabled '{owner}' plugin edits; its cues stay in the project but cannot be edited"
+            ),
+        }
+    }
+}
+
 /// Every split inside a command, including the implicit ones a ripple edit
 /// expands into.
 fn splits(command: &EditCommand) -> Vec<(TrackId, Frame)> {
@@ -1517,6 +1573,10 @@ impl Host for Editor {
 
     fn take_visual_start(&mut self) -> Option<davimci_keys::VisualStart> {
         self.pending_visual_start.take()
+    }
+
+    fn take_text_editing(&mut self) -> Option<bool> {
+        self.pending_text_editing.take()
     }
 
     fn command(

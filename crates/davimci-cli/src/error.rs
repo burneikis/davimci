@@ -49,6 +49,9 @@ pub enum CliError {
     #[error("there is no track named {0} in this timeline")]
     NoSuchTrack(String),
 
+    #[error("the focused track is not a text track; :track text makes one")]
+    NotATextTrack,
+
     #[error("{0} needs analysis of that track; it is still running or has not started")]
     AnalysisNotReady(&'static str),
 
@@ -125,6 +128,7 @@ impl Classify for CliError {
             | Self::NothingToReplace
             | Self::NoClipUnderPlayhead(_)
             | Self::NoSuchTrack(_)
+            | Self::NotATextTrack
             | Self::UnknownProperty(_)
             | Self::BadPropertyValue { .. }
             | Self::AnalysisNotReady(_)

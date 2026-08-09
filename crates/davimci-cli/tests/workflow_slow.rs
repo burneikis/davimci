@@ -170,25 +170,18 @@ fn the_whole_spec_one_workflow_survives_a_real_import_and_export() {
         &mut editor,
     );
 
-    // 5. Add a subtitle.
-    app.session_mut()
-        .exec(&EditCommand::AddTrack {
-            kind: TrackKind::Text,
-            name: None,
-            new_id: None,
-        })
-        .unwrap();
+    // 5. Add a subtitle, through the `:` lines a user types rather than by
+    //    building the commands here.
+    app.event(Event::Command(":track text".to_string()), &mut editor);
     let text = app.session().timeline().tracks().last().unwrap().id;
-    let mut cue = Clip::generated(ClipId(0), "cue", Frame(0), Frame(25));
-    cue.text = Some("hello".into());
-    app.session_mut()
-        .exec(&EditCommand::Insert {
-            track: text,
-            at: Frame(0),
-            clip: cue,
-            new_id: None,
-        })
-        .unwrap();
+    app.session_mut().set_playhead(Frame(0), text).unwrap();
+    app.event(Event::Command(":subtitle hello".to_string()), &mut editor);
+    assert_eq!(
+        app.session().timeline().track(text).unwrap().clips()[0]
+            .text
+            .as_deref(),
+        Some("hello")
+    );
 
     // The golden snapshot: the shape of the timeline the workflow built. It
     // is compared as text so a structural regression reads as a diff rather
@@ -212,10 +205,11 @@ fn the_whole_spec_one_workflow_survives_a_real_import_and_export() {
             "A1 2 clip(s)".to_string(),
             "A2 2 clip(s)".to_string(),
             "A3 2 clip(s)".to_string(),
-            // The fixture carries two subtitle streams of its own; the cue
-            // this workflow adds lands on a third text track.
-            "T1 0 clip(s)".to_string(),
-            "T2 0 clip(s)".to_string(),
+            // The fixture carries two subtitle streams of its own, each
+            // with one cue, which the import reads; the cue this workflow
+            // types lands on a third text track.
+            "T1 1 clip(s)".to_string(),
+            "T2 1 clip(s)".to_string(),
             "O1 1 clip(s)".to_string(),
             "T3 1 clip(s)".to_string(),
         ],
@@ -255,10 +249,28 @@ fn the_whole_spec_one_workflow_survives_a_real_import_and_export() {
     )
     .parse::<u64>()
     .expect("ffprobe should count frames");
+    // The picture, not the timeline: a plain `:export` carries no subtitles,
+    // so a text track is not part of what gets rendered and a cue sitting
+    // past the last frame of video does not lengthen the file. The ripple
+    // delete shortened the picture and left the loose cues where they were,
+    // which is exactly the case that tells the two lengths apart.
+    let picture = app
+        .session()
+        .timeline()
+        .tracks()
+        .iter()
+        .filter(|t| matches!(t.kind, TrackKind::Video | TrackKind::Audio))
+        .map(davimci_core::Track::duration)
+        .max()
+        .unwrap();
     assert_eq!(
         frames,
-        app.session().timeline().duration().get(),
-        "the export is not as long as the timeline"
+        picture.get(),
+        "the export is not as long as the picture"
+    );
+    assert!(
+        app.session().timeline().duration() > picture,
+        "the imported cues should outlast the shortened picture"
     );
 
     // And every edit still undoes, after a real export.
@@ -270,4 +282,43 @@ fn the_whole_spec_one_workflow_survives_a_real_import_and_export() {
     app.session().timeline().check_invariants().unwrap();
 
     let _ = std::fs::remove_file(&out);
+}
+
+/// Importing a container with subtitle streams brings the cues in, not just
+/// the empty tracks: a caption written elsewhere has to survive the import
+/// or the text track is a promise the editor does not keep.
+///
+/// Regression: `:e <media>` and the media picker both built their
+/// `ImportOptions` without ever calling `subtitle::extract`, so every
+/// imported subtitle stream produced a track with nothing on it.
+#[test]
+fn importing_a_container_with_subtitles_brings_the_cues_with_it() {
+    let mut ws = Workspace::new(std::env::temp_dir()).without_autosave();
+    ws.import_media(&fixture("multitrack.mkv"), &davimci_analysis::FfprobeProber)
+        .expect("the fixture should import");
+    let tl = ws.current().timeline();
+
+    let text: Vec<_> = tl
+        .tracks()
+        .iter()
+        .filter(|t| t.kind == TrackKind::Text)
+        .collect();
+    assert_eq!(text.len(), 2, "the fixture has two subtitle streams");
+    for track in text {
+        let clips = track.clips();
+        assert_eq!(clips.len(), 1, "{} came in with no cues", track.name);
+        // `scripts/gen-fixtures.sh` writes one cue per stream, and its text
+        // names the stream it belongs to.
+        assert!(
+            clips[0]
+                .text
+                .as_deref()
+                .is_some_and(|t| t.starts_with("subtitle track")),
+            "{} carried {:?}",
+            track.name,
+            clips[0].text
+        );
+        assert!(clips[0].media.is_none(), "a cue is a generated clip");
+    }
+    tl.check_invariants().unwrap();
 }

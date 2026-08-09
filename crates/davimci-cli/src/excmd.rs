@@ -4,6 +4,7 @@
 //! filesystem: [`parse`] is a pure function from a command line to an
 //! [`ExCommand`], and [`Workspace::run`] is the only part that touches disk.
 
+use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use davimci_analysis::{FfprobeProber, ImportOptions, Prober};
@@ -42,6 +43,19 @@ pub enum ExCommand {
     Buffer(usize),
     /// `:relink [old] <new>`
     Relink { old: Option<String>, new: String },
+    /// `:track <kind> [name]` - add an empty track. Import makes a track
+    /// per stream, which leaves no way to start one the media did not bring:
+    /// a text track written from scratch above all.
+    AddTrack {
+        kind: davimci_core::TrackKind,
+        name: Option<String>,
+    },
+    /// `:track! ` - remove the focused track, which must be empty.
+    RemoveTrack,
+    /// `:subtitle <text>` - a cue at the playhead on the focused text track.
+    /// A track the media did not bring has no cues to edit until something
+    /// makes one, and `i` edits a cue rather than creating it.
+    Subtitle(String),
     /// `:group` - link the clips under the playhead into one group.
     Group,
     /// `:ungroup` - break the group holding the clip under the playhead.
@@ -84,6 +98,10 @@ pub enum ExCommand {
     /// the model will take.
     Set(crate::setting::Setting),
 }
+
+/// How long a cue `:subtitle` writes lasts. A readable default that is
+/// meant to be trimmed, not a claim about how long the line takes to say.
+pub const DEFAULT_CUE_MS: u64 = 2000;
 
 /// Default target for `:normalize`, in dBFS RMS. Conservative on purpose:
 /// normalising should not be the thing that introduces clipping.
@@ -202,10 +220,46 @@ pub fn parse(line: &str) -> Result<ExCommand, CliError> {
                 .map_err(|_| CliError::NoSuchBuffer(n))
         }
         "relink" => parse_relink(&line),
+        "track" => parse_track(&line),
+        "track!" => {
+            if line.args.is_empty() {
+                Ok(ExCommand::RemoveTrack)
+            } else {
+                Err(line.usage(""))
+            }
+        }
+        "subtitle" | "sub" => {
+            if line.tail.is_empty() {
+                Err(line.usage("<text>"))
+            } else {
+                Ok(ExCommand::Subtitle(line.tail.to_string()))
+            }
+        }
         "group" => Ok(ExCommand::Group),
         "ungroup" => Ok(ExCommand::Ungroup),
         other => Err(CliError::UnknownCommand(other.to_string())),
     }
+}
+
+/// `:track <kind> [name]`. The kind is spelled as the lanes are labelled -
+/// `V`, `A`, `T`, `O` - or in full, so it reads the same as what the user
+/// sees on screen.
+fn parse_track(line: &Line<'_>) -> Result<ExCommand, CliError> {
+    use davimci_core::TrackKind;
+    const USAGE: &str = "<video|audio|text|overlay> [name]";
+    let (kind, name) = match line.args.as_slice() {
+        [kind] => (*kind, None),
+        [kind, name] => (*kind, Some((*name).to_string())),
+        _ => return Err(line.usage(USAGE)),
+    };
+    let kind = match kind.to_ascii_lowercase().as_str() {
+        "v" | "video" => TrackKind::Video,
+        "a" | "audio" => TrackKind::Audio,
+        "t" | "text" | "subtitle" | "subtitles" => TrackKind::Text,
+        "o" | "overlay" => TrackKind::Overlay,
+        _ => return Err(line.usage(USAGE)),
+    };
+    Ok(ExCommand::AddTrack { kind, name })
 }
 
 /// `--preset <name>` is a trailing flag, so the path before it may contain
@@ -394,6 +448,10 @@ fn command_names() -> Vec<String> {
         "b",
         "buffer",
         "relink",
+        "track",
+        "track!",
+        "subtitle",
+        "sub",
         "group",
         "ungroup",
     ]
@@ -441,22 +499,10 @@ impl Workspace {
                 let saved = self.write(path.clone())?;
                 Ok(ExOutcome::msg(format!("wrote {}", saved.display())))
             }
-            ExCommand::Quit { force } => {
-                self.close(*force)?;
-                Ok(if self.should_quit() {
-                    ExOutcome::Quit
-                } else {
-                    ExOutcome::msg(format!("now editing {}", self.current().name()))
-                })
-            }
+            ExCommand::Quit { force } => self.close_buffer(*force),
             ExCommand::WriteQuit(path) => {
                 self.write(path.clone())?;
-                self.close(false)?;
-                Ok(if self.should_quit() {
-                    ExOutcome::Quit
-                } else {
-                    ExOutcome::msg(format!("now editing {}", self.current().name()))
-                })
+                self.close_buffer(false)
             }
             ExCommand::Edit(path) => self.edit(path, on_recovery),
             // Exporting needs a render backend, which a workspace has no
@@ -483,18 +529,9 @@ impl Workspace {
                 Ok(ExOutcome::msg(format!("frame {}", target.get())))
             }
             ExCommand::List => Ok(ExOutcome::Lines(self.list())),
-            ExCommand::BufferNext => {
-                self.next_buffer()?;
-                Ok(ExOutcome::msg(self.current().name()))
-            }
-            ExCommand::BufferPrev => {
-                self.prev_buffer()?;
-                Ok(ExOutcome::msg(self.current().name()))
-            }
-            ExCommand::Buffer(n) => {
-                self.goto_buffer_id(*n)?;
-                Ok(ExOutcome::msg(self.current().name()))
-            }
+            ExCommand::BufferNext => self.named(Self::next_buffer),
+            ExCommand::BufferPrev => self.named(Self::prev_buffer),
+            ExCommand::Buffer(n) => self.named(|ws| ws.goto_buffer_id(*n)),
             // Gain and fades are clip properties, so the workspace can run
             // them: no backend, no analysis, just an undoable edit.
             ExCommand::Gain(db) => {
@@ -544,9 +581,33 @@ impl Workspace {
                 None => self.set(setting, selection),
             },
             ExCommand::Relink { old, new } => self.relink(old.as_deref(), new),
+            ExCommand::AddTrack { kind, name } => self.add_track(*kind, name.clone()),
+            ExCommand::RemoveTrack => self.remove_track(),
+            ExCommand::Subtitle(text) => self.subtitle(text),
             ExCommand::Group => self.group(),
             ExCommand::Ungroup => self.ungroup(),
         }
+    }
+
+    /// Close the current buffer, answering with whichever is now current -
+    /// or with `Quit` when that was the last one.
+    fn close_buffer(&mut self, force: bool) -> Result<ExOutcome, CliError> {
+        self.close(force)?;
+        Ok(if self.should_quit() {
+            ExOutcome::Quit
+        } else {
+            ExOutcome::msg(format!("now editing {}", self.current().name()))
+        })
+    }
+
+    /// Switch buffers and answer with the name of the one now current, which
+    /// is all `:bn`, `:bp` and `:b` differ in.
+    fn named(
+        &mut self,
+        switch: impl FnOnce(&mut Self) -> Result<(), CliError>,
+    ) -> Result<ExOutcome, CliError> {
+        switch(self)?;
+        Ok(ExOutcome::msg(self.current().name()))
     }
 
     /// `:e <path>`: a davimci project opens as a project, anything else is
@@ -587,14 +648,26 @@ impl Workspace {
     ) -> Result<ExOutcome, CliError> {
         let info = prober.probe(path)?;
         self.new_timeline(TimelineProps::default());
-        let imported =
-            self.with_session(|s| davimci_analysis::import(s, &info, &ImportOptions::default()))?;
+        let (subtitles, problems) = davimci_analysis::extract_all(&info);
+        let opts = ImportOptions {
+            subtitles,
+            ..ImportOptions::default()
+        };
+        let imported = self.with_session(|s| davimci_analysis::import(s, &info, &opts))?;
         self.sync_autosave()?;
-        Ok(ExOutcome::msg(format!(
+        let mut msg = format!(
             "imported {} ({} tracks)",
             imported.path,
             imported.mapping.len()
-        )))
+        );
+        if let Some(first) = problems.first() {
+            let _ = write!(
+                msg,
+                "; {} subtitle stream(s) unread: {first}",
+                problems.len()
+            );
+        }
+        Ok(ExOutcome::msg(msg))
     }
 
     /// `:set <property> <value>` on the selection, or on the clip under the
@@ -775,6 +848,73 @@ impl Workspace {
     ///
     /// The clips have to be frame-aligned, which is the model's rule for a
     /// group and the reason this takes the whole column rather than a range.
+    /// `:track <kind> [name]`. The name the timeline settles on is reported,
+    /// because leaving it out is the common case and the user still has to
+    /// know what to type at `:duck` afterwards.
+    fn add_track(
+        &mut self,
+        kind: davimci_core::TrackKind,
+        name: Option<String>,
+    ) -> Result<ExOutcome, CliError> {
+        let before: std::collections::BTreeSet<_> = self
+            .current()
+            .timeline()
+            .tracks()
+            .iter()
+            .map(|t| t.id)
+            .collect();
+        self.exec(&EditCommand::AddTrack {
+            kind,
+            name,
+            new_id: None,
+        })?;
+        let added = self
+            .current()
+            .timeline()
+            .tracks()
+            .iter()
+            .find(|t| !before.contains(&t.id))
+            .map_or_else(String::new, |t| t.name.clone());
+        Ok(ExOutcome::msg(format!("added track {added}")))
+    }
+
+    /// `:track!`: remove the focused track. The model refuses a track with
+    /// clips on it, so this can never be a silent way to lose an edit.
+    fn remove_track(&mut self) -> Result<ExOutcome, CliError> {
+        let tl = self.current().timeline();
+        let track = tl.playhead().track;
+        let name = tl.track(track).map_or_else(String::new, |t| t.name.clone());
+        self.exec(&EditCommand::RemoveTrack { track })?;
+        Ok(ExOutcome::msg(format!("removed track {name}")))
+    }
+
+    /// `:subtitle <text>`: a cue at the playhead, pushing later cues right so
+    /// nothing already written is overwritten by typing a new line.
+    fn subtitle(&mut self, text: &str) -> Result<ExOutcome, CliError> {
+        let tl = self.current().timeline();
+        let head = tl.playhead();
+        let track = tl
+            .track(head.track)
+            .filter(|t| t.kind == davimci_core::TrackKind::Text)
+            .ok_or(CliError::NotATextTrack)?;
+        let track = track.id;
+        let duration = Frame(crate::audio::frames_for_ms(DEFAULT_CUE_MS, tl.props.fps));
+        let mut clip = davimci_core::Clip::generated(
+            davimci_core::ClipId(0),
+            text.lines().next().unwrap_or(text),
+            head.frame,
+            duration,
+        );
+        clip.text = Some(text.to_string());
+        self.exec(&EditCommand::Insert {
+            track,
+            at: head.frame,
+            clip,
+            new_id: None,
+        })?;
+        Ok(ExOutcome::msg(format!("cue added at {}", head.frame)))
+    }
+
     fn group(&mut self) -> Result<ExOutcome, CliError> {
         let tl = self.current().timeline();
         let frame = tl.playhead().frame;

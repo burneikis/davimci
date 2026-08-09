@@ -108,6 +108,26 @@ fn the_ex_grammar_covers_the_spec_12_table() {
         (":group", ExCommand::Group),
         (":ungroup", ExCommand::Ungroup),
         (
+            ":track text",
+            ExCommand::AddTrack {
+                kind: davimci_core::TrackKind::Text,
+                name: None,
+            },
+        ),
+        (
+            ":track A Music",
+            ExCommand::AddTrack {
+                kind: davimci_core::TrackKind::Audio,
+                name: Some("Music".into()),
+            },
+        ),
+        (":track!", ExCommand::RemoveTrack),
+        // A cue is a sentence, so it is the rest of the line, spaces and all.
+        (
+            ":subtitle and then he said hello",
+            ExCommand::Subtitle("and then he said hello".into()),
+        ),
+        (
             ":relink /old/a.mkv /new/a.mkv",
             ExCommand::Relink {
                 old: Some("/old/a.mkv".into()),
@@ -124,7 +144,15 @@ fn the_ex_grammar_covers_the_spec_12_table() {
 
 #[test]
 fn unknown_and_misused_commands_are_user_errors_with_a_sentence() {
-    for line in [":wat", ":e", ":b", ":relink"] {
+    for line in [
+        ":wat",
+        ":e",
+        ":b",
+        ":relink",
+        ":track",
+        ":track nonsense",
+        ":subtitle",
+    ] {
         let err = parse(line).unwrap_err();
         assert_eq!(err.class(), ErrorClass::User, "{line}");
         assert!(!err.user_message().is_empty(), "{line}");
@@ -904,6 +932,82 @@ fn group_and_ungroup_bracket_a_link() {
         ExOutcome::Message("2 clips ungrouped".into())
     );
     assert_eq!(groups(&ws), vec![None, None]);
+}
+
+// text tracks
+
+/// A text track can be made from nothing and written into: import is not
+/// the only way to get one, and a track with no cues is not a dead end.
+#[test]
+fn a_text_track_can_be_created_and_written_into() {
+    let dir = Scratch::new("texttrack");
+    let mut ws = Workspace::new(dir.path()).without_autosave();
+    seeded(&mut ws, fixture(&[("V1", &[(0, 300, "a")])]));
+
+    assert_eq!(
+        ws.run("track text", OnRecovery::Discard).unwrap(),
+        ExOutcome::Message("added track T1".into())
+    );
+    let t1 = davimci_core::testing::track_id(ws.current().timeline(), "T1");
+
+    // A cue needs the text track focused; asking for one on V1 is refused
+    // before anything is written.
+    let err = ws.run("subtitle hello", OnRecovery::Discard).unwrap_err();
+    assert_eq!(err.class(), ErrorClass::User);
+    assert!(
+        ws.current()
+            .timeline()
+            .track(t1)
+            .unwrap()
+            .clips()
+            .is_empty(),
+        "a refused cue still wrote to the timeline"
+    );
+
+    ws.with_session(|s| s.set_playhead(davimci_core::Frame::ZERO, t1))
+        .unwrap();
+    ws.run("subtitle hello there", OnRecovery::Discard).unwrap();
+    let clips = ws.current().timeline().track(t1).unwrap().clips().to_vec();
+    assert_eq!(clips.len(), 1);
+    assert_eq!(clips[0].text.as_deref(), Some("hello there"));
+    assert!(clips[0].media.is_none(), "a cue is a generated clip");
+
+    // And one undo takes the cue back out.
+    ws.with_session(davimci_cmd::Session::undo).unwrap();
+    assert!(
+        ws.current()
+            .timeline()
+            .track(t1)
+            .unwrap()
+            .clips()
+            .is_empty()
+    );
+}
+
+/// An empty track can be removed again; one with clips on it cannot, so
+/// `:track!` is never a quiet way to lose an edit.
+#[test]
+fn only_an_empty_track_can_be_removed() {
+    let dir = Scratch::new("rmtrack");
+    let mut ws = Workspace::new(dir.path()).without_autosave();
+    seeded(&mut ws, fixture(&[("V1", &[(0, 300, "a")])]));
+    let v1 = davimci_core::testing::track_id(ws.current().timeline(), "V1");
+    ws.with_session(|s| s.set_playhead(davimci_core::Frame::ZERO, v1))
+        .unwrap();
+
+    let err = ws.run("track!", OnRecovery::Discard).unwrap_err();
+    assert!(!err.user_message().is_empty());
+    assert!(ws.current().timeline().track(v1).is_some());
+
+    ws.run("track text", OnRecovery::Discard).unwrap();
+    let t1 = davimci_core::testing::track_id(ws.current().timeline(), "T1");
+    ws.with_session(|s| s.set_playhead(davimci_core::Frame::ZERO, t1))
+        .unwrap();
+    assert_eq!(
+        ws.run("track!", OnRecovery::Discard).unwrap(),
+        ExOutcome::Message("removed track T1".into())
+    );
+    assert!(ws.current().timeline().track(t1).is_none());
 }
 
 #[test]

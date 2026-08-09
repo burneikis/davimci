@@ -88,7 +88,8 @@ pub enum Outcome {
     PickMedia(MediaIntent),
     /// `i` on a subtitle clip: INSERT mode is scoped to text editing there
     ///, so the caller should open a text buffer rather than
-    /// a media picker.
+    /// a media picker. Only reachable while text editing is switched on,
+    /// which the `subtitles` plugin is what asks for.
     EditText {
         clip: ClipId,
         text: String,
@@ -160,6 +161,10 @@ pub struct Engine {
     jump_cfg: JumpConfig,
     visual_start: VisualStart,
     zoom: Zoom,
+    /// Whether `i` on a text track edits the subtitle under the playhead.
+    /// Off until the plugin that owns text tracks switches it on, so a
+    /// build with no subtitle plugin has one meaning for `i`.
+    text_editing: bool,
     /// Registers named with `"<reg>`; distinct from the
     /// clipboard/anonymous register used when none is named.
     registers: HashMap<char, Register>,
@@ -181,6 +186,7 @@ impl Engine {
             jump_cfg: JumpConfig::default(),
             visual_start: VisualStart::default(),
             zoom: Zoom::default(),
+            text_editing: false,
             registers: HashMap::new(),
         }
     }
@@ -244,6 +250,16 @@ impl Engine {
     /// live selection under the user is not what a setting is for.
     pub fn set_visual_start(&mut self, start: VisualStart) {
         self.visual_start = start;
+    }
+
+    /// Let `i` on a text track open the subtitle under the playhead.
+    pub fn set_text_editing(&mut self, on: bool) {
+        self.text_editing = on;
+    }
+
+    #[must_use]
+    pub fn text_editing(&self) -> bool {
+        self.text_editing
     }
 
     #[must_use]
@@ -393,7 +409,7 @@ impl Engine {
                 ripple,
                 register,
             } => self.do_paste(before, ripple, register, session),
-            Action::InsertMedia => do_insert_media(session),
+            Action::InsertMedia => do_insert_media(session, self.text_editing),
             Action::AppendMedia => Outcome::PickMedia(MediaIntent::Append),
             Action::Replace => do_replace(session),
             Action::Undo => run(session.undo()),
@@ -1022,7 +1038,10 @@ fn or_error(result: Result<Outcome, KeysError>) -> Outcome {
 
 /// `i` means two different things by context: on a text track it edits the
 /// subtitle under the playhead, anywhere else it inserts media.
-fn do_insert_media(session: &Session) -> Outcome {
+fn do_insert_media(session: &Session, text_editing: bool) -> Outcome {
+    if !text_editing {
+        return Outcome::PickMedia(MediaIntent::Insert);
+    }
     match text_clip_under_playhead(session) {
         Some((clip, text)) => Outcome::EditText { clip, text },
         None => Outcome::PickMedia(MediaIntent::Insert),

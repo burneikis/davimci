@@ -641,7 +641,8 @@ fn a_click_past_the_end_clamps_to_the_last_frame() {
 }
 
 /// INSERT on a subtitle clip edits text, and Esc commits it as an
-/// ordinary undoable command.
+/// ordinary undoable command - once the plugin that owns text tracks has
+/// granted text editing.
 #[test]
 fn a_committed_subtitle_edit_is_one_undoable_command() {
     let mut tl = fixture(&[("V1", &[(0, 100, "a")]), ("T1", &[])]);
@@ -654,6 +655,7 @@ fn a_committed_subtitle_edit_is_one_undoable_command() {
     let mut session = Session::new(tl);
     session.set_playhead(Frame::ZERO, t1).unwrap();
     let mut app = App::new(session);
+    app.set_text_editing(true);
 
     let response = app.key(Key::parse_str("i").remove(0), &mut NullHost);
     assert_eq!(
