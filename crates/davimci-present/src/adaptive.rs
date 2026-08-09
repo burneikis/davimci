@@ -7,9 +7,9 @@
 //! the scale to switch to, or nothing.
 //!
 //! Two properties matter more than the exact thresholds. It must not
-//! oscillate - a reduction is only reconsidered after a full clean window -
-//! and it must never reduce a scale the *user* chose, only one it chose
-//! itself.
+//! oscillate - taking a step back up costs a consumer restart, so it needs
+//! [`CLEAN_WINDOWS`] spotless windows in a row, not one - and it must never
+//! reduce a scale the *user* chose, only one it chose itself.
 
 use davimci_backend::PreviewScale;
 
@@ -24,6 +24,14 @@ const WINDOW: u64 = 60;
 /// frames presented in the same window.
 const DROP_PERCENT: u64 = 20;
 
+/// Clean windows in a row before resolution is given back.
+///
+/// Every change of scale restarts the preview consumer, which is an audible
+/// gap in the sound and a stalled picture. One clean window is not evidence
+/// the machine can hold the higher scale, and acting on it makes playback
+/// pause about once a second as the policy steps up and straight back down.
+const CLEAN_WINDOWS: u8 = 3;
+
 /// The adaptive scale policy for one preview.
 #[derive(Debug, Clone, Default)]
 pub struct AdaptiveScale {
@@ -33,6 +41,8 @@ pub struct AdaptiveScale {
     /// How many steps down this policy has taken. Only steps it took are
     /// ever given back, so `:set` - or a small window - keeps its scale.
     steps_down: u8,
+    /// Consecutive windows with no dropped frame.
+    clean: u8,
 }
 
 /// What the policy decided, so the caller has a sentence to show without
@@ -84,6 +94,7 @@ impl AdaptiveScale {
             scale = up(scale);
         }
         self.steps_down = 0;
+        self.clean = 0;
         (scale != current).then_some(ScaleChange {
             scale,
             reduced: false,
@@ -103,6 +114,14 @@ impl AdaptiveScale {
         let presented = stats.presented.saturating_sub(self.baseline.presented);
         self.reset(stats);
 
+        // Only a window with no drops at all counts as clean: a window that
+        // is merely under the threshold is one already at its limit.
+        self.clean = if dropped == 0 {
+            self.clean.saturating_add(1)
+        } else {
+            0
+        };
+
         let struggling = presented > 0 && dropped * 100 > presented * DROP_PERCENT;
         if struggling {
             let next = down(current);
@@ -115,10 +134,8 @@ impl AdaptiveScale {
                 reduced: true,
             });
         }
-        // Only a window with no drops at all gives resolution back: a window
-        // that is merely under the threshold is one that is already at its
-        // limit, and stepping up would start the cycle again.
-        if dropped == 0 && self.steps_down > 0 {
+        if self.clean >= CLEAN_WINDOWS && self.steps_down > 0 {
+            self.clean = 0;
             self.steps_down -= 1;
             let next = up(current);
             if next != current {
@@ -209,6 +226,16 @@ mod tests {
         let mut acc = stats(0, 0);
         run(&mut policy, &mut scale, &mut acc, 1, 1);
         assert_eq!(scale, PreviewScale::Half);
+        // A step up restarts the consumer, so it waits for `CLEAN_WINDOWS`
+        // windows in a row rather than the first one.
+        let early = run(
+            &mut policy,
+            &mut scale,
+            &mut acc,
+            u64::from(CLEAN_WINDOWS) - 1,
+            0,
+        );
+        assert!(early.is_empty(), "one clean window is not evidence");
         let back = run(&mut policy, &mut scale, &mut acc, 1, 0);
         assert_eq!(scale, PreviewScale::Full);
         assert_eq!(back.len(), 1);
@@ -239,6 +266,26 @@ mod tests {
         assert_eq!(released.scale, PreviewScale::Full);
         assert!(!released.reduced);
         assert!(policy.release(released.scale).is_none());
+    }
+
+    /// Regression: a policy that stepped back up after a single clean window
+    /// ping-ponged between two scales, and every change restarts the preview
+    /// consumer - playback paused about once a second.
+    #[test]
+    fn alternating_windows_never_step_back_up() {
+        let mut policy = AdaptiveScale::new();
+        let mut scale = PreviewScale::Full;
+        let mut acc = stats(0, 0);
+        let mut changes = Vec::new();
+        for _ in 0..8 {
+            changes.extend(run(&mut policy, &mut scale, &mut acc, 1, 1));
+            changes.extend(run(&mut policy, &mut scale, &mut acc, 1, 0));
+        }
+        assert!(
+            changes.iter().all(|c| c.reduced),
+            "a scale given back between two bad windows is a restart per second"
+        );
+        assert_eq!(scale, PreviewScale::Quarter);
     }
 
     #[test]

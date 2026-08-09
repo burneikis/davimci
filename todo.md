@@ -3,10 +3,6 @@
 - move which-key to a plugin, make it not enabled by default
 
 # AI - deferred (not v1)
-- GPU/hardware acceleration: see `docs/gpu_plan.md`. Hardware decode, cheaper
-  preview pixels, planar upload for stills and hardware encode have landed;
-  planar frames through the playback queue and zero-copy surface import have
-  not, the latter blocked by MLT handing out system memory
 - plugin distribution and package management
 - a custom subtitle layout engine in place of MLT's text producers
 

@@ -83,7 +83,8 @@ struct PreviewShared {
 struct Preview {
     consumer: Consumer,
     shared: Arc<PreviewShared>,
-    // Dropped before the consumer, so no callback can fire into freed state.
+    // Kept alive for as long as the consumer that fires it. `Drop` stops the
+    // consumer first, so no callback can reach freed state.
     _event: EventHandle,
     scale: PreviewScale,
     /// Set while the consumer runs backwards. MLT decodes a backwards pass
@@ -97,6 +98,17 @@ struct Preview {
 impl Preview {
     fn is_reverse(&self) -> bool {
         self.scrub.is_some()
+    }
+}
+
+impl Drop for Preview {
+    /// The consumer runs on a thread of its own that reads the listener's
+    /// shared state and pulls from the graph. It is stopped before anything
+    /// it touches is released; field order alone would free the shared state
+    /// under a running thread.
+    fn drop(&mut self) {
+        self.consumer.stop();
+        drop(self.scrub.take());
     }
 }
 
@@ -481,6 +493,10 @@ struct Render {
 }
 
 /// MLT-backed renderer and previewer.
+///
+/// Teardown order is load-bearing and is spelled out in [`Drop`]: field
+/// order would close the profile and the graph while the preview consumer's
+/// thread and the prefetch worker are still reading them.
 #[derive(Debug)]
 pub struct MltBackend {
     profile: Profile,
@@ -601,6 +617,25 @@ impl MltBackend {
             self.prefetch_below(frame, scale);
         }
         Ok(served)
+    }
+
+    /// Stop everything running on a thread of its own, then release the
+    /// services those threads read.
+    ///
+    /// Shared by [`Drop`] and by any path that has to reach a quiet backend
+    /// before touching the profile.
+    fn shutdown(&mut self) {
+        if let Some(r) = self.render.as_mut() {
+            r.consumer.stop();
+        }
+        self.render = None;
+        // The consumer's thread pulls from `graph`; the workers own graphs of
+        // their own built from `profile`. Both are joined before either is
+        // freed.
+        self.preview = None;
+        self.prefetch = None;
+        self.graph = None;
+        self.projection = None;
     }
 
     /// Create a backend for a timeline's profile.
@@ -1368,6 +1403,19 @@ unsafe extern "C" fn on_frame_show(
             });
         }
     });
+}
+
+impl Drop for MltBackend {
+    /// Quit is a teardown order, not a free order.
+    ///
+    /// Declaration order would close the profile first and the graph second,
+    /// while the preview consumer's thread is still pulling from that graph
+    /// and the scrub and prefetch workers are still decoding from graphs of
+    /// their own. The consumer then never stops and the join at the end of
+    /// the drop never returns: closing the window hangs.
+    fn drop(&mut self) {
+        self.shutdown();
+    }
 }
 
 impl MltBackend {
