@@ -471,12 +471,13 @@ impl Runtime {
         Ok(t)
     }
 
-    /// The `ctx` a motion receives: the playhead, the focused track, and a
-    /// `timeline` with `find_next`.
+    /// The `ctx` a motion receives: the playhead, the focused track, the
+    /// per-track snapshot, and a `timeline` with `find_next`.
     fn motion_ctx(&self, env: &MotionEnv, pending: &Rc<Cell<bool>>) -> mlua::Result<Table> {
         let ctx = self.lua.create_table()?;
         ctx.set("playhead", env.playhead)?;
         ctx.set("track", env.focused_track.as_str())?;
+        ctx.set("tracks", self.tracks_table(env)?)?;
 
         let env = env.clone();
         let pending = Rc::clone(pending);
@@ -499,6 +500,28 @@ impl Runtime {
         timeline.set("find_next", find_next)?;
         ctx.set("timeline", timeline)?;
         Ok(ctx)
+    }
+
+    /// What each track is, without its samples: those are what `find_next`
+    /// is for, and copying every hop into Lua on each motion would cost more
+    /// than the query does.
+    fn tracks_table(&self, env: &MotionEnv) -> mlua::Result<Table> {
+        let tracks = self.lua.create_table()?;
+        for (name, data) in &env.tracks {
+            let t = self.lua.create_table()?;
+            t.set("kind", data.kind.as_str())?;
+            t.set("analysed", data.analysed)?;
+            t.set(
+                "clip_bounds",
+                self.lua.create_sequence_from(data.clip_bounds.clone())?,
+            )?;
+            t.set(
+                "scene_changes",
+                self.lua.create_sequence_from(data.scene_changes.clone())?,
+            )?;
+            tracks.set(name.as_str(), t)?;
+        }
+        Ok(tracks)
     }
 }
 

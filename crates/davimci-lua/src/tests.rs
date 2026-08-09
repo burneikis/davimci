@@ -164,6 +164,7 @@ fn env_with_audio(analysed: bool) -> MotionEnv {
             ],
             clip_bounds: vec![0, 100],
             analysed,
+            ..TrackData::default()
         },
     )
 }

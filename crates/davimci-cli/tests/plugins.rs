@@ -383,7 +383,11 @@ require("davimci.transition").register("sparkle", {
         &DenyAll,
     );
     let _ = plugins.take_notices();
-    let defs = plugins.transitions();
+    let defs: Vec<_> = plugins
+        .transitions()
+        .into_iter()
+        .filter(|t| t.name == "sparkle")
+        .collect();
     assert_eq!(defs.len(), 1, "the config's type did not reach the seam");
     assert_eq!(defs[0].service, "frei0r.sparkle");
 
@@ -561,7 +565,13 @@ fn plugin_choices_are_read_before_the_bundled_plugins_run() {
     let mut plugins = Plugins::load(Some(&ConfigPaths::new(cfg.path())), cfg.path(), &DenyAll);
     assert!(plugins.take_notices().is_empty());
     for p in davimci_cli::BUNDLED {
-        assert_eq!(plugins.wants(p), p.name == "which-key");
+        // The one it named is on; the rest keep whatever they ship as.
+        let expected = if p.name == "which-key" {
+            true
+        } else {
+            p.default_on
+        };
+        assert_eq!(plugins.wants(p), expected, "{}", p.name);
     }
 }
 
@@ -681,5 +691,154 @@ fn project_local_config_runs_only_after_the_question_is_answered_in_the_view() {
         clips(&app),
         before + 1,
         "a trusted binding did not reach the grammar"
+    );
+}
+
+/// The wipes are a plugin now: with it on, the names reach the backend seam
+/// with the geometry they need, and with it off the editor still renders
+/// the one type it has.
+#[test]
+fn the_transition_catalogue_comes_from_the_bundled_plugin() {
+    let on = Scratch::with_config("transitions-on", &[("init.lua", "")]);
+    let plugins = Plugins::load(Some(&ConfigPaths::new(on.path())), on.path(), &DenyAll);
+    let wipe = plugins
+        .transitions()
+        .into_iter()
+        .find(|t| t.name == "wipe_left")
+        .expect("the bundled transitions plugin registered no wipe");
+    assert_eq!(wipe.service, "luma");
+    assert!(
+        wipe.props.iter().any(|(k, _)| k == "resource"),
+        "a wipe without a geometry is a dissolve"
+    );
+
+    let off = Scratch::with_config(
+        "transitions-off",
+        &[(
+            "plugins.lua",
+            r#"require("davimci.plugins").disable("transitions")"#,
+        )],
+    );
+    let plugins = Plugins::load(Some(&ConfigPaths::new(off.path())), off.path(), &DenyAll);
+    assert!(
+        plugins.transitions().is_empty(),
+        "a disabled plugin still registered its types"
+    );
+    // The name still renders, as the dissolve every build has.
+    assert_eq!(
+        davimci_mlt::transitions::spec("wipe_left", davimci_core::TrackKind::Video).service,
+        "luma"
+    );
+}
+
+/// Silence and scene jumps are plugin policy over core measurements: the
+/// motions exist by default and are bound where the keymap left room.
+#[test]
+fn the_analysis_plugins_register_their_motions_and_bindings() {
+    let cfg = Scratch::with_config("analysis-plugins", &[("init.lua", "")]);
+    let plugins = Plugins::load(Some(&ConfigPaths::new(cfg.path())), cfg.path(), &DenyAll);
+    let names = plugins.motion_names();
+    for wanted in ["next_silence", "prev_silence", "next_scene", "prev_scene"] {
+        assert!(names.contains(&wanted.to_string()), "{wanted} is missing");
+    }
+    let keymap = plugins.keymap();
+    for keys in ["]s", "[s", "]v", "[v"] {
+        assert!(
+            !matches!(
+                keymap.lookup(&Key::parse_str(keys)),
+                davimci_keys::keymap::Lookup::NoMatch
+            ),
+            "{keys} is unbound"
+        );
+    }
+}
+
+/// A scene jump lands on a detected cut, and the detection comes from the
+/// snapshot rather than from anything the plugin measured itself.
+#[test]
+fn a_scene_motion_lands_on_the_next_detected_cut() {
+    let cfg = Scratch::with_config("scene-motion", &[("init.lua", "")]);
+    let mut plugins = Plugins::load(Some(&ConfigPaths::new(cfg.path())), cfg.path(), &DenyAll);
+    let env = davimci_lua::MotionEnv::new(50, "V1").with_track(
+        "V1",
+        davimci_lua::TrackData {
+            kind: "video".into(),
+            analysed: true,
+            scene_changes: vec![10, 120, 300],
+            ..davimci_lua::TrackData::default()
+        },
+    );
+    let answer = plugins
+        .run_motion("next_scene", &davimci_lua::Opts::new(), &env)
+        .expect("the bundled motion runs");
+    assert_eq!(answer, davimci_lua::MotionAnswer::Found(120));
+
+    let answer = plugins
+        .run_motion("prev_scene", &davimci_lua::Opts::new(), &env)
+        .expect("the bundled motion runs");
+    assert_eq!(answer, davimci_lua::MotionAnswer::Found(10));
+
+    // Nothing detected is "no match", never a guessed frame.
+    let bare = davimci_lua::MotionEnv::new(50, "V1").with_track(
+        "V1",
+        davimci_lua::TrackData {
+            kind: "video".into(),
+            analysed: true,
+            ..davimci_lua::TrackData::default()
+        },
+    );
+    assert_eq!(
+        plugins
+            .run_motion("next_scene", &davimci_lua::Opts::new(), &bare)
+            .unwrap(),
+        davimci_lua::MotionAnswer::NoMatch
+    );
+}
+
+/// The silence motion is a threshold over the hops core measured, and an
+/// unanalysed track answers "not yet" rather than a wrong frame.
+#[test]
+fn a_silence_motion_lands_on_the_first_quiet_hop() {
+    let cfg = Scratch::with_config("silence-motion", &[("init.lua", "")]);
+    let mut plugins = Plugins::load(Some(&ConfigPaths::new(cfg.path())), cfg.path(), &DenyAll);
+    let sample = |frame: u64, db: f64| davimci_lua::Sample {
+        frame,
+        rms_db: db,
+        peak_db: db,
+    };
+    let env = davimci_lua::MotionEnv::new(0, "A1").with_track(
+        "A1",
+        davimci_lua::TrackData {
+            kind: "audio".into(),
+            analysed: true,
+            samples: vec![
+                sample(10, -6.0),
+                sample(20, -12.0),
+                sample(30, -80.0),
+                sample(40, -3.0),
+            ],
+            ..davimci_lua::TrackData::default()
+        },
+    );
+    assert_eq!(
+        plugins
+            .run_motion("next_silence", &davimci_lua::Opts::new(), &env)
+            .unwrap(),
+        davimci_lua::MotionAnswer::Found(30)
+    );
+
+    let pending = davimci_lua::MotionEnv::new(0, "A1").with_track(
+        "A1",
+        davimci_lua::TrackData {
+            kind: "audio".into(),
+            analysed: false,
+            ..davimci_lua::TrackData::default()
+        },
+    );
+    assert_eq!(
+        plugins
+            .run_motion("next_silence", &davimci_lua::Opts::new(), &pending)
+            .unwrap(),
+        davimci_lua::MotionAnswer::Pending
     );
 }

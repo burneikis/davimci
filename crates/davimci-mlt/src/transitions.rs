@@ -2,9 +2,14 @@
 //!
 //! The model stores a transition as a *name*, because types are extensible
 //! and `davimci-core` may not know what MLT is. This is the one place that
-//! turns a name into a service: video types composite with `luma`, audio
-//! types cross-fade with `mix`, and an unknown name falls back to the
-//! default rather than failing a render.
+//! turns a name into a service: audio types cross-fade with `mix`, and any
+//! video name that nothing registered falls back to a plain dissolve rather
+//! than failing a render.
+//!
+//! The catalogue of video types is not core. `dissolve` exists here because
+//! it is the fallback every project needs to open; the wipes and the iris
+//! are the bundled `transitions` plugin, registered through the same
+//! `davimci.transition.register` a third-party plugin uses.
 
 use std::collections::BTreeMap;
 use std::sync::{OnceLock, RwLock};
@@ -30,33 +35,9 @@ impl TransitionSpec {
     }
 }
 
-/// Built-in video transition types, by name.
-///
-/// A `luma` with no resource is a plain dissolve; the wipes are the same
-/// service driven by a soft-edged geometry, which is how MLT itself expresses
-/// them.
-type Builtin = (
-    &'static str,
-    &'static str,
-    &'static [(&'static str, &'static str)],
-);
-
-const VIDEO: &[Builtin] = &[
-    ("dissolve", "luma", &[]),
-    ("wipe_left", "luma", &[("resource", "%luma01.pgm")]),
-    (
-        "wipe_right",
-        "luma",
-        &[("resource", "%luma01.pgm"), ("invert", "1")],
-    ),
-    ("wipe_up", "luma", &[("resource", "%luma03.pgm")]),
-    (
-        "wipe_down",
-        "luma",
-        &[("resource", "%luma03.pgm"), ("invert", "1")],
-    ),
-    ("iris", "luma", &[("resource", "%luma05.pgm")]),
-];
+/// The one video type the backend knows without a plugin: a `luma` with no
+/// resource, which is a plain cross-dissolve.
+const DEFAULT: &str = "dissolve";
 
 /// Types registered at runtime, on top of the built-ins.
 ///
@@ -91,17 +72,16 @@ pub fn registered_names() -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Every transition type a user may name.
+/// Every transition type a user may name without a plugin.
 #[must_use]
 pub fn names() -> Vec<&'static str> {
-    VIDEO.iter().map(|(n, _, _)| *n).collect()
+    vec![DEFAULT]
 }
 
-/// Whether `name` is a transition type this build can render.
+/// Whether `name` is a transition type this session can render as named.
 #[must_use]
 pub fn is_known(name: &str) -> bool {
-    VIDEO.iter().any(|(n, _, _)| *n == name)
-        || registered().read().is_ok_and(|m| m.contains_key(name))
+    name == DEFAULT || registered().read().is_ok_and(|m| m.contains_key(name))
 }
 
 /// The service and properties for `kind` on a track of `track_kind`.
@@ -118,12 +98,9 @@ pub fn spec(kind: &str, track_kind: TrackKind) -> TransitionSpec {
     if let Some(found) = registered().read().ok().and_then(|m| m.get(kind).cloned()) {
         return found;
     }
-    VIDEO.iter().find(|(n, _, _)| *n == kind).map_or_else(
-        // An unregistered name still renders: a project made with a config
-        // type has to open in a build that does not have that config.
-        || TransitionSpec::new("luma", &[]),
-        |(_, service, props)| TransitionSpec::new(service, props),
-    )
+    // An unregistered name still renders: a project made with a wipe has to
+    // open in a session where the transitions plugin is off.
+    TransitionSpec::new("luma", &[])
 }
 
 #[cfg(test)]
@@ -137,11 +114,25 @@ mod tests {
     }
 
     #[test]
-    fn a_dissolve_is_a_bare_luma_and_a_wipe_carries_a_geometry() {
+    fn a_dissolve_is_a_bare_luma_and_needs_no_plugin() {
         assert_eq!(spec("dissolve", TrackKind::Video).service, "luma");
         assert!(spec("dissolve", TrackKind::Video).props.is_empty());
+        assert!(is_known("dissolve"));
+        assert_eq!(names(), vec!["dissolve"]);
+    }
+
+    /// A wipe is a plugin's registration, not a built-in: before it is
+    /// registered the name still renders, as a dissolve.
+    #[test]
+    fn a_wipe_carries_its_geometry_only_once_a_plugin_registers_it() {
+        assert!(spec("wipe_test", TrackKind::Video).props.is_empty());
+        register(
+            "wipe_test",
+            "luma",
+            vec![("resource".into(), "%luma01.pgm".into())],
+        );
         assert!(
-            spec("wipe_left", TrackKind::Video)
+            spec("wipe_test", TrackKind::Video)
                 .props
                 .iter()
                 .any(|(k, _)| k == "resource")
@@ -171,7 +162,7 @@ mod tests {
     #[test]
     fn an_unknown_type_degrades_to_a_dissolve() {
         assert_eq!(spec("sparkle", TrackKind::Video).service, "luma");
+        assert!(spec("sparkle", TrackKind::Video).props.is_empty());
         assert!(!is_known("sparkle"));
-        assert!(names().contains(&"dissolve"));
     }
 }

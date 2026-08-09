@@ -130,6 +130,7 @@ fn a_lua_motion_bound_to_a_key_resolves_against_the_analysis_snapshot() {
             ],
             clip_bounds: vec![0, 300],
             analysed: true,
+            ..TrackData::default()
         },
     );
     let mut opts = Opts::new();

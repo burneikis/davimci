@@ -1171,6 +1171,11 @@ impl Editor {
                         peak_db: f64::from(hop.peak_db),
                     })
                     .collect();
+                data.scene_changes = a
+                    .scene_changes
+                    .iter()
+                    .map(|ms| frame_of_ms(*ms, fps))
+                    .collect();
             }
             data.clip_bounds = track
                 .clips()

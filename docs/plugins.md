@@ -17,7 +17,11 @@ the only write path to something the model owns.
   `davimci-keys`): the grammar is the interface, not a feature of it.
 - Project load, save and autosave, including conforming a source on import.
 - The render backend seam and export (`davimci-backend`, `davimci-mlt`):
-  preview, seek, scrub and encode.
+  preview, seek, scrub and encode, including the measurements analysis takes
+  (loudness hops, detected scene changes). Measuring is core; what the
+  numbers mean for an edit is not.
+- One transition type, `dissolve`. It is the fallback an unregistered name
+  renders as, so a project always opens.
 - The view: timeline lanes, ruler, video pane, status line and `:` line
   (`davimci-app`, `davimci-present`, `davimci-gui`, `davimci-tui`).
 - The plugin surface itself: the Lua runtime, the event list, panels, and the
@@ -29,10 +33,11 @@ A thing is a plugin when it is a *view* of state core already has, or an
 opinion about how to edit that the model does not need to hold.
 
 - Anything that only reads events and draws: which-key above all.
-- Extra transition types, export presets, and effect chains beyond what the
-  backend already exposes by name.
-- Analysis-driven editing: scene detection, beat detection, silence-driven
-  cutting policy.
+- The transition catalogue: every wipe and iris is a `luma` plus a geometry,
+  which is a registration, not a backend feature. Export presets and effect
+  chains likewise.
+- Analysis-driven editing: where a scene cut is worth landing on, what
+  loudness counts as silence, beat detection as a jump source.
 - Audio processing beyond the built-in duck: EQ, compression, noise
   reduction.
 - Workflow opinions: proxy policies, naming schemes, per-project layouts.
@@ -50,7 +55,15 @@ replace anything they set up.
 
 | Plugin | Default | What it does |
 |---|---|---|
+| `transitions` | on | Registers `wipe_left`, `wipe_right`, `wipe_up`, `wipe_down`, `iris`. |
+| `silence` | on | `next_silence` / `prev_silence` motions and `]s` / `[s`, over a threshold you can change. |
+| `scenes` | on | `next_scene` / `prev_scene` motions and `]v` / `[v`, over the detected cuts. |
 | `which-key` | off | Lists what can follow a half-typed key sequence. |
+
+The three default-on plugins are on because turning them off removes a name
+or a binding the user might already have in a project, not because the editor
+needs them: with all of them off there is still a timeline, a grammar, a
+preview and an export.
 
 A plugin is on by default only when the editor would feel broken without it.
 Anything that changes what is on screen is opt-in, so a fresh install draws

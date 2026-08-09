@@ -24,6 +24,10 @@ pub struct TrackData {
     pub samples: Vec<Sample>,
     /// Clip start/end frames, sorted.
     pub clip_bounds: Vec<u64>,
+    /// Frames the analysis called a scene change, sorted. Empty for a track
+    /// nothing detected scenes in; what counts as a cut worth jumping to is
+    /// a plugin's policy, not the model's.
+    pub scene_changes: Vec<u64>,
     /// Whether analysis for this track has finished. A motion over an
     /// unanalysed track reports "not yet" rather than a wrong frame.
     pub analysed: bool,

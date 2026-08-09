@@ -49,11 +49,30 @@ pub struct Bundled {
 /// They use the same `davimci.*` surface a third-party plugin does: if a
 /// bundled plugin needs something the API cannot express, that is a gap in
 /// the API rather than a reason to special-case it.
-pub const BUNDLED: &[Bundled] = &[Bundled {
-    name: "which-key",
-    source: include_str!("../runtime/plugins/which-key.lua"),
-    default_on: false,
-}];
+pub const BUNDLED: &[Bundled] = &[
+    Bundled {
+        name: "transitions",
+        source: include_str!("../runtime/plugins/transitions.lua"),
+        // On by default: the backend renders one type without it, and a
+        // project made with a wipe would open as a dissolve.
+        default_on: true,
+    },
+    Bundled {
+        name: "silence",
+        source: include_str!("../runtime/plugins/silence.lua"),
+        default_on: true,
+    },
+    Bundled {
+        name: "scenes",
+        source: include_str!("../runtime/plugins/scenes.lua"),
+        default_on: true,
+    },
+    Bundled {
+        name: "which-key",
+        source: include_str!("../runtime/plugins/which-key.lua"),
+        default_on: false,
+    },
+];
 
 impl Plugins {
     /// A runtime with no user config loaded. Every build has one, so the Lua
