@@ -95,6 +95,10 @@ pub(crate) struct State {
     pub callbacks: BTreeMap<HandlerId, Function>,
     pub autocmds: Vec<Autocmd>,
     pub requests: Vec<Request>,
+    /// What `davimci.plugins` said about a bundled plugin by name. Absent
+    /// means "whatever the plugin ships as", so a config only records the
+    /// choices it actually made.
+    pub plugin_choices: BTreeMap<String, bool>,
     next_id: HandlerId,
 }
 
@@ -109,6 +113,7 @@ impl fmt::Debug for State {
             .field("timeline", &self.timeline)
             .field("autocmds", &self.autocmds)
             .field("requests", &self.requests)
+            .field("plugin_choices", &self.plugin_choices)
             .finish_non_exhaustive()
     }
 }

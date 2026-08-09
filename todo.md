@@ -1,6 +1,6 @@
 # Human
-- strip down to core features, everything else should be built as a plugin, include default plugins for common features (first decide what features are core, and what can be plugins)
-- move which-key to a plugin, make it not enabled by default
+- move the analysis-driven editing policies (silence cutting, scene detection
+  hooks) out of the host and into bundled plugins, per `docs/plugins.md`
 
 # AI - deferred (not v1)
 - plugin distribution and package management

@@ -481,7 +481,13 @@ fn a_plugin_panel_opens_fills_and_closes_through_the_ui_api() {
 
 #[test]
 fn the_which_key_panel_follows_the_pending_sequence_and_never_eats_a_key() {
-    let cfg = Scratch::with_config("which-key", &[("init.lua", "")]);
+    let cfg = Scratch::with_config(
+        "which-key",
+        &[(
+            "plugins.lua",
+            r#"require("davimci.plugins").enable("which-key")"#,
+        )],
+    );
     let (mut app, mut editor, _) = editor_with(&cfg);
     app.event(Event::Tick, &mut editor);
     assert!(
@@ -522,6 +528,41 @@ fn the_which_key_panel_follows_the_pending_sequence_and_never_eats_a_key() {
         before,
         "gg went somewhere other than the start"
     );
+}
+
+/// which-key is bundled but opt-in: a config that never names it gets the
+/// bare editor, and no panel appears on a prefix.
+#[test]
+fn a_bundled_plugin_that_is_off_by_default_does_not_run_unasked() {
+    assert!(
+        davimci_cli::BUNDLED
+            .iter()
+            .any(|p| p.name == "which-key" && !p.default_on),
+        "which-key is no longer opt-in"
+    );
+    let cfg = Scratch::with_config("which-key-off", &[("init.lua", "")]);
+    let (mut app, mut editor, _) = editor_with(&cfg);
+    feed(&mut app, &mut editor, "g");
+    app.event(Event::Tick, &mut editor);
+    assert!(panels(&app).is_empty(), "which-key ran without being asked");
+}
+
+/// A choice in `plugins.lua` is read before the bundled plugins run, so
+/// disabling one that ships on keeps it from ever executing.
+#[test]
+fn plugin_choices_are_read_before_the_bundled_plugins_run() {
+    let cfg = Scratch::with_config(
+        "plugin-choice",
+        &[(
+            "plugins.lua",
+            r#"require("davimci.plugins").setup({ ["which-key"] = true })"#,
+        )],
+    );
+    let mut plugins = Plugins::load(Some(&ConfigPaths::new(cfg.path())), cfg.path(), &DenyAll);
+    assert!(plugins.take_notices().is_empty());
+    for p in davimci_cli::BUNDLED {
+        assert_eq!(plugins.wants(p), p.name == "which-key");
+    }
 }
 
 #[test]

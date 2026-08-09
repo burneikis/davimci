@@ -7,6 +7,8 @@ remappable keys, and hookable events.
 
 - [`todo.md`](todo.md) - loose ends and deferred work
 - [`docs/keymap.md`](docs/keymap.md) - the default keymap, generated from the code
+- [`docs/plugins.md`](docs/plugins.md) - what is core, what is a plugin, and how to
+  turn a bundled plugin on
 
 ## Usage
 

@@ -82,7 +82,8 @@ pub(crate) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
     let davimci = lua.create_table()?;
     davimci.set("version", env!("CARGO_PKG_VERSION"))?;
 
-    let modules: [(&str, Table); 9] = [
+    let modules: [(&str, Table); 10] = [
+        ("plugins", plugins_module(lua, state)?),
         ("ui", ui_module(lua, state)?),
         ("keymap", keymap_module(lua, state)?),
         ("motions", motions_module(lua, state)?),
@@ -105,6 +106,64 @@ pub(crate) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
     loaded.set("davimci", davimci.clone())?;
     lua.globals().set("davimci", davimci)?;
     Ok(())
+}
+
+/// `davimci.plugins`: which bundled plugins this config wants.
+///
+/// Only a declaration - the host reads the choices before it runs any
+/// bundled plugin, so enabling one is not a request to load it twice.
+fn plugins_module(lua: &Lua, state: &Shared) -> mlua::Result<Table> {
+    let t = lua.create_table()?;
+    for (fname, wanted) in [("enable", true), ("disable", false)] {
+        let st = Rc::clone(state);
+        t.set(
+            fname,
+            lua.create_function(move |_, names: Variadic<Value>| {
+                let mut st = st.borrow_mut();
+                for name in plugin_names(&names)? {
+                    st.plugin_choices.insert(name, wanted);
+                }
+                Ok(())
+            })?,
+        )?;
+    }
+    let st = Rc::clone(state);
+    t.set(
+        "setup",
+        lua.create_function(move |_, spec: Table| {
+            let mut st = st.borrow_mut();
+            for pair in spec.pairs::<String, bool>() {
+                let (name, wanted) = pair?;
+                st.plugin_choices.insert(name, wanted);
+            }
+            Ok(())
+        })?,
+    )?;
+    Ok(t)
+}
+
+/// Accept `enable("a", "b")` and `enable({ "a", "b" })` alike: a config
+/// listing its plugins should not have to care which form it used.
+fn plugin_names(values: &Variadic<Value>) -> mlua::Result<Vec<String>> {
+    let mut out = Vec::new();
+    for value in values.iter() {
+        match value {
+            Value::String(s) => out.push(s.to_str()?.to_string()),
+            Value::Table(t) => out.extend(string_list(t)?),
+            other => {
+                return Err(err(LuaError::Config(format!(
+                    "a plugin is named by a string or a list of strings, not {}",
+                    other.type_name()
+                ))));
+            }
+        }
+    }
+    if out.is_empty() {
+        return Err(err(LuaError::Config(
+            "naming no plugin enables and disables nothing".into(),
+        )));
+    }
+    Ok(out)
 }
 
 fn keymap_module(lua: &Lua, state: &Shared) -> mlua::Result<Table> {

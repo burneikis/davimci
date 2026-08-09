@@ -31,16 +31,29 @@ impl std::fmt::Debug for Plugins {
     }
 }
 
-/// The plugins every build ships with, run before any user config so a
-/// config can rebind or replace what they set up.
+/// One plugin shipped in the binary.
+#[derive(Debug, Clone, Copy)]
+pub struct Bundled {
+    /// The name `davimci.plugins.enable` uses.
+    pub name: &'static str,
+    source: &'static str,
+    /// Whether it runs when config says nothing about it. A plugin is on by
+    /// default only when the editor would feel broken without it; anything
+    /// that changes what the screen shows is opt-in.
+    pub default_on: bool,
+}
+
+/// The plugins every build ships with, run before the rest of the user
+/// config so a config can rebind or replace what they set up.
 ///
 /// They use the same `davimci.*` surface a third-party plugin does: if a
 /// bundled plugin needs something the API cannot express, that is a gap in
 /// the API rather than a reason to special-case it.
-const BUNDLED: &[(&str, &str)] = &[(
-    "which-key.lua",
-    include_str!("../runtime/plugins/which-key.lua"),
-)];
+pub const BUNDLED: &[Bundled] = &[Bundled {
+    name: "which-key",
+    source: include_str!("../runtime/plugins/which-key.lua"),
+    default_on: false,
+}];
 
 impl Plugins {
     /// A runtime with no user config loaded. Every build has one, so the Lua
@@ -66,7 +79,7 @@ impl Plugins {
     #[must_use]
     pub fn load(paths: Option<&ConfigPaths>, project_dir: &Path, trust: &dyn TrustPrompt) -> Self {
         let mut plugins = Self::empty();
-        plugins.load_bundled();
+        plugins.load_choices_and_bundled(paths);
         if let Some(paths) = paths {
             plugins.notices.extend(plugins.runtime.load_config(paths));
         }
@@ -88,7 +101,7 @@ impl Plugins {
         project_dir: &Path,
     ) -> (Self, Option<PathBuf>) {
         let mut plugins = Self::empty();
-        plugins.load_bundled();
+        plugins.load_choices_and_bundled(paths);
         if let Some(paths) = paths {
             plugins.notices.extend(plugins.runtime.load_config(paths));
         }
@@ -106,17 +119,38 @@ impl Plugins {
         self.notices.extend(notice);
     }
 
-    /// Run the bundled plugins. A bundled plugin that fails is a notice like
-    /// any other: the editor keeps working without it.
+    /// Read `plugins.lua`, then run the bundled plugins it left enabled.
+    fn load_choices_and_bundled(&mut self, paths: Option<&ConfigPaths>) {
+        if let Some(paths) = paths {
+            let notices = self.runtime.load_plugin_choices(paths);
+            self.notices.extend(notices);
+        }
+        self.load_bundled();
+    }
+
+    /// Run every enabled bundled plugin. A bundled plugin that fails is a
+    /// notice like any other: the editor keeps working without it.
     pub fn load_bundled(&mut self) {
-        for (name, source) in BUNDLED {
-            if let Err(e) = self
-                .runtime
-                .exec(source, name, davimci_lua::Sandbox::Trusted)
+        for plugin in BUNDLED {
+            if !self.wants(plugin) {
+                continue;
+            }
+            if let Err(e) =
+                self.runtime
+                    .exec(plugin.source, plugin.name, davimci_lua::Sandbox::Trusted)
             {
                 self.notices.push(Notice::from_error(&e));
             }
         }
+    }
+
+    /// Whether a bundled plugin runs: what config asked for, or what the
+    /// plugin ships as when config said nothing.
+    #[must_use]
+    pub fn wants(&self, plugin: &Bundled) -> bool {
+        self.runtime
+            .plugin_choice(plugin.name)
+            .unwrap_or(plugin.default_on)
     }
 
     /// Startup notices, as status-line messages. Drained once by the host.

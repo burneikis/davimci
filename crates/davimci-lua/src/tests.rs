@@ -1088,3 +1088,37 @@ fn a_panel_key_handler_is_called_with_the_key_it_was_given() {
     let requests = rt.invoke_key(handler, "j").expect("the handler runs");
     assert_eq!(requests, vec![Request::Message("got j".to_string())]);
 }
+
+#[test]
+fn plugin_choices_take_a_name_a_list_or_a_table() {
+    let rt = rt();
+    exec(
+        &rt,
+        r#"
+        local plugins = require("davimci.plugins")
+        plugins.enable("which-key")
+        plugins.disable({ "marks", "timers" })
+        plugins.setup({ ruler = true, timers = true })
+        "#,
+    );
+    assert_eq!(rt.plugin_choice("which-key"), Some(true));
+    assert_eq!(rt.plugin_choice("marks"), Some(false));
+    // A later choice wins, so one file can override an earlier one.
+    assert_eq!(rt.plugin_choice("timers"), Some(true));
+    assert_eq!(rt.plugin_choice("ruler"), Some(true));
+    // Silence means "whatever the plugin ships as", not "off".
+    assert_eq!(rt.plugin_choice("unmentioned"), None);
+}
+
+#[test]
+fn naming_no_plugin_is_a_config_error() {
+    let rt = rt();
+    let e = rt
+        .exec(
+            r#"require("davimci.plugins").enable()"#,
+            "t",
+            crate::Sandbox::Trusted,
+        )
+        .expect_err("enabling nothing is a typo, not a no-op");
+    assert!(e.to_string().contains("plugin"), "{e}");
+}

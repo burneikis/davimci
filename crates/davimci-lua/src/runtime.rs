@@ -216,6 +216,12 @@ impl Runtime {
         self.state.borrow().transitions.values().cloned().collect()
     }
 
+    /// Whether config asked for a bundled plugin by name, or said nothing.
+    #[must_use]
+    pub fn plugin_choice(&self, name: &str) -> Option<bool> {
+        self.state.borrow().plugin_choices.get(name).copied()
+    }
+
     #[must_use]
     pub fn object_names(&self) -> Vec<String> {
         self.state.borrow().objects.keys().cloned().collect()
