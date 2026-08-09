@@ -490,6 +490,114 @@ fn first_import_fits_the_clip_in_the_viewport_width() {
     assert!(vp.span() < Frame(2 * 600), "fit left the clip tiny: {vp:?}");
 }
 
+/// A host whose ex line creates the first clip, standing in for `:import`.
+#[derive(Debug, Default)]
+struct CommandImportHost;
+
+impl Host for CommandImportHost {
+    fn command(
+        &mut self,
+        _line: &str,
+        session: &mut Session,
+        _selection: Option<&Selection>,
+    ) -> Result<Option<String>, AppError> {
+        let track = session
+            .timeline()
+            .tracks()
+            .first()
+            .map(|t| t.id)
+            .expect("fixture timelines have a track");
+        let clip = davimci_core::Clip::generated(
+            davimci_core::ClipId(9_003),
+            "imported",
+            Frame(0),
+            Frame(600),
+        );
+        session
+            .exec(&davimci_cmd::EditCommand::Insert {
+                track,
+                at: Frame::ZERO,
+                clip,
+                new_id: None,
+            })
+            .map_err(|e| AppError::UnhandledCommand(e.to_string()))?;
+        Ok(None)
+    }
+}
+
+/// A host whose import appends one clip of a chosen length.
+#[derive(Debug)]
+struct LongImportHost(Frame);
+
+impl Host for LongImportHost {
+    fn import_media(
+        &mut self,
+        _path: &std::path::Path,
+        _intent: davimci_keys::MediaIntent,
+        session: &mut Session,
+    ) -> Result<Option<String>, AppError> {
+        let track = session
+            .timeline()
+            .tracks()
+            .first()
+            .map(|t| t.id)
+            .expect("fixture timelines have a track");
+        let clip =
+            davimci_core::Clip::generated(davimci_core::ClipId(9_002), "long", Frame(0), self.0);
+        session
+            .exec(&davimci_cmd::EditCommand::Insert {
+                track,
+                at: Frame::ZERO,
+                clip,
+                new_id: None,
+            })
+            .map_err(|e| AppError::UnhandledCommand(e.to_string()))?;
+        Ok(None)
+    }
+}
+
+/// Regression: fitting a long import used to land below the level where
+/// subdivisions begin, leaving the clip's two ends as the only jump points.
+#[test]
+fn first_import_leaves_jump_points_inside_the_clip() {
+    let mut app = App::new(Session::new(fixture(&[("V1", &[])])));
+    app.resize(Surface {
+        columns: 200,
+        rows: 4,
+        ..Surface::default()
+    });
+    let mut host = LongImportHost(Frame(216_000));
+    app.key(Key::parse_str("a")[0], &mut host);
+    app.event(Event::MediaChosen("long.mp4".into()), &mut host);
+
+    let interior = app
+        .view()
+        .ticks
+        .iter()
+        .filter(|t| t.frame > Frame::ZERO && t.frame < Frame(216_000))
+        .count();
+    assert!(interior > 1, "no jump points inside the clip");
+}
+
+/// A clip created without a picker is still first content, so the view fits
+/// it: the fit rule belongs to the timeline going non-empty, not to import.
+#[test]
+fn first_clip_from_an_edit_fits_the_viewport() {
+    let mut app = App::new(Session::new(fixture(&[("V1", &[])])));
+    app.resize(Surface {
+        columns: 30,
+        rows: 4,
+        ..Surface::default()
+    });
+    let before = app.viewport().zoom();
+    let mut host = CommandImportHost;
+    // Not the picker path: an ex line creates the first clip, as `:import`
+    // does.
+    app.event(Event::Command("import clip.mp4".into()), &mut host);
+    assert_ne!(app.viewport().zoom(), before);
+    assert!(app.viewport().span() >= Frame(600));
+}
+
 #[test]
 fn a_later_import_leaves_the_viewport_alone() {
     let mut app = App::new(Session::new(timeline()));

@@ -223,9 +223,18 @@ impl Viewport {
     /// timeline fits at [`Zoom::MAX`]; a timeline longer than the widest
     /// span pins to [`Zoom::OUT`] and is simply clipped.
     pub fn fit(&mut self, duration: Frame) {
+        self.fit_at_least(duration, Zoom::OUT);
+    }
+
+    /// [`Viewport::fit`], but never coarser than `floor`.
+    ///
+    /// A timeline too long to fit even at `floor` is shown at `floor` and
+    /// clipped: the caller has decided that whatever `floor` buys - jump
+    /// subdivisions, a readable ruler - outranks seeing the last frames.
+    pub fn fit_at_least(&mut self, duration: Frame, floor: Zoom) {
         let columns = u64::from(self.columns());
-        let mut best = Zoom::OUT;
-        for level in 0..=Zoom::MAX.level() {
+        let mut best = floor;
+        for level in floor.level()..=Zoom::MAX.level() {
             let zoom = Zoom::new(level);
             let span = frames_per_column(zoom).saturating_mul(columns);
             if span >= duration.get() {

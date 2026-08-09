@@ -363,6 +363,10 @@ pub struct App {
     batching: bool,
     deferred_moved: bool,
     deferred_changed: bool,
+    /// Whether the view has already been fitted to content. The first clip in
+    /// an empty timeline moves the view once; every later edit leaves it
+    /// where the user put it.
+    fitted: bool,
     quit: bool,
 }
 
@@ -374,7 +378,9 @@ impl App {
 
     #[must_use]
     pub fn with_keymap(session: Session, keymap: Keymap) -> Self {
+        let fitted = session.timeline().duration() != Frame::ZERO;
         Self {
+            fitted,
             session,
             engine: Engine::with_keymap(keymap),
             viewport: Viewport::default(),
@@ -423,6 +429,7 @@ impl App {
         self.engine.reset();
         self.pending_selection = None;
         self.viewport = Viewport::new(self.viewport.columns(), self.viewport.rows());
+        self.fitted = self.session.timeline().duration() != Frame::ZERO;
         self.engine.set_zoom(self.viewport.zoom());
         self.follow();
     }
@@ -818,16 +825,8 @@ impl App {
             self.fail("no media picker is open".to_string());
             return Response::Continue;
         };
-        // An import into an empty timeline is the one place the view may move
-        // on its own: the default zoom would show a clip as a couple of
-        // columns, which reads as "nothing happened".
-        let was_empty = self.session.timeline().duration() == Frame::ZERO;
         match host.import_media(path, intent, &mut self.session) {
             Ok(msg) => {
-                if was_empty {
-                    self.viewport.fit(self.session.timeline().duration());
-                    self.engine.set_zoom(self.viewport.zoom());
-                }
                 // Importing is an edit: the graph is stale and the frame
                 // under the playhead may have changed.
                 self.note_changed(host);
@@ -1208,6 +1207,7 @@ impl App {
 
     /// "The graph is stale" - issued now, or once at the end of the batch.
     fn note_changed(&mut self, host: &mut dyn Host) {
+        self.fit_to_first_content();
         if self.batching {
             self.deferred_changed = true;
         } else {
@@ -1235,6 +1235,25 @@ impl App {
         if std::mem::take(&mut self.deferred_moved) {
             host.playhead_moved(&self.session);
         }
+    }
+
+    /// The first content in an empty timeline is the one place the view moves
+    /// on its own: the default zoom draws a clip as a couple of columns, which
+    /// reads as "nothing happened".
+    ///
+    /// The fitted level is also never left below the level where subdivisions
+    /// begin, or a long import would offer no jump point between its two
+    /// ends. Overshooting the width by one level is preferred to a track the
+    /// user cannot navigate inside.
+    fn fit_to_first_content(&mut self) {
+        if self.fitted || self.session.timeline().duration() == Frame::ZERO {
+            return;
+        }
+        self.fitted = true;
+        let floor = Zoom::new(self.jump_cfg.subdivide_from);
+        self.viewport
+            .fit_at_least(self.session.timeline().duration(), floor);
+        self.engine.set_zoom(self.viewport.zoom());
     }
 
     /// Scroll-follow: the playhead and the focused track are visible after
