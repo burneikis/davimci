@@ -38,12 +38,26 @@ pub fn entry_key(content_hash: &str, stream: u32, kind: StreamKind) -> String {
 /// Not cryptographic - it identifies media, it does not authenticate it -
 /// but it is stable across machines and cheap on large files.
 pub fn content_hash(path: &Path) -> Result<String, AnalysisError> {
+    hash_file(path, None)
+}
+
+/// [`content_hash`], abandoned when the job is cancelled.
+///
+/// Hashing gigabytes takes seconds, and closing a project waits for the
+/// thread doing it, so the read is checked between chunks.
+pub fn hash_file(
+    path: &Path,
+    ctx: Option<&crate::jobs::JobContext>,
+) -> Result<String, AnalysisError> {
     let name = path.display().to_string();
     let mut file = fs::File::open(path).map_err(|e| AnalysisError::io(&name, &e))?;
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     let mut buf = vec![0u8; 64 * 1024];
     let mut len: u64 = 0;
     loop {
+        if let Some(ctx) = ctx {
+            ctx.check()?;
+        }
         let n = file
             .read(&mut buf)
             .map_err(|e| AnalysisError::io(&name, &e))?;

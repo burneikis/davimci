@@ -9,28 +9,33 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::error::AnalysisError;
+use crate::jobs::JobContext;
 
 /// Decode an audio stream to mono `f32` at `sample_rate`.
 ///
 /// Downmixed on purpose: analysis answers "is there sound here", which is a
-/// property of the take rather than of the channel layout.
-pub fn decode_mono(path: &Path, stream: u32, sample_rate: u32) -> Result<Vec<f32>, AnalysisError> {
+/// property of the take rather than of the channel layout. Cancelling the
+/// job kills ffmpeg rather than waiting out the file.
+pub fn decode_mono(
+    path: &Path,
+    stream: u32,
+    sample_rate: u32,
+    ctx: Option<&JobContext>,
+) -> Result<Vec<f32>, AnalysisError> {
     let name = path.display().to_string();
-    let out = Command::new("ffmpeg")
-        .args(["-v", "error", "-i"])
-        .arg(path)
-        .args([
-            "-map",
-            &format!("0:{stream}"),
-            "-ac",
-            "1",
-            "-ar",
-            &sample_rate.to_string(),
-            "-f",
-            "f32le",
-            "-",
-        ])
-        .output()
+    let mut command = Command::new("ffmpeg");
+    command.args(["-v", "error", "-i"]).arg(path).args([
+        "-map",
+        &format!("0:{stream}"),
+        "-ac",
+        "1",
+        "-ar",
+        &sample_rate.to_string(),
+        "-f",
+        "f32le",
+        "-",
+    ]);
+    let out = crate::run::output(&mut command, ctx)
         .map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 AnalysisError::ToolMissing {
@@ -40,7 +45,8 @@ pub fn decode_mono(path: &Path, stream: u32, sample_rate: u32) -> Result<Vec<f32
             } else {
                 AnalysisError::io(&name, &e)
             }
-        })?;
+        })?
+        .ok_or(AnalysisError::Cancelled)?;
     if !out.status.success() {
         return Err(AnalysisError::AnalysisFailed {
             path: name,
@@ -68,19 +74,21 @@ pub const SCENE_THRESHOLD: f32 = 10.0;
 ///
 /// Optional: a failure here degrades to "no scene changes"
 /// rather than failing the import.
-pub fn scene_changes(path: &Path, threshold: f32) -> Result<Vec<u64>, AnalysisError> {
+pub fn scene_changes(
+    path: &Path,
+    threshold: f32,
+    ctx: Option<&JobContext>,
+) -> Result<Vec<u64>, AnalysisError> {
     let name = path.display().to_string();
-    let out = Command::new("ffmpeg")
-        .args(["-v", "info", "-i"])
-        .arg(path)
-        .args([
-            "-vf",
-            &format!("scdet=threshold={threshold}"),
-            "-f",
-            "null",
-            "-",
-        ])
-        .output()
+    let mut command = Command::new("ffmpeg");
+    command.args(["-v", "info", "-i"]).arg(path).args([
+        "-vf",
+        &format!("scdet=threshold={threshold}"),
+        "-f",
+        "null",
+        "-",
+    ]);
+    let out = crate::run::output(&mut command, ctx)
         .map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 AnalysisError::ToolMissing {
@@ -90,7 +98,8 @@ pub fn scene_changes(path: &Path, threshold: f32) -> Result<Vec<u64>, AnalysisEr
             } else {
                 AnalysisError::io(&name, &e)
             }
-        })?;
+        })?
+        .ok_or(AnalysisError::Cancelled)?;
     Ok(parse_scdet(&String::from_utf8_lossy(&out.stderr)))
 }
 

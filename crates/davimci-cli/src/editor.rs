@@ -881,6 +881,26 @@ impl Editor {
         self.swap.take()
     }
 
+    /// Stop everything the session started, before the frontend closes.
+    ///
+    /// Dropping the editor already does this, but drop order runs it *after*
+    /// the window is gone: an encode still running then holds a dead window
+    /// on screen and the process alive for as long as ffmpeg takes. Asking
+    /// first, while the last frame is still up, is what makes quit look
+    /// immediate. Cancellation is a request, so the joins still happen in
+    /// `Drop`; they just have nothing left to wait for.
+    pub fn shutdown(&mut self) {
+        self.analyser.cancel_all();
+        self.proxies.cancel_all();
+        if self.exporter.is_running() {
+            let _ = self.exporter.cancel(self.backend.as_mut());
+        }
+        let _ = self.transport.interrupt(self.backend.as_mut());
+        if self.backend.is_previewing() {
+            let _ = self.backend.preview_stop();
+        }
+    }
+
     /// Project the timeline and show the frame under the playhead. Called
     /// once at startup so the first paint is not black.
     pub fn prime(&mut self, session: &Session) {

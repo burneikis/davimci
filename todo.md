@@ -1,6 +1,9 @@
 # TODO
 - plugin distribution and package management
-- still some weird freeze/hangs when closing the gui or tui, where the gui doesnt close immediately, the just run stays running etc.
+- make lightweight
+- core feature stripdown
+  - define the core
+  - is gpu accel related
 
 # Plugins
 - check transitions work, make them work in preview

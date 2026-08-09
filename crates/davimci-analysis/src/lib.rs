@@ -23,10 +23,11 @@ pub mod jobs;
 pub mod pipeline;
 pub mod probe;
 pub mod proxy;
+pub mod run;
 pub mod subtitle;
 
 pub use analysis::{ANALYSIS_VERSION, Analysis, AnalysisParams, Hop, Span};
-pub use cache::{AnalysisCache, content_hash, entry_key};
+pub use cache::{AnalysisCache, content_hash, entry_key, hash_file};
 pub use conform::{ConformOptions, Conformed, FitPolicy, FitRect};
 pub use error::AnalysisError;
 pub use import::{

@@ -213,20 +213,25 @@ pub fn generate(
         })?;
     }
     let partial = spec.partial_path();
-    let out = std::process::Command::new("ffmpeg")
-        .args(spec.ffmpeg_args())
-        .output()
-        .map_err(|e| {
-            let _ = std::fs::remove_file(&partial);
-            if e.kind() == std::io::ErrorKind::NotFound {
-                AnalysisError::ToolMissing {
-                    tool: "ffmpeg",
-                    what: "proxy generation",
-                }
-            } else {
-                AnalysisError::io(&spec.source, &e)
+    let mut command = std::process::Command::new("ffmpeg");
+    command.args(spec.ffmpeg_args());
+    let out = crate::run::output(&mut command, ctx).map_err(|e| {
+        let _ = std::fs::remove_file(&partial);
+        if e.kind() == std::io::ErrorKind::NotFound {
+            AnalysisError::ToolMissing {
+                tool: "ffmpeg",
+                what: "proxy generation",
             }
-        })?;
+        } else {
+            AnalysisError::io(&spec.source, &e)
+        }
+    })?;
+    // Killed part way through: the partial container is worthless, and the
+    // caller is waiting on this thread to return.
+    let Some(out) = out else {
+        let _ = std::fs::remove_file(&partial);
+        return Err(AnalysisError::Cancelled);
+    };
     if !out.status.success() {
         // Half a container is worse than none: it exists, so every later
         // check takes it for a finished proxy.

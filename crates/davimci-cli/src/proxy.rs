@@ -100,7 +100,7 @@ impl Proxies {
                 props,
                 davimci_analysis::conform::ConformOptions::default(),
             );
-            let hash = davimci_analysis::cache::content_hash(Path::new(&info.path))?;
+            let hash = davimci_analysis::cache::hash_file(Path::new(&info.path), Some(ctx))?;
             let Some(spec) =
                 davimci_analysis::proxy::plan_proxy(&info, &conformed, &policy, &root, &hash)
             else {

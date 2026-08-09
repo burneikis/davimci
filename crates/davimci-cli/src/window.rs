@@ -59,6 +59,9 @@ pub struct Window {
     /// without a `wgpu` render state, where the composited RGBA texture is
     /// the only path.
     planar: bool,
+    /// Set once the close has been asked for, so background work is
+    /// cancelled once rather than on every frame the viewport takes to go.
+    closing: bool,
 }
 
 impl std::fmt::Debug for Window {
@@ -87,6 +90,7 @@ impl Window {
             },
             thumbnails: egui_shell::ThumbnailTextures::default(),
             planar: false,
+            closing: false,
         }
     }
 
@@ -244,6 +248,13 @@ impl eframe::App for Window {
         }
 
         if self.app.wants_quit() || self.editor.wants_quit() {
+            // Cancel first, close second: the editor is dropped after the
+            // event loop returns, and a drop that joins a running transcode
+            // is a window that stays on screen after the user closed it.
+            if !self.closing {
+                self.closing = true;
+                self.editor.shutdown();
+            }
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         // Playback and shuttle advance off the clock, so the window must

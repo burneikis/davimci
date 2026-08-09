@@ -872,3 +872,22 @@ fn jumping_to_a_frame_keeps_the_zoom_and_never_swaps_the_buffer() {
     assert!(editor.take_session_swap().is_none());
     assert_eq!(app.viewport().zoom(), zoom);
 }
+
+/// Regression: quitting with an export in flight left the frontend waiting
+/// on the work in `Drop`, so the window stayed on screen after it was
+/// closed. Shutdown stops the running work before the frontend goes.
+#[test]
+fn shutdown_stops_the_work_a_quit_would_otherwise_wait_for() {
+    let (mut app, mut editor) = editor_with_manual_render();
+    let out = std::env::temp_dir().join("davimci-shutdown.mkv");
+    app.event(
+        Event::Command(format!(":export {}", out.display())),
+        &mut editor,
+    );
+    assert!(editor.exporter().is_running());
+
+    editor.shutdown();
+    assert!(!editor.exporter().is_running(), "the export kept running");
+    // A frontend may reach quit twice; the second ask must not complain.
+    editor.shutdown();
+}

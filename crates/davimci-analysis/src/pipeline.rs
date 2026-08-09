@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use davimci_core::TrackId;
 
 use crate::analysis::{Analysis, AnalysisParams, analyze_samples};
-use crate::cache::{AnalysisCache, content_hash, entry_key};
+use crate::cache::{AnalysisCache, entry_key};
 use crate::decode;
 use crate::error::AnalysisError;
 use crate::jobs::{JobContext, JobId, JobRunner};
@@ -51,7 +51,11 @@ pub fn analyse(
 ) -> Result<Analysis, AnalysisError> {
     let check = |ctx: Option<&JobContext>| ctx.map_or(Ok(()), JobContext::check);
     check(ctx)?;
-    let hash = entry_key(&content_hash(&request.path)?, request.stream, request.kind);
+    let hash = entry_key(
+        &crate::cache::hash_file(&request.path, ctx)?,
+        request.stream,
+        request.kind,
+    );
     if let Some(hit) = cache.load(&hash)
         && hit.params == params
     {
@@ -64,7 +68,7 @@ pub fn analyse(
     check(ctx)?;
     let mut analysis = match request.kind {
         StreamKind::Audio => {
-            let samples = decode::decode_mono(&request.path, request.stream, sample_rate)?;
+            let samples = decode::decode_mono(&request.path, request.stream, sample_rate, ctx)?;
             check(ctx)?;
             analyze_samples(&samples, sample_rate, params)
         }
@@ -78,8 +82,12 @@ pub fn analyse(
         }
         check(ctx)?;
         // Scene detection is optional: losing it must not lose the waveform.
-        analysis.scene_changes =
-            decode::scene_changes(&request.path, decode::SCENE_THRESHOLD).unwrap_or_default();
+        // A cancelled detection is not a loss to absorb, though - it means
+        // the editor is closing and this thread is being waited on.
+        match decode::scene_changes(&request.path, decode::SCENE_THRESHOLD, ctx) {
+            Err(AnalysisError::Cancelled) => return Err(AnalysisError::Cancelled),
+            other => analysis.scene_changes = other.unwrap_or_default(),
+        }
     }
     hash.clone_into(&mut analysis.source_hash);
     let _ = cache.store(&hash, &analysis);

@@ -126,6 +126,9 @@ pub fn run(mut app: App, mut editor: Editor) -> Result<()> {
         }
     }
 
+    // Before the terminal is restored, not after: cancelling here is what
+    // keeps the shell prompt from coming back to a process still encoding.
+    editor.shutdown();
     term.close();
     Ok(())
 }
