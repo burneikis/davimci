@@ -42,7 +42,9 @@ pub use editor::Editor;
 pub use error::CliError;
 pub use excmd::{ExCommand, ExOutcome, parse, vocabulary};
 pub use export::{ExportEvent, Exporter};
-pub use plugins::{AskOnTerminal, BUNDLED, Bundled, Plugins};
+pub use plugins::{
+    AskOnTerminal, BUNDLED, Bundled, Plugins, Provides, provider_of_motion, provider_of_transition,
+};
 pub use proxy::Proxies;
 pub use setting::{Numbers, Setting};
 pub use transport::{Transport, TransportState};

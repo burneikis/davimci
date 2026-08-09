@@ -21,6 +21,7 @@ use davimci_lua::{
 pub struct Plugins {
     runtime: Runtime,
     notices: Vec<Notice>,
+    active: std::collections::BTreeSet<&'static str>,
 }
 
 impl std::fmt::Debug for Plugins {
@@ -37,10 +38,48 @@ pub struct Bundled {
     /// The name `davimci.plugins.enable` uses.
     pub name: &'static str,
     source: &'static str,
-    /// Whether it runs when config says nothing about it. A plugin is on by
-    /// default only when the editor would feel broken without it; anything
-    /// that changes what the screen shows is opt-in.
+    /// Whether it runs when config says nothing about it.
+    ///
+    /// Every bundled plugin is off: none of them is needed to edit, and a
+    /// default that is on in practice is core wearing a plugin's name. What
+    /// keeps that from losing anything is [`Bundled::provides`] - a plugin
+    /// that owns a name the project or the config actually uses is switched
+    /// on when that name comes up.
     pub default_on: bool,
+    /// The names this plugin owns, and the only reason a session may turn it
+    /// on by itself.
+    pub provides: Provides,
+}
+
+/// What a bundled plugin registers, declared so the host can tell who owns a
+/// name it does not recognise.
+#[derive(Debug, Clone, Copy)]
+pub struct Provides {
+    /// Transition types, as they appear in a saved project.
+    pub transitions: &'static [&'static str],
+    /// Motions, as a config or a macro names them.
+    pub motions: &'static [&'static str],
+}
+
+impl Provides {
+    const NOTHING: Self = Self {
+        transitions: &[],
+        motions: &[],
+    };
+}
+
+/// The bundled plugin that owns `name` as a transition type, if any.
+#[must_use]
+pub fn provider_of_transition(name: &str) -> Option<&'static Bundled> {
+    BUNDLED
+        .iter()
+        .find(|p| p.provides.transitions.contains(&name))
+}
+
+/// The bundled plugin that owns `name` as a motion, if any.
+#[must_use]
+pub fn provider_of_motion(name: &str) -> Option<&'static Bundled> {
+    BUNDLED.iter().find(|p| p.provides.motions.contains(&name))
 }
 
 /// The plugins every build ships with, run before the rest of the user
@@ -53,24 +92,35 @@ pub const BUNDLED: &[Bundled] = &[
     Bundled {
         name: "transitions",
         source: include_str!("../runtime/plugins/transitions.lua"),
-        // On by default: the backend renders one type without it, and a
-        // project made with a wipe would open as a dissolve.
-        default_on: true,
+        default_on: false,
+        provides: Provides {
+            transitions: &["wipe_left", "wipe_right", "wipe_up", "wipe_down", "iris"],
+            motions: &[],
+        },
     },
     Bundled {
         name: "silence",
         source: include_str!("../runtime/plugins/silence.lua"),
-        default_on: true,
+        default_on: false,
+        provides: Provides {
+            transitions: &[],
+            motions: &["next_silence", "prev_silence"],
+        },
     },
     Bundled {
         name: "scenes",
         source: include_str!("../runtime/plugins/scenes.lua"),
-        default_on: true,
+        default_on: false,
+        provides: Provides {
+            transitions: &[],
+            motions: &["next_scene", "prev_scene"],
+        },
     },
     Bundled {
         name: "which-key",
         source: include_str!("../runtime/plugins/which-key.lua"),
         default_on: false,
+        provides: Provides::NOTHING,
     },
 ];
 
@@ -83,12 +133,14 @@ impl Plugins {
             Ok(runtime) => Self {
                 runtime,
                 notices: Vec::new(),
+                active: std::collections::BTreeSet::new(),
             },
             // A runtime that cannot even be created costs the user their
             // plugins, not their editor (Phase 0: degrade locally).
             Err(e) => Self {
                 runtime: no_runtime(),
                 notices: vec![Notice::from_error(&e)],
+                active: std::collections::BTreeSet::new(),
             },
         }
     }
@@ -151,16 +203,42 @@ impl Plugins {
     /// notice like any other: the editor keeps working without it.
     pub fn load_bundled(&mut self) {
         for plugin in BUNDLED {
-            if !self.wants(plugin) {
-                continue;
-            }
-            if let Err(e) =
-                self.runtime
-                    .exec(plugin.source, plugin.name, davimci_lua::Sandbox::Trusted)
-            {
-                self.notices.push(Notice::from_error(&e));
+            if self.wants(plugin) {
+                self.run_bundled(plugin);
             }
         }
+    }
+
+    /// Run one bundled plugin, at most once a session.
+    fn run_bundled(&mut self, plugin: &'static Bundled) {
+        if !self.active.insert(plugin.name) {
+            return;
+        }
+        if let Err(e) = self
+            .runtime
+            .exec(plugin.source, plugin.name, davimci_lua::Sandbox::Trusted)
+        {
+            self.notices.push(Notice::from_error(&e));
+        }
+    }
+
+    /// Whether `name` has run this session.
+    #[must_use]
+    pub fn is_active(&self, name: &str) -> bool {
+        self.active.contains(name)
+    }
+
+    /// Turn a bundled plugin on because something asked for a name it owns.
+    ///
+    /// A config that said `disable(name)` is obeyed: an opinion the user
+    /// wrote down outranks one the project implies. Answers whether the
+    /// plugin is now running.
+    pub fn activate(&mut self, plugin: &'static Bundled) -> bool {
+        if self.runtime.plugin_choice(plugin.name) == Some(false) {
+            return false;
+        }
+        self.run_bundled(plugin);
+        true
     }
 
     /// Whether a bundled plugin runs: what config asked for, or what the

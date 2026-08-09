@@ -53,21 +53,37 @@ Bundled plugins are compiled into the binary and listed in
 They run before the rest of the user config, so a config can rebind or
 replace anything they set up.
 
-| Plugin | Default | What it does |
-|---|---|---|
-| `transitions` | on | Registers `wipe_left`, `wipe_right`, `wipe_up`, `wipe_down`, `iris`. |
-| `silence` | on | `next_silence` / `prev_silence` motions and `]s` / `[s`, over a threshold you can change. |
-| `scenes` | on | `next_scene` / `prev_scene` motions and `]v` / `[v`, over the detected cuts. |
-| `which-key` | off | Lists what can follow a half-typed key sequence. |
+| Plugin | Default | Owns | What it does |
+|---|---|---|---|
+| `transitions` | off | `wipe_left`, `wipe_right`, `wipe_up`, `wipe_down`, `iris` | The video transition catalogue: a `luma` plus a geometry. |
+| `silence` | off | `next_silence`, `prev_silence` | Those motions and `]s` / `[s`, over a threshold you can change. |
+| `scenes` | off | `next_scene`, `prev_scene` | Those motions and `]v` / `[v`, over the detected cuts. |
+| `which-key` | off | - | Lists what can follow a half-typed key sequence. |
 
-The three default-on plugins are on because turning them off removes a name
-or a binding the user might already have in a project, not because the editor
-needs them: with all of them off there is still a timeline, a grammar, a
-preview and an export.
+**Every bundled plugin is off.** A default that is on in practice is core
+wearing a plugin's name, so nothing here runs until something asks for it.
+With all of them off there is still a timeline, a grammar, a preview and an
+export - which is the test of whether a thing belongs in this table at all.
 
-A plugin is on by default only when the editor would feel broken without it.
-Anything that changes what is on screen is opt-in, so a fresh install draws
-what the core view draws and nothing more.
+## Nothing is lost by defaulting to off
+
+Off would be a trap if a project written elsewhere quietly lost a transition,
+so a plugin declares the names it owns (`Bundled::provides`) and the session
+turns it on when one of those names comes up.
+
+- **Opening a project** that uses `wipe_left` switches `transitions` on and
+  says so in the status line. The file is what asks; the user did not have to
+  know a plugin existed.
+- **Calling a motion** nothing registered names its owner: "the motion
+  `next_silence` comes from the bundled `silence` plugin; enable it in
+  `plugins.lua`". A missing name is never a silent no-op.
+- **An explicit `disable`** outranks both. The project still opens, the wipe
+  still renders as a `dissolve`, and the status line says that is what
+  happened rather than leaving it to be noticed.
+
+So the split is honest in both directions: a fresh install draws and binds
+only what core does, and no file, macro or config silently loses meaning
+because a plugin was off.
 
 ## Choosing plugins
 
@@ -80,10 +96,13 @@ local plugins = require("davimci.plugins")
 
 plugins.enable("which-key")
 plugins.disable("which-key")
-plugins.enable({ "which-key" })
-plugins.setup({ ["which-key"] = true })
+plugins.enable({ "silence", "scenes" })
+plugins.setup({ ["which-key"] = true, transitions = false })
 ```
 
 Naming no plugin is an error: an empty `enable()` is a typo, not a no-op.
-Saying nothing about a plugin leaves it at whatever it ships as, which is why
-a config never has to list the ones it does not care about.
+
+Saying nothing about a plugin leaves it off until a project or a call needs a
+name it owns. Saying `disable` means off even then - that is the one way to
+keep a plugin from ever running, and the editor reports what the project
+loses rather than pretending nothing did.

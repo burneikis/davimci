@@ -209,6 +209,10 @@ impl Editor {
     pub fn with_plugins(mut self, plugins: Plugins) -> Self {
         self.plugins = plugins;
         self.install_registrations();
+        // The project on argv is already open by now, and it may have been
+        // written with a plugin this session has not run.
+        let session = self.workspace.current_session();
+        self.activate_plugins_for(&session);
         self
     }
 
@@ -241,6 +245,53 @@ impl Editor {
         }
         self.notices.extend(problems);
         self.notices.extend(self.plugins.take_notices());
+    }
+
+    /// Turn on the bundled plugins this project's own contents need.
+    ///
+    /// A saved project names transition types, and a type nothing registered
+    /// renders as a dissolve - silently losing what the editor that wrote
+    /// the file could do. So the project is what asks: opening one that uses
+    /// a wipe switches the plugin that owns wipes on, and says so. A config
+    /// that disabled the plugin outright is still obeyed.
+    fn activate_plugins_for(&mut self, session: &Session) {
+        // One message per plugin, naming the first type that needed it: a
+        // project with fifty wipes should not be fifty notices.
+        let mut wanted: std::collections::BTreeMap<&'static str, String> =
+            std::collections::BTreeMap::new();
+        for track in session.timeline().tracks() {
+            for clip in track.clips() {
+                let Some(kind) = clip.transition_in.as_ref().map(|t| t.kind.as_str()) else {
+                    continue;
+                };
+                let Some(owner) = crate::plugins::provider_of_transition(kind) else {
+                    continue;
+                };
+                if self.plugins.is_active(owner.name) {
+                    continue;
+                }
+                wanted.entry(owner.name).or_insert_with(|| kind.to_string());
+            }
+        }
+        if wanted.is_empty() {
+            return;
+        }
+        for (owner, kind) in wanted {
+            let Some(plugin) = crate::plugins::BUNDLED.iter().find(|p| p.name == owner) else {
+                continue;
+            };
+            if self.plugins.activate(plugin) {
+                self.notices.push(Message::info(format!(
+                    "enabled the bundled '{owner}' plugin: this project uses the transition '{kind}'"
+                )));
+            } else {
+                self.notices.push(Message::warning(format!(
+                    "this project uses the transition '{kind}', which the disabled '{owner}' plugin owns; it renders as a dissolve"
+                )));
+            }
+        }
+        self.install_registrations();
+        self.pending_keymap = Some(self.plugins.keymap());
     }
 
     #[must_use]
@@ -1130,6 +1181,20 @@ impl Editor {
             Ok(MotionAnswer::Pending) => out.say(Message::warning(format!(
                 "analysis is still running; the motion '{name}' cannot be resolved yet"
             ))),
+            // A motion nothing registered is usually one a bundled plugin
+            // owns: say which, rather than leaving the user to guess that
+            // the name exists at all.
+            Err(davimci_lua::LuaError::NoSuchMotion(missing)) => {
+                match crate::plugins::provider_of_motion(&missing) {
+                    Some(owner) => out.say(Message::warning(format!(
+                        "the motion '{missing}' comes from the bundled '{}' plugin; enable it in plugins.lua with require(\"davimci.plugins\").enable(\"{}\")",
+                        owner.name, owner.name
+                    ))),
+                    None => out.say(Message::error(
+                        davimci_lua::LuaError::NoSuchMotion(missing).to_string(),
+                    )),
+                }
+            }
             Err(e) => out.say(Message::error(e.to_string())),
         }
     }
@@ -1489,6 +1554,9 @@ impl Host for Editor {
             self.swap = Some(after.clone());
         }
         *session = after;
+        // A command may have opened a project written with plugins this
+        // session has not run.
+        self.activate_plugins_for(session);
         if self.workspace.should_quit() {
             self.quit = true;
         }

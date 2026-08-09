@@ -14,7 +14,7 @@ use davimci_backend::MockBackend;
 use davimci_cli::{Editor, Plugins, Workspace};
 use davimci_cmd::Session;
 use davimci_core::testing::fixture;
-use davimci_core::{Fps, Resolution, Timeline};
+use davimci_core::{Fps, Frame, Resolution, Timeline};
 use davimci_keys::Key;
 use davimci_lua::{ConfigPaths, DenyAll};
 use davimci_present::{Host as PresentHost, Presenter};
@@ -699,7 +699,13 @@ fn project_local_config_runs_only_after_the_question_is_answered_in_the_view() {
 /// the one type it has.
 #[test]
 fn the_transition_catalogue_comes_from_the_bundled_plugin() {
-    let on = Scratch::with_config("transitions-on", &[("init.lua", "")]);
+    let on = Scratch::with_config(
+        "transitions-on",
+        &[(
+            "plugins.lua",
+            r#"require("davimci.plugins").enable("transitions")"#,
+        )],
+    );
     let plugins = Plugins::load(Some(&ConfigPaths::new(on.path())), on.path(), &DenyAll);
     let wipe = plugins
         .transitions()
@@ -735,7 +741,13 @@ fn the_transition_catalogue_comes_from_the_bundled_plugin() {
 /// motions exist by default and are bound where the keymap left room.
 #[test]
 fn the_analysis_plugins_register_their_motions_and_bindings() {
-    let cfg = Scratch::with_config("analysis-plugins", &[("init.lua", "")]);
+    let cfg = Scratch::with_config(
+        "analysis-plugins",
+        &[(
+            "plugins.lua",
+            r#"require("davimci.plugins").enable("silence", "scenes")"#,
+        )],
+    );
     let plugins = Plugins::load(Some(&ConfigPaths::new(cfg.path())), cfg.path(), &DenyAll);
     let names = plugins.motion_names();
     for wanted in ["next_silence", "prev_silence", "next_scene", "prev_scene"] {
@@ -757,7 +769,13 @@ fn the_analysis_plugins_register_their_motions_and_bindings() {
 /// snapshot rather than from anything the plugin measured itself.
 #[test]
 fn a_scene_motion_lands_on_the_next_detected_cut() {
-    let cfg = Scratch::with_config("scene-motion", &[("init.lua", "")]);
+    let cfg = Scratch::with_config(
+        "scene-motion",
+        &[(
+            "plugins.lua",
+            r#"require("davimci.plugins").enable("scenes")"#,
+        )],
+    );
     let mut plugins = Plugins::load(Some(&ConfigPaths::new(cfg.path())), cfg.path(), &DenyAll);
     let env = davimci_lua::MotionEnv::new(50, "V1").with_track(
         "V1",
@@ -799,7 +817,13 @@ fn a_scene_motion_lands_on_the_next_detected_cut() {
 /// unanalysed track answers "not yet" rather than a wrong frame.
 #[test]
 fn a_silence_motion_lands_on_the_first_quiet_hop() {
-    let cfg = Scratch::with_config("silence-motion", &[("init.lua", "")]);
+    let cfg = Scratch::with_config(
+        "silence-motion",
+        &[(
+            "plugins.lua",
+            r#"require("davimci.plugins").enable("silence")"#,
+        )],
+    );
     let mut plugins = Plugins::load(Some(&ConfigPaths::new(cfg.path())), cfg.path(), &DenyAll);
     let sample = |frame: u64, db: f64| davimci_lua::Sample {
         frame,
@@ -841,4 +865,105 @@ fn a_silence_motion_lands_on_the_first_quiet_hop() {
             .unwrap(),
         davimci_lua::MotionAnswer::Pending
     );
+}
+
+/// Opening a project that uses a wipe turns the plugin that owns wipes on,
+/// and says so. This is what lets every bundled plugin default to off
+/// without a file written by another install quietly losing a transition.
+#[test]
+fn a_project_that_uses_a_wipe_switches_the_transitions_plugin_on() {
+    let cfg = Scratch::with_config("wipe-project", &[("init.lua", "")]);
+    let mut plugins = Plugins::load(Some(&ConfigPaths::new(cfg.path())), cfg.path(), &DenyAll);
+    assert!(
+        !plugins.is_active("transitions"),
+        "a bundled plugin ran with nothing asking for it"
+    );
+    let _ = plugins.take_notices();
+
+    let mut session = Session::new(timeline());
+    let (track, clip) = {
+        let tl = session.timeline();
+        let t = &tl.tracks()[0];
+        (t.id, t.clips()[1].id)
+    };
+    session
+        .exec(&davimci_cmd::EditCommand::SetTransition {
+            track,
+            clip,
+            transition: Some(davimci_core::Transition::new("wipe_left", Frame(10))),
+        })
+        .unwrap();
+
+    let mut ws = Workspace::new(cfg.path().to_path_buf()).without_autosave();
+    ws.set_current_session(session.clone());
+    let editor = Editor::new(
+        ws,
+        Box::new(MockBackend::new(Resolution {
+            width: 8,
+            height: 4,
+        })),
+        Presenter::new(
+            PresentHost::Embedded,
+            Resolution {
+                width: 32,
+                height: 16,
+            },
+            Fps::FPS_60,
+        ),
+    )
+    .with_plugins(plugins);
+
+    assert!(
+        editor.plugins().is_active("transitions"),
+        "the project's own transition did not switch its plugin on"
+    );
+    let wipe = editor
+        .plugins()
+        .transitions()
+        .into_iter()
+        .find(|t| t.name == "wipe_left")
+        .expect("the wipe never reached the seam");
+    assert!(wipe.props.iter().any(|(k, _)| k == "resource"));
+}
+
+/// A config that turned the plugin off outranks the project: the file still
+/// opens, the wipe still renders as a dissolve, and the user is told rather
+/// than left to notice.
+#[test]
+fn a_config_that_disabled_a_plugin_is_not_overridden_by_a_project() {
+    let cfg = Scratch::with_config(
+        "wipe-disabled",
+        &[(
+            "plugins.lua",
+            r#"require("davimci.plugins").disable("transitions")"#,
+        )],
+    );
+    let mut plugins = Plugins::load(Some(&ConfigPaths::new(cfg.path())), cfg.path(), &DenyAll);
+    let _ = plugins.take_notices();
+    let owner = davimci_cli::provider_of_transition("wipe_left").expect("nothing owns wipe_left");
+    assert!(!plugins.activate(owner), "an explicit disable was ignored");
+    assert!(!plugins.is_active("transitions"));
+    assert!(plugins.transitions().is_empty());
+}
+
+/// Every bundled plugin is off until something asks, and each one that owns
+/// a name says which names those are.
+#[test]
+fn no_bundled_plugin_is_on_by_default_and_each_declares_what_it_owns() {
+    for p in davimci_cli::BUNDLED {
+        assert!(!p.default_on, "{} is on by default", p.name);
+    }
+    assert_eq!(
+        davimci_cli::provider_of_transition("wipe_left").map(|p| p.name),
+        Some("transitions")
+    );
+    assert_eq!(
+        davimci_cli::provider_of_motion("next_silence").map(|p| p.name),
+        Some("silence")
+    );
+    assert_eq!(
+        davimci_cli::provider_of_motion("next_scene").map(|p| p.name),
+        Some("scenes")
+    );
+    assert!(davimci_cli::provider_of_transition("dissolve").is_none());
 }
