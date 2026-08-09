@@ -1199,7 +1199,7 @@ impl MltBackend {
             }
             TrackOp::Update { index, entry } => {
                 let resizable = matches!((live.get(*index), entry), (Some(Entry::Clip(a)), Entry::Clip(b))
-                    if a.clip == b.clip && a.filters == b.filters);
+                    if a.same_producer(b));
                 if resizable && let Entry::Clip(c) = entry {
                     pl.resize_clip(
                         mlt_int(*index),

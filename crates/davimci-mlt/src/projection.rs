@@ -94,6 +94,22 @@ impl ClipEntry {
     pub fn length(&self) -> u64 {
         self.out_point.get() + 1 - self.in_point.get()
     }
+
+    /// Whether `other` plays the same producer over a different span, which
+    /// is the only update a live playlist may take as a resize.
+    ///
+    /// Everything a producer is built from has to be compared here. A text
+    /// edit keeps the clip id, the filters and the span and changes only the
+    /// payload, so a resize would leave the graph playing the words the edit
+    /// replaced until the project is reopened.
+    #[must_use]
+    pub fn same_producer(&self, other: &Self) -> bool {
+        self.clip == other.clip
+            && self.resource == other.resource
+            && self.stream == other.stream
+            && self.channels == other.channels
+            && self.filters == other.filters
+    }
 }
 
 /// The overlap between two clips, projected.
@@ -951,5 +967,30 @@ mod tests {
         assert_eq!(f.len(), 2);
         assert_eq!(f[0].props[0].1, "0=-60;9=0");
         assert_eq!(f[1].props[0].1, "80=0;99=-60");
+    }
+
+    fn cue(text: &str) -> ClipEntry {
+        ClipEntry {
+            clip: ClipId(1),
+            label: "cue".into(),
+            resource: Resource::Text(text.into()),
+            in_point: Frame(0),
+            out_point: Frame(49),
+            stream: None,
+            channels: None,
+            filters: Vec::new(),
+        }
+    }
+
+    /// Regression: a text edit keeps the clip id, the span and the filters,
+    /// so the patch path took it as a resize and the live graph went on
+    /// playing the words the edit replaced until the project was reopened.
+    #[test]
+    fn a_text_edit_is_not_a_resize_but_a_trim_is() {
+        let before = cue("hello");
+        assert!(!before.same_producer(&cue("hello there")));
+        let mut trimmed = before.clone();
+        trimmed.out_point = Frame(29);
+        assert!(before.same_producer(&trimmed));
     }
 }

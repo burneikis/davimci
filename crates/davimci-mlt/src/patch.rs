@@ -206,6 +206,28 @@ mod tests {
         ));
     }
 
+    /// Regression: an edited cue must reach the graph. The entry keeps its
+    /// id and its span, so the only thing that can carry the new words is the
+    /// resource, and the diff has to report it as an update.
+    #[test]
+    fn editing_a_cue_updates_its_entry() {
+        let mut tl = Timeline::new(TimelineProps::default());
+        let track = tl.add_track(davimci_core::TrackKind::Text);
+        let mut clip =
+            davimci_core::Clip::generated(davimci_core::ClipId(1), "cue", Frame(0), Frame(50));
+        clip.text = Some("hello".into());
+        let clip = tl.insert_clip(track, clip, Frame(0)).unwrap();
+        let before = proj(&tl);
+        tl.set_clip_text(track, clip, "hello there").unwrap();
+        let Patch::Tracks(patches) = diff(&before, &proj(&tl)) else {
+            panic!("expected playlist ops");
+        };
+        assert!(matches!(
+            patches[0].ops.as_slice(),
+            [TrackOp::Update { index: 0, .. }]
+        ));
+    }
+
     #[test]
     fn a_ripple_delete_removes_rather_than_rebuilds() {
         let mut tl = fixture(&[("V1", &[(0, 50, "a"), (50, 50, "b"), (100, 50, "c")])]);
