@@ -41,6 +41,10 @@ ratatui   = "0.30"
 crossterm = "0.29"
 rustix    = { version = "1", features = ["event", "stdio"] }
 egui      = "0.35"
+# Pinned to what eframe links: the window hands its own device to the planar
+# renderer, so two wgpu versions would be two incompatible `Device` types.
+wgpu      = "29"
+pollster  = "0.4"
 eframe    = { version = "0.35", default-features = false, features = ["wgpu", "x11", "wayland", "default_fonts"] }
 
 [workspace.lints.rust]

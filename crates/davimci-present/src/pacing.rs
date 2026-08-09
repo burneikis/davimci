@@ -91,6 +91,11 @@ pub struct Pacer {
     /// Set when the frame on screen belongs to a pass that has ended, so the
     /// first frame of the next one is taken wherever it starts.
     restarting: bool,
+    /// Bumped every time the picture is replaced. It is what lets the
+    /// presenter tell "the same picture again" from "a different picture at
+    /// the same position", and so skip a full-surface blit that would
+    /// produce identical pixels.
+    epoch: u64,
 }
 
 impl Pacer {
@@ -103,7 +108,15 @@ impl Pacer {
             max_pulls_per_tick: 8,
             direction: Direction::Forward,
             restarting: false,
+            epoch: 0,
         }
+    }
+
+    /// Identifies the picture currently on screen. Equal epochs mean the
+    /// same decoded frame, byte for byte.
+    #[must_use]
+    pub fn epoch(&self) -> u64 {
+        self.epoch
     }
 
     /// Tell the pacer which way the clock now runs. A held frame belongs to
@@ -149,11 +162,13 @@ impl Pacer {
     pub fn show(&mut self, frame: VideoFrame) {
         self.stats.presented = self.stats.presented.saturating_add(1);
         self.current = Some(frame);
+        self.epoch = self.epoch.wrapping_add(1);
     }
 
     pub fn clear(&mut self) {
         self.current = None;
         self.pending = None;
+        self.epoch = self.epoch.wrapping_add(1);
     }
 
     /// One presentation tick. `clock` is the audio clock position; `None`
@@ -224,6 +239,7 @@ impl Pacer {
                 let at = frame.position;
                 self.stats.presented = self.stats.presented.saturating_add(1);
                 self.current = Some(frame);
+                self.epoch = self.epoch.wrapping_add(1);
                 Ok(Pace::Presented(at))
             }
             None => Ok(self.hold()),

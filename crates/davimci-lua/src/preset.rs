@@ -43,6 +43,10 @@ pub struct ExportPreset {
     pub fps: Option<Fps>,
     pub audio_tracks: TrackSelection,
     pub subtitle_tracks: SubtitleSelection,
+    /// `hardware = true`: this preset requires a hardware encoder, and an
+    /// export that cannot use one is refused rather than encoded in
+    /// software at a different quality.
+    pub hardware: bool,
 }
 
 /// Containers davimci will mux, and the codecs each accepts. A pairing outside
@@ -156,6 +160,11 @@ impl ExportPreset {
                 && self.audio_tracks != TrackSelection::None,
             burn_subtitles: matches!(self.subtitle_tracks, SubtitleSelection::Burned),
             extra: Vec::new(),
+            hardware: if self.hardware {
+                davimci_backend::HardwareEncode::Required
+            } else {
+                davimci_backend::HardwareEncode::Off
+            },
         }
     }
 }
@@ -176,6 +185,7 @@ mod tests {
             fps: None,
             audio_tracks: TrackSelection::All,
             subtitle_tracks: SubtitleSelection::Burned,
+            hardware: false,
         }
     }
 

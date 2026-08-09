@@ -55,6 +55,10 @@ pub struct Window {
     video_size: Resolution,
     /// One GPU texture per clip thumbnail, kept across frames.
     thumbnails: egui_shell::ThumbnailTextures,
+    /// Whether this window can convert planar frames on the card. False
+    /// without a `wgpu` render state, where the composited RGBA texture is
+    /// the only path.
+    planar: bool,
 }
 
 impl std::fmt::Debug for Window {
@@ -82,6 +86,7 @@ impl Window {
                 height: 0,
             },
             thumbnails: egui_shell::ThumbnailTextures::default(),
+            planar: false,
         }
     }
 
@@ -94,7 +99,19 @@ impl Window {
                 .with_min_inner_size([480.0, 320.0]),
             ..Default::default()
         };
-        eframe::run_native(TITLE, options, Box::new(move |_cc| Ok(Box::new(self))))
+        eframe::run_native(
+            TITLE,
+            options,
+            Box::new(move |cc| {
+                let mut window = self;
+                // Planar preview needs a device to convert on. Asked for
+                // once, here, because a window that cannot do it must stay
+                // on the composited texture rather than show nothing.
+                window.planar = crate::planar_video::install(cc.wgpu_render_state.as_ref());
+                window.editor.set_planar_preview(window.planar);
+                Ok(Box::new(window))
+            }),
+        )
     }
 
     /// Keep the presenter's surface the size of the video pane, so
@@ -116,6 +133,12 @@ impl Window {
         let Some(p) = self.editor.presentation() else {
             return;
         };
+        // A planar frame is uploaded by the render callback, in its own
+        // three single-channel textures. There is no composited buffer to
+        // put on the card, and there must not be one.
+        if p.video.is_some() {
+            return;
+        }
         if p.pixels.is_empty() || self.uploaded == Some(p.pixels_id) {
             return;
         }
@@ -241,7 +264,23 @@ impl eframe::App for Window {
         // included - so it is drawn over the whole video pane. Drawing it
         // into the quad would letterbox a second time and squash the
         // picture into the middle of its own bars.
-        if let (Some(tex), Some(p)) = (&self.texture, self.editor.presentation())
+        // Planar first: when the presenter handed out a decoder frame, the
+        // picture is drawn into the quad it letterboxed rather than over the
+        // whole pane, because the shader draws the video and nothing else.
+        if let Some(p) = self.editor.presentation()
+            && let Some(video) = p.video.clone()
+            && layout.video.height > 0
+        {
+            let quad = egui::Rect::from_min_size(
+                screen.min
+                    + egui::Vec2::new(
+                        layout.video.x as f32 + p.quad.x as f32,
+                        layout.video.y as f32 + p.quad.y as f32,
+                    ),
+                egui::Vec2::new(p.quad.width as f32, p.quad.height as f32),
+            );
+            crate::planar_video::draw(ui, quad, &video);
+        } else if let (Some(tex), Some(p)) = (&self.texture, self.editor.presentation())
             && layout.video.height > 0
         {
             let rect = egui::Rect::from_min_size(

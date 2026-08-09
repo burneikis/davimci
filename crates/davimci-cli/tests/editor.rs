@@ -657,6 +657,20 @@ fn setting_the_decode_policy_is_not_an_edit_and_degrades_to_software() {
     assert!(status.detail.ends_with('.'), "{}", status.detail);
 }
 
+/// The encode policy is a session policy like the decode one: it changes
+/// how the next export is produced, never what the timeline holds.
+#[test]
+fn setting_the_encode_policy_is_not_an_edit() {
+    let (mut app, mut editor) = editor();
+    let before = app.session().history().current();
+    let timeline = app.session().timeline().clone();
+
+    app.event(Event::Command(":set encode auto".into()), &mut editor);
+
+    assert_eq!(app.session().history().current(), before);
+    assert_eq!(app.session().timeline(), &timeline);
+}
+
 /// `:gain` sets an absolute level on the clip under the playhead, and it is
 /// an ordinary undoable edit.
 #[test]

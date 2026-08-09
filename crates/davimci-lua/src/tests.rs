@@ -309,6 +309,33 @@ fn spec_9_5_preset_loads_and_validates() {
     assert_eq!(s.resolution, davimci_core::Resolution::HD_1080);
 }
 
+/// `hardware = true` is a preset requiring a hardware encoder. It reaches
+/// the render settings as a requirement, which the backend refuses rather
+/// than downgrades.
+#[test]
+fn a_preset_can_require_a_hardware_encoder() {
+    let rt = rt();
+    exec(
+        &rt,
+        r#"
+        require("davimci.export").preset("fast", {
+          container = "mkv", video_codec = "h264", audio_codec = "aac",
+          hardware = true,
+        })
+        "#,
+    );
+    let p = rt.preset("fast").unwrap();
+    assert!(p.hardware);
+    let s = p.render_settings(davimci_core::Resolution::HD_1080, davimci_core::Fps::FPS_60);
+    assert_eq!(s.hardware, davimci_backend::HardwareEncode::Required);
+
+    // The default is software, so an existing preset cannot start demanding
+    // hardware by accident.
+    exec(&rt, PRESET_CFG);
+    let plain = rt.preset("youtube_1080p").unwrap();
+    assert!(!plain.hardware);
+}
+
 #[test]
 fn a_named_track_list_is_accepted_the_way_the_comment_says() {
     let rt = rt();

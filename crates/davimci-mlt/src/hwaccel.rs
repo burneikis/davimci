@@ -12,7 +12,7 @@
 
 use std::path::{Path, PathBuf};
 
-use davimci_backend::{AccelerationStatus, DecodePolicy};
+use davimci_backend::{AccelerationStatus, DecodePolicy, EncodePolicy, HardwareEncode};
 
 /// The codecs whose long-GOP decode is expensive enough that a hardware
 /// decode plus a readback still wins. Anything not listed stays on the CPU:
@@ -37,10 +37,38 @@ pub struct Choice {
     pub device: String,
 }
 
+/// The software encoders that have a VAAPI equivalent, keyed by the encoder
+/// name a preset resolves to. Same codec on both sides: a substitution that
+/// changed the codec would change what the preset promised.
+const ENCODERS: &[(&str, &str)] = &[
+    ("libx264", "h264_vaapi"),
+    ("libx265", "hevc_vaapi"),
+    ("libvpx-vp9", "vp9_vaapi"),
+];
+
+/// What an export will actually encode with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EncodeChoice {
+    /// The software encoder the preset resolved to.
+    Software,
+    /// A hardware encoder that meets the preset, plus the device to open.
+    Hardware { encoder: String, device: String },
+    /// The job must not start: a required hardware encode cannot be
+    /// delivered. Carries the complete sentence to refuse it with.
+    Refused(String),
+}
+
 /// The session's decode policy plus what the probe found.
 #[derive(Debug, Clone)]
 pub struct Acceleration {
     policy: DecodePolicy,
+    encode: EncodePolicy,
+    /// Hardware encoders that have been tried, and whether they worked.
+    ///
+    /// A render node says nothing about *encode* entrypoints: plenty of
+    /// cards decode H.264 and cannot encode it. Presence is not capability,
+    /// so an encoder is only trusted once it has produced a file.
+    verified: std::collections::BTreeMap<String, bool>,
     device: Option<String>,
     /// Why there is no device, when there is none.
     unavailable: Option<String>,
@@ -74,9 +102,82 @@ impl Acceleration {
         });
         Self {
             policy,
+            encode: EncodePolicy::default(),
+            verified: std::collections::BTreeMap::new(),
             device,
             unavailable,
             failure: None,
+        }
+    }
+
+    /// What a trial encode found, or `None` if this encoder has not been
+    /// tried yet.
+    #[must_use]
+    pub fn encoder_verified(&self, encoder: &str) -> Option<bool> {
+        self.verified.get(encoder).copied()
+    }
+
+    /// Record what a trial encode found. Sticky for the session: a card
+    /// without an encode entrypoint will not grow one.
+    pub fn mark_encoder(&mut self, encoder: &str, works: bool) {
+        self.verified.insert(encoder.to_string(), works);
+    }
+
+    /// The sentence that refuses a required hardware encode this machine
+    /// cannot perform.
+    #[must_use]
+    pub fn encoder_refusal(encoder: &str) -> String {
+        format!(
+            "This export was refused because the preset requires a hardware encoder and this \
+             machine's graphics driver has no working {encoder} encoder."
+        )
+    }
+
+    #[must_use]
+    pub fn encode_policy(&self) -> EncodePolicy {
+        self.encode
+    }
+
+    /// `:set encode cpu|auto`. Reports what exports will now do.
+    pub fn set_encode_policy(&mut self, encode: EncodePolicy) -> AccelerationStatus {
+        self.encode = encode;
+        self.status()
+    }
+
+    /// What to encode one export with.
+    ///
+    /// `software` is the encoder the preset resolved to, which is what a
+    /// hardware encode has to match: the substitution keeps the codec and
+    /// only changes who does the work.
+    #[must_use]
+    pub fn encoder_for(&self, software: &str, request: HardwareEncode) -> EncodeChoice {
+        // `:set encode auto` is the session asking for acceleration wherever
+        // it meets the preset, which is exactly what `Preferred` means.
+        let request = match (request, self.encode) {
+            (HardwareEncode::Off, EncodePolicy::Auto) => HardwareEncode::Preferred,
+            (other, _) => other,
+        };
+        if !request.wanted() || (self.encode == EncodePolicy::Cpu && !request.required()) {
+            return EncodeChoice::Software;
+        }
+        let mapped = ENCODERS
+            .iter()
+            .find(|(cpu, _)| *cpu == software)
+            .map(|(_, gpu)| (*gpu).to_string());
+        match (mapped, self.device.clone()) {
+            (Some(encoder), Some(device)) => EncodeChoice::Hardware { encoder, device },
+            (None, _) if request.required() => EncodeChoice::Refused(format!(
+                "This export was refused because the preset requires a hardware encoder and no \
+                 hardware encoder produces what {software} produces."
+            )),
+            (_, None) if request.required() => EncodeChoice::Refused(
+                "This export was refused because the preset requires a hardware encoder and this \
+                 machine has no usable render device."
+                    .into(),
+            ),
+            // Preferred, not required: an export that cannot be accelerated
+            // is still an export, and nothing was promised about its speed.
+            _ => EncodeChoice::Software,
         }
     }
 
@@ -111,6 +212,10 @@ impl Acceleration {
     /// What the session is doing, as a complete sentence.
     #[must_use]
     pub fn status(&self) -> AccelerationStatus {
+        self.decode_status().with_encode(self.encode)
+    }
+
+    fn decode_status(&self) -> AccelerationStatus {
         if self.policy == DecodePolicy::Cpu {
             return AccelerationStatus::cpu(
                 self.policy,
@@ -183,7 +288,7 @@ fn render_nodes(dri: &Path) -> Vec<PathBuf> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
 
@@ -217,6 +322,74 @@ mod tests {
         assert!(!status.is_hardware());
         assert!(status.detail.ends_with('.'));
         assert!(accel.choose(Some("hevc"), 3840 * 2160).is_none());
+    }
+
+    #[test]
+    fn an_export_that_asks_for_nothing_gets_the_software_encoder() {
+        let accel = with_device(DecodePolicy::Auto);
+        assert_eq!(
+            accel.encoder_for("libx264", HardwareEncode::Off),
+            EncodeChoice::Software
+        );
+        // The session default is cpu, so `Preferred` alone changes nothing.
+        assert_eq!(
+            accel.encoder_for("libx264", HardwareEncode::Preferred),
+            EncodeChoice::Software
+        );
+    }
+
+    #[test]
+    fn set_encode_auto_substitutes_the_encoder_for_the_same_codec() {
+        let mut accel = with_device(DecodePolicy::Cpu);
+        let status = accel.set_encode_policy(EncodePolicy::Auto);
+        assert_eq!(status.encode, EncodePolicy::Auto);
+        assert_eq!(
+            accel.encoder_for("libx265", HardwareEncode::Preferred),
+            EncodeChoice::Hardware {
+                encoder: "hevc_vaapi".into(),
+                device: "/dev/dri/renderD128".into(),
+            }
+        );
+        // A preset that asked for nothing is accelerated too: that is what
+        // the session policy is for.
+        assert!(matches!(
+            accel.encoder_for("libx264", HardwareEncode::Off),
+            EncodeChoice::Hardware { .. }
+        ));
+        // A codec with no hardware encoder is not a refusal when nothing was
+        // promised - it is simply encoded in software.
+        assert_eq!(
+            accel.encoder_for("prores_ks", HardwareEncode::Preferred),
+            EncodeChoice::Software
+        );
+    }
+
+    #[test]
+    fn a_required_hardware_encode_is_refused_rather_than_downgraded() {
+        let accel = with_device(DecodePolicy::Cpu);
+        // Required beats the session policy: the preset is binding.
+        assert!(matches!(
+            accel.encoder_for("libx264", HardwareEncode::Required),
+            EncodeChoice::Hardware { .. }
+        ));
+        let EncodeChoice::Refused(reason) =
+            accel.encoder_for("prores_ks", HardwareEncode::Required)
+        else {
+            panic!("a codec with no hardware encoder must refuse");
+        };
+        assert!(reason.ends_with('.'));
+
+        let none = Acceleration::with_devices(DecodePolicy::Cpu, &[]);
+        let EncodeChoice::Refused(reason) = none.encoder_for("libx264", HardwareEncode::Required)
+        else {
+            panic!("a machine with no device must refuse a required hardware encode");
+        };
+        assert!(reason.ends_with('.'));
+        // The same export without the requirement still runs.
+        assert_eq!(
+            none.encoder_for("libx264", HardwareEncode::Preferred),
+            EncodeChoice::Software
+        );
     }
 
     #[test]

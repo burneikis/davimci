@@ -24,6 +24,9 @@ pub struct RenderSettings {
     pub burn_subtitles: bool,
     /// Extra backend properties, passed through verbatim.
     pub extra: Vec<(String, String)>,
+    /// What this export asks of a hardware encoder. The backend substitutes
+    /// the encoder or refuses the job; it never downgrades a requirement.
+    pub hardware: crate::accel::HardwareEncode,
 }
 
 impl Default for RenderSettings {
@@ -37,6 +40,7 @@ impl Default for RenderSettings {
             separate_audio_tracks: false,
             burn_subtitles: true,
             extra: Vec::new(),
+            hardware: crate::accel::HardwareEncode::Off,
         }
     }
 }

@@ -110,6 +110,11 @@ pub type mlt_profile = *mut mlt_profile_s;
 /// presenter's format, so this is the only one davimci ever asks for.
 pub const MLT_IMAGE_RGBA: c_int = 2;
 
+/// `mlt_image_yuv420p` from `mlt_types.h`, fifth in the enum. Planar 8-bit
+/// YUV 4:2:0: the format a GPU host uploads as three textures and converts
+/// in a shader.
+pub const MLT_IMAGE_YUV420P: c_int = 4;
+
 unsafe extern "C" {
     // -- factory ---------------------------------------------------------
     pub fn mlt_factory_init(directory: *const c_char) -> mlt_repository;

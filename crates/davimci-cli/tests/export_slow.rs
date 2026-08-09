@@ -291,6 +291,96 @@ fn an_exported_file_has_the_duration_of_the_timeline() {
     let _ = std::fs::remove_file(&out);
 }
 
+/// A hardware export must satisfy every assertion a software export does:
+/// the same codec, one video stream, and exactly the timeline's frames. A
+/// machine with no encoder falls back to software, which must satisfy them
+/// too - so this test asserts the file, not the encoder.
+#[test]
+fn a_hardware_export_meets_the_same_assertions_as_a_software_one() {
+    let _mlt = davimci_mlt::test_support::media_lock();
+    let src = fixture("counter_720p.mkv");
+    let (mut app, mut editor) = editor_with(&src);
+    let frames = app.session().timeline().duration();
+
+    app.event(Event::Command(":set encode auto".into()), &mut editor);
+    let out = std::env::temp_dir().join("davimci-slow-hwencode.mkv");
+    let _ = std::fs::remove_file(&out);
+    app.event(
+        Event::Command(format!(":export {}", out.display())),
+        &mut editor,
+    );
+    drain_export(&mut app, &mut editor);
+
+    assert!(out.exists(), "the export produced no file");
+    assert_eq!(stream_count(&out, "v"), 1);
+    assert_eq!(
+        probe(
+            &out,
+            &[
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=codec_name",
+                "-of",
+                "csv=p=0",
+            ],
+        ),
+        "h264",
+        "the preset named h264 and the file must carry h264, hardware or not"
+    );
+    let coded: u64 = probe(
+        &out,
+        &[
+            "-select_streams",
+            "v:0",
+            "-count_frames",
+            "-show_entries",
+            "stream=nb_read_frames",
+            "-of",
+            "csv=p=0",
+        ],
+    )
+    .parse()
+    .expect("ffprobe should count the video frames");
+    assert_eq!(
+        coded,
+        frames.get(),
+        "the export is not the timeline's length"
+    );
+    let _ = std::fs::remove_file(&out);
+}
+
+/// A preset that requires a hardware encoder is refused before the job
+/// starts when it cannot be met - no partial file, and a sentence saying so.
+#[test]
+fn a_required_hardware_encode_that_cannot_be_met_is_refused_with_no_file() {
+    use davimci_backend::{HardwareEncode, RenderJob, RenderSettings};
+
+    let _mlt = davimci_mlt::test_support::media_lock();
+    let src = fixture("counter_720p.mkv");
+    let (app, mut editor) = editor_with(&src);
+    let props = app.session().timeline().props;
+
+    let out = std::env::temp_dir().join("davimci-slow-hwrefused.mkv");
+    let _ = std::fs::remove_file(&out);
+    // ProRes has no hardware encoder anywhere, so this is a requirement no
+    // machine can meet.
+    let settings = RenderSettings {
+        resolution: props.resolution,
+        fps: props.fps,
+        video_codec: "prores_ks".into(),
+        hardware: HardwareEncode::Required,
+        ..RenderSettings::default()
+    };
+    let err = editor
+        .backend_mut()
+        .render(RenderJob::new(out.clone(), settings))
+        .expect_err("a requirement that cannot be met must refuse");
+    let sentence = err.to_string();
+    assert!(sentence.ends_with('.'), "{sentence}");
+    assert!(!out.exists(), "a refused export left a file behind");
+}
+
 #[test]
 fn cancelling_a_real_export_stops_it_and_keeps_the_partial_file() {
     let _mlt = davimci_mlt::test_support::media_lock();

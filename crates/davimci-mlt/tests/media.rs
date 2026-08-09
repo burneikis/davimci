@@ -406,6 +406,49 @@ fn hardware_decode_matches_software_decode_or_falls_back_to_it() {
     }
 }
 
+/// A planar pull is the same picture as the RGBA pull, in three eighths of
+/// the bytes.
+///
+/// Not bit-exact: MLT converts to RGBA with swscale and this converts with
+/// the BT.709 matrix in `davimci-backend`, so the comparison is the mean
+/// channel under a tolerance that belongs to this path alone. RGBA remains
+/// the reference the golden tests assert against, and this tolerance is
+/// never applied to them.
+const PLANAR_TOLERANCE: i32 = 12;
+
+#[test]
+fn a_planar_pull_is_the_same_picture_in_fewer_bytes() {
+    let _mlt = davimci_mlt::test_support::media_lock();
+    let res = Resolution {
+        width: 640,
+        height: 480,
+    };
+    let tl = timeline_of("scene_cut.mkv", 240, res);
+    let mut b = MltBackend::new(tl.props).unwrap();
+    b.set_timeline(&tl).unwrap();
+    assert!(b.supports_planar());
+
+    for at in [Frame(30), Frame(200)] {
+        let rgba = b.frame_at(at, PreviewScale::Full).unwrap();
+        let planar = b.planar_frame_at(at, PreviewScale::Full).unwrap();
+        assert!(planar.is_well_formed());
+        assert_eq!((planar.width, planar.height), (rgba.width, rgba.height));
+        assert_eq!(
+            planar.bytes() * 8,
+            rgba.rgba.len() * 3,
+            "a planar frame must be three eighths of the RGBA upload"
+        );
+        let want = rgba.signature();
+        let got = planar.to_rgba().signature();
+        for c in 0..3 {
+            assert!(
+                (i32::from(want[c]) - i32::from(got[c])).abs() <= PLANAR_TOLERANCE,
+                "planar decode is a different picture: {want:?} vs {got:?}"
+            );
+        }
+    }
+}
+
 /// Phase 1's before/after number, printed rather than asserted: a wall clock
 /// is not a correctness claim, and a machine without a device has nothing to
 /// compare.
@@ -437,6 +480,25 @@ fn decode_cost_per_frame_is_reported_for_both_paths() {
         println!("decode {policy}: {ms:.2} ms/frame (hardware: {hardware})");
     }
     assert_eq!(timings.len(), 2);
+
+    // Phase 3's number: the same pull without the RGBA conversion, and the
+    // bytes a host would upload for each.
+    let mut b = MltBackend::new(tl.props).unwrap();
+    b.set_timeline(&tl).unwrap();
+    b.frame_at(Frame(0), PreviewScale::Full).unwrap();
+    let start = Instant::now();
+    let mut planar_bytes = 0;
+    for f in 1..=120u64 {
+        planar_bytes = b
+            .planar_frame_at(Frame(f), PreviewScale::Full)
+            .unwrap()
+            .bytes();
+    }
+    let per_frame = start.elapsed().as_secs_f64() * 1000.0 / 120.0;
+    println!(
+        "planar pull: {per_frame:.2} ms/frame, {planar_bytes} bytes to upload against {} for RGBA8",
+        (res.width as usize) * (res.height as usize) * 4
+    );
 }
 
 #[test]
@@ -605,6 +667,7 @@ fn a_render_produces_a_file_with_the_requested_streams() {
         separate_audio_tracks: false,
         burn_subtitles: false,
         extra: vec![("preset".into(), "ultrafast".into())],
+        hardware: davimci_backend::HardwareEncode::Off,
     };
     let mut job = RenderJob::new(&out, settings);
     job.range = Some((Frame::ZERO, Frame(60)));
@@ -680,4 +743,26 @@ fn an_unknown_clip_id_never_reaches_the_graph() {
             );
         }
     }
+}
+
+/// The encode probe must tell a card that encodes from one that only
+/// decodes: a render node is not an encode entrypoint, and trusting one is
+/// how an export ends up as a container with no header.
+///
+/// The answer is whatever this machine can do; what is asserted is that the
+/// probe reaches one, sticks to it, and that a device that does not exist is
+/// never usable.
+#[test]
+fn the_hardware_encode_probe_is_decided_by_encoding_and_is_stable() {
+    let _mlt = davimci_mlt::test_support::media_lock();
+    let mut b = MltBackend::new(TimelineProps::default()).unwrap();
+    let first = b.hardware_encoder_probe("h264_vaapi", "/dev/dri/renderD128");
+    let second = b.hardware_encoder_probe("h264_vaapi", "/dev/dri/renderD128");
+    assert_eq!(first, second, "the probe must cache its answer");
+    println!("h264_vaapi usable on this machine: {first}");
+
+    assert!(
+        !b.hardware_encoder_probe("h264_vaapi", "/dev/dri/renderD_nonexistent"),
+        "a device that does not exist cannot encode"
+    );
 }

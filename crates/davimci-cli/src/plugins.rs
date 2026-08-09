@@ -290,6 +290,9 @@ fn convert_preset(p: &davimci_lua::ExportPreset) -> Result<Preset, LuaError> {
         davimci_lua::SubtitleSelection::Embedded => SubtitleMode::Embedded,
         davimci_lua::SubtitleSelection::None => SubtitleMode::None,
     };
+    if p.hardware {
+        preset = preset.require_hardware().map_err(fail)?;
+    }
     Ok(preset)
 }
 

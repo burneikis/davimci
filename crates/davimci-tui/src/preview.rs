@@ -740,6 +740,7 @@ mod tests {
             pixels.extend_from_slice(&fill);
         }
         Presentation {
+            video: None,
             surface,
             pixels: Arc::new(pixels),
             pixels_id: 1,

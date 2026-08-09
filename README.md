@@ -75,12 +75,34 @@ spelled `current`) or `--numbers none`, the default. Changeable live with
 
 `:1234` puts the playhead on frame 1234, clamped to the end of the timeline.
 
+## Hardware acceleration
+
+Optional, off by default, and never required: davimci runs fully on the CPU,
+which is the path every test asserts against. Three runtime switches turn the
+fast paths on, and each falls back to software with a sentence saying why
+rather than failing.
+
+```
+:set decode cpu|auto   # VAAPI decode for long-GOP sources that benefit
+:set encode cpu|auto   # a hardware encoder where it meets the export preset
+:set proxy on|off      # proxy media for qualifying imports
+```
+
+A window with a `wgpu` device uploads the decoder's YUV planes and converts
+them in a shader, which is three eighths of the bytes of an RGBA upload and
+no CPU colour conversion; a machine without one composites on the CPU and
+looks identical. An export preset may demand hardware with `hardware = true`,
+in which case an export that cannot deliver it is refused rather than
+silently encoded in software. See `docs/gpu_plan.md` for what is measured and
+what is not done.
+
 ## Testing
 
 ```sh
 just fixtures        # generate test media with ffmpeg (never committed)
 just test            # fast suite - no decode/encode, runs in seconds
 just test-slow       # real render/export tests (--features slow-tests)
+just test-gpu        # the planar shader path, against the CPU conversion
 just test-all        # everything, including sanitizer and GPU snapshot tests
 just perf            # timing budgets and scaling checks, in release
 just bench           # criterion benchmarks

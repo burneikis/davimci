@@ -353,6 +353,7 @@ fn preset_from_table(name: &str, def: &Table) -> mlua::Result<ExportPreset> {
         fps: None,
         audio_tracks,
         subtitle_tracks,
+        hardware: def.get::<Option<bool>>("hardware")?.unwrap_or(false),
     })
 }
 

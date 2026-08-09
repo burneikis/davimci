@@ -52,6 +52,13 @@ pub struct Presentation {
     /// byte-identical pixels, which is how a host skips re-uploading a
     /// texture for a repeated frame.
     pub pixels_id: u64,
+    /// The frame as the decoder produced it, for a host that uploads planar
+    /// YUV and converts on the GPU.
+    ///
+    /// `None` on the CPU path, which is every host that has not asked for
+    /// planar and every test in the tree: when this is set, `pixels` is
+    /// empty and the host is the one drawing the video.
+    pub video: Option<Arc<davimci_backend::PlanarFrame>>,
     /// Where the video landed inside the surface.
     pub quad: Quad,
     /// The frame on screen, or `None` if nothing has been presented.
@@ -72,6 +79,7 @@ impl std::fmt::Debug for Presentation {
             .field("overlay", &self.overlay)
             .field("pixels_id", &self.pixels_id)
             .field("bytes", &self.pixels.len())
+            .field("planar", &self.video.is_some())
             .finish()
     }
 }
@@ -104,6 +112,14 @@ pub struct Presenter {
     /// picture. Compositing is a per-pixel scale of the whole surface; doing
     /// it again for a frame already on screen is pure waste at refresh rate.
     cache: Option<Presentation>,
+    /// The pacer epoch the cache was composed from, so "the same picture"
+    /// is decided by the frame's identity rather than by its position: two
+    /// different frames can carry the same position across a restart.
+    cache_epoch: Option<u64>,
+    /// Full-surface blits skipped because only the overlay changed. The
+    /// budget test asserts it: an overlay that forces a recomposition is a
+    /// per-pixel cost paid at refresh rate.
+    pub blits_skipped: u64,
     next_pixels_id: u64,
 }
 
@@ -118,6 +134,8 @@ impl Presenter {
             overlay_cfg: OverlayConfig::default(),
             pacer: Pacer::new(),
             cache: None,
+            cache_epoch: None,
+            blits_skipped: 0,
             next_pixels_id: 0,
         }
     }
@@ -135,6 +153,7 @@ impl Presenter {
     pub fn resize(&mut self, surface: Resolution) {
         if surface != self.surface {
             self.cache = None;
+            self.cache_epoch = None;
         }
         self.surface = surface;
     }
@@ -165,8 +184,10 @@ impl Presenter {
     }
 
     pub fn set_overlay_config(&mut self, cfg: OverlayConfig) {
+        // The overlay is a model, not pixels: a new configuration changes
+        // what the host draws over the video, never the video, so the
+        // composed buffer stands.
         self.overlay_cfg = cfg;
-        self.cache = None;
     }
 
     #[must_use]
@@ -182,6 +203,7 @@ impl Presenter {
     pub fn clear(&mut self) {
         self.pacer.clear();
         self.cache = None;
+        self.cache_epoch = None;
     }
 
     /// Which way the clock now runs, so pacing knows which frames are late.
@@ -204,6 +226,54 @@ impl Presenter {
         self.compose(pace)
     }
 
+    /// Show one planar frame, for a host that converts on the GPU.
+    ///
+    /// No blit and no allocation: the picture never becomes RGBA on the CPU
+    /// at all, which is the whole point of the planar path. What is still
+    /// computed here is everything a host must not decide for itself - where
+    /// the picture sits in the surface, and what the overlay says.
+    pub fn present_planar(
+        &mut self,
+        frame: Arc<davimci_backend::PlanarFrame>,
+    ) -> Result<Presentation, PresentError> {
+        if !frame.is_well_formed() {
+            return Err(PresentError::MalformedFrame {
+                width: frame.width,
+                height: frame.height,
+                bytes: frame.bytes(),
+            });
+        }
+        let position = frame.position;
+        let quad = letterbox(
+            Resolution {
+                width: frame.width,
+                height: frame.height,
+            },
+            self.surface,
+        );
+        let overlay = if self.host.allows_overlay() {
+            self.overlay_cfg.build(Some(position), self.fps, quad)
+        } else {
+            Overlay::default()
+        };
+        // The composed buffer belongs to the CPU path and is no longer what
+        // is on screen, so it must not be handed back as if it were.
+        self.cache = None;
+        self.cache_epoch = None;
+        let out = Presentation {
+            surface: self.surface,
+            video: Some(frame),
+            pixels: Arc::new(Vec::new()),
+            pixels_id: self.next_pixels_id,
+            quad,
+            position: Some(position),
+            overlay,
+            pace: Pace::Presented(position),
+        };
+        self.next_pixels_id = self.next_pixels_id.wrapping_add(1);
+        Ok(out)
+    }
+
     /// Show one frame outside playback - scrubbing, seeking, a still.
     pub fn present_frame(&mut self, frame: VideoFrame) -> Result<Presentation, PresentError> {
         if !frame.is_well_formed() {
@@ -219,14 +289,24 @@ impl Presenter {
     }
 
     fn compose(&mut self, pace: Pace) -> Result<Presentation, PresentError> {
-        // A repeat is the same picture on the same surface: hand back what
-        // was already composed rather than scaling every pixel again.
-        if let Pace::Repeated(_) = pace
+        // The same picture on the same surface composes to the same pixels,
+        // whether the tick repeated it or the overlay is the only thing that
+        // moved. Hand back the buffer already composed - and the same
+        // `pixels_id`, so the host skips the upload too - and rebuild only
+        // the overlay, which is a model rather than pixels.
+        if self.cache_epoch == Some(self.pacer.epoch())
             && let Some(cached) = &self.cache
             && cached.surface == self.surface
         {
             let mut out = cached.clone();
             out.pace = pace;
+            out.overlay = if self.host.allows_overlay() {
+                self.overlay_cfg.build(out.position, self.fps, out.quad)
+            } else {
+                Overlay::default()
+            };
+            self.blits_skipped = self.blits_skipped.saturating_add(1);
+            self.cache = Some(out.clone());
             return Ok(out);
         }
         let px = (self.surface.width as usize) * (self.surface.height as usize);
@@ -267,6 +347,7 @@ impl Presenter {
 
         let out = Presentation {
             surface: self.surface,
+            video: None,
             pixels: Arc::new(pixels),
             pixels_id: self.next_pixels_id,
             quad,
@@ -276,6 +357,7 @@ impl Presenter {
         };
         self.next_pixels_id = self.next_pixels_id.wrapping_add(1);
         self.cache = Some(out.clone());
+        self.cache_epoch = Some(self.pacer.epoch());
         Ok(out)
     }
 }
@@ -368,6 +450,86 @@ mod tests {
         // The only permitted difference:
         assert!(a.overlay.timecode.is_some());
         assert_eq!(b.overlay, Overlay::default());
+    }
+
+    /// The overlay is a model the host draws; changing it must not cost a
+    /// full-surface blit, and must not make the host re-upload a texture
+    /// whose pixels are unchanged.
+    #[test]
+    fn an_overlay_change_reuses_the_composed_pixels() {
+        let mut p = Presenter::new(Host::Embedded, res(64, 64), Fps::FPS_60);
+        let frame = VideoFrame {
+            position: Frame(12),
+            width: 8,
+            height: 4,
+            rgba: [1u8, 2, 3, 255].repeat(32),
+        };
+        let first = p.present_frame(frame).unwrap();
+        assert_eq!(p.blits_skipped, 0);
+
+        p.set_overlay_config(OverlayConfig {
+            safe_areas: true,
+            ..OverlayConfig::default()
+        });
+        // Nothing new arrived, so the picture is the one already composed.
+        let mut backend = MockBackend::new(res(8, 4));
+        let again = p.present(&mut backend).unwrap();
+
+        assert_eq!(p.blits_skipped, 1, "the surface was blitted again");
+        assert!(Arc::ptr_eq(&first.pixels, &again.pixels));
+        assert_eq!(
+            first.pixels_id, again.pixels_id,
+            "identical pixels must keep their id, or the host re-uploads"
+        );
+        assert_ne!(first.overlay, again.overlay, "the overlay did not follow");
+    }
+
+    /// The planar path costs no composition at all: no RGBA buffer, no
+    /// blit. What it must still decide is where the picture sits and what
+    /// the overlay says, because a host may not decide either.
+    #[test]
+    fn a_planar_frame_is_letterboxed_and_described_without_being_composed() {
+        let mut p = Presenter::new(Host::Embedded, res(20, 20), Fps::FPS_60);
+        let frame = Arc::new(davimci_backend::PlanarFrame {
+            position: Frame(3),
+            width: 4,
+            height: 2,
+            y: vec![120; 8],
+            u: vec![128; 2],
+            v: vec![128; 2],
+        });
+        let out = p.present_planar(Arc::clone(&frame)).unwrap();
+        assert!(out.pixels.is_empty(), "the planar path composed a surface");
+        assert_eq!(
+            out.quad,
+            Quad {
+                x: 0,
+                y: 5,
+                width: 20,
+                height: 10
+            },
+            "a planar frame must letterbox exactly as an RGBA one does"
+        );
+        assert_eq!(out.position, Some(Frame(3)));
+        assert_eq!(out.overlay.timecode.as_deref(), Some("00:00:00:03"));
+        assert!(out.video.is_some_and(|v| Arc::ptr_eq(&v, &frame)));
+    }
+
+    #[test]
+    fn a_short_plane_is_refused_rather_than_uploaded() {
+        let mut p = Presenter::new(Host::Embedded, res(8, 8), Fps::FPS_60);
+        let bad = Arc::new(davimci_backend::PlanarFrame {
+            position: Frame(0),
+            width: 100,
+            height: 100,
+            y: vec![0; 4],
+            u: Vec::new(),
+            v: Vec::new(),
+        });
+        assert!(matches!(
+            p.present_planar(bad),
+            Err(PresentError::MalformedFrame { .. })
+        ));
     }
 
     #[test]

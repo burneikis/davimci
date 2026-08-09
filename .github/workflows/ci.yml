@@ -60,7 +60,9 @@ jobs:
         env:
           WGPU_BACKEND: vulkan
           LIBGL_ALWAYS_SOFTWARE: "1"
-        run: cargo test -p davimci-present -p davimci-gui
+        run: |
+          cargo test -p davimci-present -p davimci-gui
+          cargo test -p davimci-present --features gpu --test gpu
 
   # Aimed at the MLT refcount wrapper (spec §10.1 accepted risk).
   sanitize:

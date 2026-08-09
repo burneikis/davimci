@@ -21,8 +21,8 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use davimci_backend::{
-    AccelerationStatus, BackendError, DecodePolicy, PreviewScale, RenderBackend, RenderJob,
-    RenderProgress, RenderState, SourceInfo, VideoFrame,
+    AccelerationStatus, BackendError, DecodePolicy, PlanarFrame, PreviewScale, RenderBackend,
+    RenderJob, RenderProgress, RenderState, SourceInfo, VideoFrame,
 };
 use davimci_core::{ClipId, Fps, Frame, Resolution, Timeline, TimelineProps};
 use davimci_mlt_sys as sys;
@@ -682,6 +682,74 @@ impl MltBackend {
             self.hardware_producers
                 .set(self.hardware_producers.get() + 1);
         }
+    }
+
+    /// Whether this machine can really encode with `encoder`, established
+    /// by encoding with it.
+    ///
+    /// A render node is a decode capability at best: cards that decode
+    /// H.264 and cannot encode it are common, and the failure surfaces as a
+    /// container with no header - an export that looks like it ran and
+    /// produced nothing. Export correctness outranks export speed, so the
+    /// encoder is tried on two frames before a real job is handed to it, and
+    /// the answer is cached for the session.
+    pub fn hardware_encoder_probe(&mut self, encoder: &str, device: &str) -> bool {
+        self.hardware_encoder_works(encoder, device)
+    }
+
+    fn hardware_encoder_works(&mut self, encoder: &str, device: &str) -> bool {
+        // Keyed by device as well as encoder: two cards in one machine do
+        // not have the same entrypoints.
+        let key = format!("{encoder}@{device}");
+        if let Some(known) = self.accel.encoder_verified(&key) {
+            return known;
+        }
+        let works = Self::trial_encode(encoder, device).unwrap_or(false);
+        self.accel.mark_encoder(&key, works);
+        works
+    }
+
+    fn trial_encode(encoder: &str, device: &str) -> Result<bool> {
+        let path = std::env::temp_dir().join(format!(
+            "davimci-probe-{encoder}-{}.mkv",
+            device.replace('/', "_")
+        ));
+        let _ = std::fs::remove_file(&path);
+        let output = path.to_string_lossy().to_string();
+        let profile = Profile::new(320, 240, 25, 1)?;
+        let mut source = Producer::new(&profile, "color", "#ff102030")?;
+        source.set_in_and_out(0, 1);
+        let mut consumer = Consumer::new(&profile, "avformat", Some(&output))?;
+        {
+            let mut props = consumer.properties();
+            props.set_int("real_time", 0)?;
+            props.set_int("terminate_on_pause", 1)?;
+            props.set("vcodec", encoder)?;
+            props.set("vaapi_device", device)?;
+            props.set_int("mlt_hwupload", 1)?;
+            props.set("an", "1")?;
+        }
+        consumer.connect(&source)?;
+        consumer.start()?;
+        // Two frames at 320x240 is milliseconds of work; the deadline only
+        // exists so a wedged driver cannot hang the session.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !consumer.is_stopped() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        consumer.stop();
+        // The file is the evidence, and only a file that decodes counts: a
+        // driver without an encode entrypoint still leaves a few bytes of
+        // container behind, so its size proves nothing. Reading a picture
+        // back out proves the whole path.
+        let playable = Producer::new(&profile, "avformat", &output)
+            .ok()
+            .filter(|p| p.length() > 0)
+            .and_then(|mut p| p.next_frame().ok())
+            .and_then(|mut f| f.rgba(320, 240).ok())
+            .is_some();
+        let _ = std::fs::remove_file(&path);
+        Ok(playable)
     }
 
     /// The MLT XML for the current projection, for debugging and golden tests.
@@ -1515,6 +1583,46 @@ impl RenderBackend for MltBackend {
         self.accel.status()
     }
 
+    /// Takes effect on the next export: an encoder is chosen when the job
+    /// starts, and a render already running keeps the one it opened with.
+    fn set_encode_policy(&mut self, policy: davimci_backend::EncodePolicy) -> AccelerationStatus {
+        self.accel.set_encode_policy(policy)
+    }
+
+    fn supports_planar(&self) -> bool {
+        true
+    }
+
+    /// Pull the picture without converting it to RGBA.
+    ///
+    /// Deliberately not cached: the still cache holds the RGBA frames the
+    /// presenter composes, and a planar pull is a host asking for the same
+    /// picture in its own upload format. Caching both would double the
+    /// memory for one picture.
+    fn planar_frame_at(&mut self, frame: Frame, scale: PreviewScale) -> Result<PlanarFrame> {
+        let res = scale.apply(self.props.resolution);
+        let graph = self.require_graph()?;
+        graph.root.seek(mlt_int(frame.get()));
+        let mut pulled = graph
+            .root
+            .next_frame()
+            .map_err(|_| BackendError::Seek { frame: frame.get() })?;
+        let planes =
+            pulled
+                .yuv420p(res.width, res.height)
+                .map_err(|_| BackendError::Unavailable {
+                    reason: "this frame could not be decoded as planar YUV".into(),
+                })?;
+        Ok(PlanarFrame {
+            position: frame,
+            width: planes.width,
+            height: planes.height,
+            y: planes.y,
+            u: planes.u,
+            v: planes.v,
+        })
+    }
+
     fn seek(&mut self, frame: Frame) -> Result<()> {
         let graph = self.require_graph()?;
         graph.root.seek(mlt_int(frame.get()));
@@ -1663,6 +1771,32 @@ impl RenderBackend for MltBackend {
         }
         let output = job.output.to_string_lossy().to_string();
 
+        // Resolved before anything is opened, so a refusal leaves no partial
+        // file behind: export correctness outranks export speed, and a
+        // preset that cannot be met is refused rather than substituted.
+        let (video_codec, vaapi_device) = match self
+            .accel
+            .encoder_for(&job.settings.video_codec, job.settings.hardware)
+        {
+            crate::hwaccel::EncodeChoice::Software => (job.settings.video_codec.clone(), None),
+            crate::hwaccel::EncodeChoice::Hardware { encoder, device } => {
+                if self.hardware_encoder_works(&encoder, &device) {
+                    (encoder, Some(device))
+                } else if job.settings.hardware.required() {
+                    return Err(BackendError::Render {
+                        reason: Acceleration::encoder_refusal(&encoder),
+                    });
+                } else {
+                    // Nothing was promised, so an encoder that does not work
+                    // is a software export rather than a failed one.
+                    (job.settings.video_codec.clone(), None)
+                }
+            }
+            crate::hwaccel::EncodeChoice::Refused(reason) => {
+                return Err(BackendError::Render { reason });
+            }
+        };
+
         // An export that keeps audio tracks separate renders from its own
         // graph: each audio track is routed onto its own channel pair before
         // the mix sums them, and the consumer cuts the bus into streams.
@@ -1701,7 +1835,15 @@ impl RenderBackend for MltBackend {
             // Not realtime: an export must drop nothing.
             props.set_int("real_time", 0)?;
             props.set_int("terminate_on_pause", 1)?;
-            props.set("vcodec", &job.settings.video_codec)?;
+            props.set("vcodec", &video_codec)?;
+            if let Some(device) = &vaapi_device {
+                // MLT plants the `hwupload` filter itself once the consumer
+                // has a VAAPI device: the frames it composites are in system
+                // memory, so they have to be uploaded before a hardware
+                // encoder can see them.
+                props.set("vaapi_device", device)?;
+                props.set_int("mlt_hwupload", 1)?;
+            }
             props.set("acodec", &job.settings.audio_codec)?;
             props.set_int("width", mlt_int(job.settings.resolution.width))?;
             props.set_int("height", mlt_int(job.settings.resolution.height))?;

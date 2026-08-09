@@ -703,6 +703,7 @@ impl Workspace {
             Setting::Preview(_) => Err(CliError::UnknownProperty("preview".into())),
             Setting::Proxy(_) => Err(CliError::UnknownProperty("proxy".into())),
             Setting::Decode(_) => Err(CliError::UnknownProperty("decode".into())),
+            Setting::Encode(_) => Err(CliError::UnknownProperty("encode".into())),
             Setting::PreviewHeight(_) => Err(CliError::UnknownProperty("previewheight".into())),
             Setting::PreviewProtocol(_) => Err(CliError::UnknownProperty("previewprotocol".into())),
             Setting::Numbers(_) => Err(CliError::UnknownProperty("numbers".into())),
@@ -722,6 +723,7 @@ impl Workspace {
             Setting::Preview(_) => Some("set preview"),
             Setting::Proxy(_) => Some("set proxy"),
             Setting::Decode(_) => Some("set decode"),
+            Setting::Encode(_) => Some("set encode"),
             _ => None,
         }
     }
@@ -871,6 +873,7 @@ fn describe_setting(setting: &crate::setting::Setting) -> String {
         Setting::Preview(on) => format!("preview {}", if *on { "on" } else { "off" }),
         Setting::Proxy(on) => format!("proxy {}", if *on { "on" } else { "off" }),
         Setting::Decode(policy) => format!("decode {policy}"),
+        Setting::Encode(policy) => format!("encode {policy}"),
         Setting::PreviewHeight(height) => height.describe(),
         Setting::PreviewProtocol(p) => format!("preview protocol {}", p.name()),
         Setting::Numbers(n) => n.describe().to_string(),

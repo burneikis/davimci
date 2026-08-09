@@ -574,6 +574,16 @@ pub struct FrameRef {
     raw: sys::mlt_frame,
 }
 
+/// The three planes of one 4:2:0 picture, at the size MLT scaled it to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Planes {
+    pub y: Vec<u8>,
+    pub u: Vec<u8>,
+    pub v: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+}
+
 impl FrameRef {
     #[must_use]
     pub fn position(&self) -> i32 {
@@ -623,6 +633,54 @@ impl FrameRef {
         // SAFETY: MLT guarantees an RGBA buffer of w*h*4 bytes on success.
         let bytes = unsafe { std::slice::from_raw_parts(buf, len) }.to_vec();
         Ok((bytes, size(w), size(h)))
+    }
+
+    /// Copy the frame's image out as planar YUV 4:2:0 at the requested size.
+    ///
+    /// The three planes are returned separately even though MLT hands back
+    /// one contiguous buffer, because a host uploads them as three
+    /// single-channel textures. Odd dimensions are refused rather than
+    /// guessed at: 4:2:0 has no unambiguous chroma layout for them, and
+    /// MLT's own plane arithmetic assumes even.
+    pub fn yuv420p(&mut self, width: u32, height: u32) -> Result<Planes, MltError> {
+        let mut buf: *mut u8 = ptr::null_mut();
+        let mut fmt: c_int = sys::MLT_IMAGE_YUV420P;
+        let mut w = mlt_int(width);
+        let mut h = mlt_int(height);
+        // SAFETY: as in `rgba` - every out-parameter is initialised and the
+        // buffer MLT keeps owning is copied before returning.
+        let rc = unsafe {
+            sys::mlt_frame_get_image(
+                self.raw,
+                &raw mut buf,
+                &raw mut fmt,
+                &raw mut w,
+                &raw mut h,
+                0,
+            )
+        };
+        if rc != 0 || buf.is_null() || w <= 0 || h <= 0 {
+            return Err(MltError::NoImage);
+        }
+        if fmt != sys::MLT_IMAGE_YUV420P {
+            return Err(MltError::WrongFormat { format: fmt });
+        }
+        let (out_w, out_h) = (size(w), size(h));
+        if out_w % 2 != 0 || out_h % 2 != 0 {
+            return Err(MltError::WrongFormat { format: fmt });
+        }
+        let luma = count(w) * count(h);
+        let chroma = luma / 4;
+        // SAFETY: MLT lays yuv420p out as Y, then U, then V, contiguously,
+        // which is `luma + 2 * chroma` bytes for even dimensions.
+        let bytes = unsafe { std::slice::from_raw_parts(buf, luma + 2 * chroma) };
+        Ok(Planes {
+            y: bytes[..luma].to_vec(),
+            u: bytes[luma..luma + chroma].to_vec(),
+            v: bytes[luma + chroma..].to_vec(),
+            width: out_w,
+            height: out_h,
+        })
     }
 }
 

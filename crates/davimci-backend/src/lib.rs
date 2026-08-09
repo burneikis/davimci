@@ -21,9 +21,9 @@ use std::path::Path;
 
 use davimci_core::{Fps, Frame, Resolution, Timeline};
 
-pub use accel::{AccelerationStatus, DecodePolicy};
+pub use accel::{AccelerationStatus, DecodePolicy, EncodePolicy, HardwareEncode};
 pub use error::{BackendError, Result};
-pub use frame::{PreviewScale, VideoFrame};
+pub use frame::{PixelFormat, PlanarFrame, PreviewScale, VideoFrame};
 pub use job::{RenderJob, RenderProgress, RenderSettings, RenderState, TransitionDef};
 pub use mock::MockBackend;
 pub use preset::{
@@ -136,6 +136,28 @@ pub trait RenderBackend {
         Vec::new()
     }
 
+    /// Whether this backend can hand out planar YUV frames.
+    ///
+    /// Asked rather than assumed: RGBA8 is the format every golden test
+    /// asserts against, so a host only takes the planar path when the
+    /// backend offers one and the host can convert it.
+    fn supports_planar(&self) -> bool {
+        false
+    }
+
+    /// Pull one frame as planar YUV 4:2:0, for a host that converts on the
+    /// GPU.
+    ///
+    /// Halves the bytes crossing to the card against RGBA8 and moves colour
+    /// conversion off the CPU. The picture must be the same one
+    /// [`RenderBackend::frame_at`] would produce.
+    fn planar_frame_at(&mut self, frame: Frame, scale: PreviewScale) -> Result<PlanarFrame> {
+        let _ = (frame, scale);
+        Err(BackendError::Unavailable {
+            reason: "this backend cannot decode to planar YUV".into(),
+        })
+    }
+
     /// Ask for hardware decode, or ask to stay on the CPU.
     ///
     /// Infallible by construction: an unusable device is a recoverable
@@ -148,6 +170,18 @@ pub trait RenderBackend {
 
     /// What acceleration is in use right now, for a health report.
     fn acceleration(&self) -> AccelerationStatus {
+        AccelerationStatus::unsupported()
+    }
+
+    /// Ask for hardware encode on the next export, or ask to stay on the
+    /// CPU.
+    ///
+    /// Infallible for the same reason as the decode policy: a machine that
+    /// cannot accelerate keeps exporting in software. What is *not*
+    /// negotiable is a preset that requires hardware - that is refused by
+    /// [`RenderBackend::render`] before the job starts.
+    fn set_encode_policy(&mut self, policy: EncodePolicy) -> AccelerationStatus {
+        let _ = policy;
         AccelerationStatus::unsupported()
     }
 

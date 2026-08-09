@@ -41,6 +41,140 @@ impl PreviewScale {
     }
 }
 
+/// The layout of a decoded frame's bytes.
+///
+/// RGBA8 is the default and the only format the golden-pixel, snapshot and
+/// cross-frontend parity tests ever assert against. Planar is an opt-in a
+/// host asks for when it can convert on the GPU: it halves the bytes that
+/// cross to the card and moves colour conversion off the CPU, but it is
+/// never the reference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PixelFormat {
+    #[default]
+    Rgba8,
+    /// 8-bit YUV 4:2:0, three planes, chroma at half resolution on both
+    /// axes.
+    Yuv420p,
+}
+
+impl PixelFormat {
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Rgba8 => "rgba8",
+            Self::Yuv420p => "yuv420p",
+        }
+    }
+}
+
+/// One decoded frame in planar YUV 4:2:0.
+///
+/// Handed to a host that uploads three single-channel textures and converts
+/// in a shader. [`PlanarFrame::to_rgba`] is the CPU reference for the same
+/// picture, which is what the shader is asserted against and what a host
+/// without a GPU path falls back to.
+#[derive(Clone, PartialEq, Eq)]
+pub struct PlanarFrame {
+    pub position: Frame,
+    pub width: u32,
+    pub height: u32,
+    /// Full-resolution luma, `width * height` bytes.
+    pub y: Vec<u8>,
+    /// Half-resolution chroma, `chroma_width * chroma_height` bytes each.
+    pub u: Vec<u8>,
+    pub v: Vec<u8>,
+}
+
+impl PlanarFrame {
+    #[must_use]
+    pub fn chroma_width(&self) -> u32 {
+        self.width.div_ceil(2)
+    }
+
+    #[must_use]
+    pub fn chroma_height(&self) -> u32 {
+        self.height.div_ceil(2)
+    }
+
+    /// Whether every plane is exactly the length its dimensions imply.
+    #[must_use]
+    pub fn is_well_formed(&self) -> bool {
+        let luma = (self.width as usize) * (self.height as usize);
+        let chroma = (self.chroma_width() as usize) * (self.chroma_height() as usize);
+        self.y.len() == luma && self.u.len() == chroma && self.v.len() == chroma
+    }
+
+    /// Bytes a host would upload for this frame. Compared against
+    /// `width * height * 4` by the benchmark that justifies this path.
+    #[must_use]
+    pub fn bytes(&self) -> usize {
+        self.y.len() + self.u.len() + self.v.len()
+    }
+
+    /// The same picture as RGBA8, by the BT.709 limited-range matrix.
+    ///
+    /// The CPU reference for the shader: a host that converts on the GPU has
+    /// to reproduce these pixels within a documented tolerance, and a host
+    /// that cannot convert at all uses this.
+    #[must_use]
+    pub fn to_rgba(&self) -> VideoFrame {
+        let mut rgba = vec![255u8; (self.width as usize) * (self.height as usize) * 4];
+        let cw = self.chroma_width() as usize;
+        for row in 0..self.height as usize {
+            for col in 0..self.width as usize {
+                let y = self
+                    .y
+                    .get(row * self.width as usize + col)
+                    .copied()
+                    .unwrap_or(16);
+                let ci = (row / 2) * cw + col / 2;
+                let u = self.u.get(ci).copied().unwrap_or(128);
+                let v = self.v.get(ci).copied().unwrap_or(128);
+                let px = yuv_to_rgb(y, u, v);
+                let di = (row * self.width as usize + col) * 4;
+                if let Some(dst) = rgba.get_mut(di..di + 3) {
+                    dst.copy_from_slice(&px);
+                }
+            }
+        }
+        VideoFrame {
+            position: self.position,
+            width: self.width,
+            height: self.height,
+            rgba,
+        }
+    }
+}
+
+impl std::fmt::Debug for PlanarFrame {
+    /// Never dump the planes, same rule as [`VideoFrame`].
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PlanarFrame")
+            .field("position", &self.position)
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .field("bytes", &self.bytes())
+            .finish_non_exhaustive()
+    }
+}
+
+/// BT.709 limited range, integer arithmetic and no floats, so two machines
+/// cannot disagree about a pixel.
+#[must_use]
+fn yuv_to_rgb(luma: u8, cb: u8, cr: u8) -> [u8; 3] {
+    let luma = (i32::from(luma) - 16) * 1192;
+    let cb = i32::from(cb) - 128;
+    let cr = i32::from(cr) - 128;
+    let red = (luma + 1836 * cr) >> 10;
+    let green = (luma - 218 * cb - 546 * cr) >> 10;
+    let blue = (luma + 2163 * cb) >> 10;
+    [clamp_byte(red), clamp_byte(green), clamp_byte(blue)]
+}
+
+fn clamp_byte(v: i32) -> u8 {
+    u8::try_from(v.clamp(0, 255)).unwrap_or(0)
+}
+
 /// One decoded video frame, RGBA8, tightly packed.
 #[derive(Clone, PartialEq, Eq)]
 pub struct VideoFrame {
@@ -140,6 +274,50 @@ mod tests {
                 height: 270
             }
         );
+    }
+
+    fn planar(width: u32, height: u32, y: u8, u: u8, v: u8) -> PlanarFrame {
+        let chroma = (width.div_ceil(2) as usize) * (height.div_ceil(2) as usize);
+        PlanarFrame {
+            position: Frame(0),
+            width,
+            height,
+            y: vec![y; (width as usize) * (height as usize)],
+            u: vec![u; chroma],
+            v: vec![v; chroma],
+        }
+    }
+
+    #[test]
+    fn planar_black_and_white_convert_to_black_and_white() {
+        // Limited range: 16 is black and 235 is white, which is exactly the
+        // pair a full-range conversion would get wrong.
+        let black = planar(4, 2, 16, 128, 128).to_rgba();
+        assert_eq!(black.rgba[..4], [0, 0, 0, 255]);
+        let white = planar(4, 2, 235, 128, 128).to_rgba();
+        for c in 0..3 {
+            assert!(white.rgba[c] >= 254, "white came out at {}", white.rgba[c]);
+        }
+        assert!(white.is_well_formed());
+    }
+
+    #[test]
+    fn a_planar_frame_is_half_the_bytes_of_the_same_picture_in_rgba() {
+        let frame = planar(1920, 1080, 128, 128, 128);
+        assert!(frame.is_well_formed());
+        let rgba = (frame.width as usize) * (frame.height as usize) * 4;
+        // 1.5 bytes per pixel against 4: three eighths of the upload.
+        assert_eq!(frame.bytes(), rgba * 3 / 8);
+    }
+
+    #[test]
+    fn a_short_plane_is_not_well_formed_and_does_not_read_past_its_end() {
+        let mut frame = planar(4, 2, 200, 90, 240);
+        frame.u.pop();
+        assert!(!frame.is_well_formed());
+        // Conversion still produces a whole picture rather than panicking:
+        // the missing chroma reads as neutral.
+        assert!(frame.to_rgba().is_well_formed());
     }
 
     #[test]

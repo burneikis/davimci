@@ -903,7 +903,9 @@ version = "0.0.0"
 dependencies = [
  "davimci-backend",
  "davimci-core",
+ "pollster",
  "thiserror 2.0.19",
+ "wgpu",
 ]
 
 [[package]]

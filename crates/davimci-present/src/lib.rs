@@ -16,13 +16,17 @@
 //! safe-area rectangles) and drawn by the host's own text stack, so one
 //! timecode cannot look like two.
 
+pub mod adaptive;
 pub mod error;
 pub mod fit;
+#[cfg(feature = "gpu")]
+pub mod gpu;
 pub mod headless;
 pub mod overlay;
 pub mod pacing;
 pub mod presenter;
 
+pub use adaptive::{AdaptiveScale, ScaleChange};
 pub use error::PresentError;
 pub use fit::{Quad, letterbox};
 pub use headless::HeadlessPresenter;

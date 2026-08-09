@@ -45,7 +45,7 @@ davimci-core = { workspace = true, features = ["testing"] }
 [features]
 default = ["window"]
 # The window. Off, the binary is the scriptable driver and needs no display.
-window = ["dep:eframe", "dep:egui", "davimci-gui/window"]
+window = ["dep:eframe", "dep:egui", "davimci-gui/window", "davimci-present/gpu"]
 slow-tests = ["davimci-analysis/slow-tests", "davimci-mlt/slow-tests"]
 # The terminal frontend. Explicitly optional: the window is the primary UI.
 tui = ["dep:davimci-tui"]

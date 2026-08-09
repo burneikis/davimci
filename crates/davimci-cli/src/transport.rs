@@ -152,6 +152,25 @@ impl Transport {
         Ok(())
     }
 
+    /// Restart a running preview at a different decode scale, from where
+    /// the clock has reached.
+    ///
+    /// The scale reaches the decoder through `preview_start`, so changing it
+    /// mid-pass means reopening the pass. Only playback does this: a shuttle
+    /// is already resolution-reduced and a stopped transport has no pass to
+    /// reopen.
+    pub fn rescale(
+        &mut self,
+        backend: &mut dyn RenderBackend,
+        at: Frame,
+        scale: PreviewScale,
+    ) -> Result<(), String> {
+        if self.state != TransportState::Playing {
+            return Ok(());
+        }
+        self.restart(backend, at, scale)
+    }
+
     #[must_use]
     pub fn state(&self) -> TransportState {
         self.state

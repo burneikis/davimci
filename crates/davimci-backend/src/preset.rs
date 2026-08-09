@@ -50,6 +50,24 @@ impl VideoCodec {
         }
     }
 
+    /// The VAAPI encoder for this codec, if one exists.
+    ///
+    /// Same codec, so a hardware encode still satisfies a preset that named
+    /// `h264`. A codec with no entry here cannot be accelerated at all,
+    /// which is why a preset that requires hardware is refused when it names
+    /// one - refusing at definition time rather than after a long render.
+    #[must_use]
+    pub fn hardware_encoder(self) -> Option<&'static str> {
+        match self {
+            Self::H264 => Some("h264_vaapi"),
+            Self::H265 => Some("hevc_vaapi"),
+            Self::Vp9 => Some("vp9_vaapi"),
+            // Intra-only and quality-critical: no VAAPI encoder produces a
+            // ProRes stream, so this is a refusal, not a gap.
+            Self::ProRes => None,
+        }
+    }
+
     /// Parse a codec name, rejecting encoder names on purpose: accepting
     /// `libx264` here would make section 10.3 a suggestion rather than a rule.
     pub fn parse(name: &str) -> Result<Self, PresetError> {
@@ -221,6 +239,10 @@ pub struct Preset {
     pub subtitles: SubtitleMode,
     /// Backend properties passed through verbatim, e.g. `crf`.
     pub extra: Vec<(String, String)>,
+    /// Whether this preset *requires* a hardware encoder. Opt-in per preset,
+    /// and binding: an export that cannot meet it is refused rather than
+    /// re-encoded in software at a quality nobody asked for.
+    pub hardware: bool,
 }
 
 impl Preset {
@@ -251,7 +273,24 @@ impl Preset {
             audio_tracks: TrackSelection::All,
             subtitles: SubtitleMode::None,
             extra: Vec::new(),
+            hardware: false,
         })
+    }
+
+    /// Require a hardware encoder for this preset.
+    ///
+    /// Validated here, where the preset is defined: a codec with no hardware
+    /// encoder at all is a preset that could never run, and finding that out
+    /// at export time would be finding it out too late.
+    pub fn require_hardware(mut self) -> Result<Self, PresetError> {
+        if self.video.hardware_encoder().is_none() {
+            return Err(PresetError::NoHardwareEncoder {
+                preset: self.name,
+                video: self.video.spec_name().to_string(),
+            });
+        }
+        self.hardware = true;
+        Ok(self)
     }
 
     /// Resolve to encoder settings against a timeline's properties. This is
@@ -272,6 +311,11 @@ impl Preset {
             // modes keep it out of the graph entirely.
             burn_subtitles: self.subtitles == SubtitleMode::Burned,
             extra: self.extra.clone(),
+            hardware: if self.hardware {
+                crate::accel::HardwareEncode::Required
+            } else {
+                crate::accel::HardwareEncode::Off
+            },
         }
     }
 
@@ -420,6 +464,12 @@ pub enum PresetError {
         video: String,
         audio: String,
     },
+
+    #[error(
+        "the preset '{preset}' requires a hardware encoder, but no hardware encoder produces \
+         {video}"
+    )]
+    NoHardwareEncoder { preset: String, video: String },
 }
 
 #[cfg(test)]

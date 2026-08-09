@@ -104,6 +104,18 @@ pub struct Editor {
     /// `:set decode cpu|auto`: what the session has *asked* for. What it
     /// gets is the backend's business, since a probe may refuse.
     decode: DecodePolicy,
+    /// `:set encode cpu|auto`: whether the next export may be accelerated.
+    /// A preset that requires hardware is binding regardless, and refused by
+    /// the backend when it cannot be met.
+    encode: davimci_backend::EncodePolicy,
+    /// Whether the host draws planar frames itself. Set by a host with a
+    /// GPU and a shader; every other frontend, and every test, stays on the
+    /// RGBA composition that the parity assertions are written against.
+    planar_preview: bool,
+    /// Preview resolution that follows the frame budget during playback.
+    /// Never a setting and never an edit: everything it took is given back
+    /// when playback stops.
+    adaptive: davimci_present::AdaptiveScale,
     /// `:set previewheight` and `:set previewprotocol`. Held here
     /// with the other view settings and read by the terminal session; inert
     /// for the window, which has a texture instead of a band.
@@ -173,6 +185,9 @@ impl Editor {
             known_clips: std::collections::BTreeSet::new(),
             preview: true,
             decode: DecodePolicy::default(),
+            encode: davimci_backend::EncodePolicy::default(),
+            planar_preview: false,
+            adaptive: davimci_present::AdaptiveScale::new(),
             preview_height: None,
             preview_protocol: PreviewProtocol::Auto,
             numbers: Numbers::Off,
@@ -337,6 +352,18 @@ impl Editor {
                 let status = self.backend.set_decode_policy(*policy);
                 Some(Ok(status.detail))
             }
+            ExCommand::Set(crate::setting::Setting::Encode(policy)) => {
+                self.encode = *policy;
+                self.backend.set_encode_policy(*policy);
+                Some(Ok(format!(
+                    "Exports will use {}.",
+                    match policy {
+                        davimci_backend::EncodePolicy::Cpu => "a software encoder",
+                        davimci_backend::EncodePolicy::Auto =>
+                            "a hardware encoder where one meets the preset",
+                    }
+                )))
+            }
             ExCommand::Set(crate::setting::Setting::PreviewHeight(height)) => {
                 self.preview_height = Some(*height);
                 Some(Ok(height.describe()))
@@ -431,6 +458,20 @@ impl Editor {
         self.preview
     }
 
+    /// Declare that this host uploads planar YUV and converts it on the GPU.
+    ///
+    /// Ignored by a backend that cannot decode planar, so a host may ask
+    /// unconditionally and get the RGBA path where there is no other.
+    pub fn set_planar_preview(&mut self, on: bool) {
+        self.planar_preview = on;
+    }
+
+    /// The render backend, for a test that has to ask it something the
+    /// editor does not expose - a refused export, say.
+    pub fn backend_mut(&mut self) -> &mut dyn RenderBackend {
+        self.backend.as_mut()
+    }
+
     /// What the backend is actually decoding with, as a complete sentence.
     ///
     /// Asked of the backend rather than remembered here: `:set decode auto`
@@ -464,6 +505,7 @@ impl Editor {
         crate::setting::CurrentSettings {
             preview: Some(self.preview),
             decode: Some(self.decode),
+            encode: Some(self.encode),
             proxy: Some(self.proxies.enabled()),
             preview_height: self.preview_height,
             preview_protocol: Some(self.preview_protocol),
@@ -838,6 +880,32 @@ impl Editor {
         let _ = self.backend.seek(session.timeline().playhead().frame);
     }
 
+    /// Let the preview drop resolution when it stops keeping up, and take it
+    /// back when it does.
+    ///
+    /// Scrubbing already trades resolution for keeping up; this is playback
+    /// doing the same. It is not an edit and not a setting: the scale the
+    /// user chose is restored the moment playback stops.
+    fn follow_frame_budget(&mut self, session: &Session) {
+        let change = if self.transport.is_playing() {
+            self.adaptive.observe(self.presenter.stats(), self.scale)
+        } else {
+            self.adaptive.release(self.scale)
+        };
+        let Some(change) = change else { return };
+        self.scale = change.scale;
+        let at = session.timeline().playhead().frame;
+        // A restart that fails leaves the pass running at the old scale,
+        // which is a slower preview rather than a stopped one.
+        match self
+            .transport
+            .rescale(self.backend.as_mut(), at, change.scale)
+        {
+            Ok(()) => self.notices.push(Message::info(change.message())),
+            Err(e) => self.notices.push(Message::error(e)),
+        }
+    }
+
     /// Pull and compose the frame at the playhead. Only meaningful when the
     /// transport is idle: during playback the pacer owns the picture.
     fn show_playhead(&mut self, session: &Session) {
@@ -851,6 +919,23 @@ impl Editor {
         if let Err(e) = self.backend.seek(at) {
             self.notices.push(Message::error(e.to_string()));
             return;
+        }
+        // A host that converts planar frames on the GPU never needs the
+        // picture in RGBA: the decoder's own planes go straight to the card,
+        // which skips both MLT's colour conversion and the presenter's blit.
+        // A planar pull that fails is a slower frame, not a lost one: the
+        // RGBA path below produces the same picture.
+        if self.planar_preview
+            && self.backend.supports_planar()
+            && let Ok(frame) = self.backend.planar_frame_at(at, self.scale)
+        {
+            match self.presenter.present_planar(std::sync::Arc::new(frame)) {
+                Ok(p) => {
+                    self.last = Some(p);
+                    return;
+                }
+                Err(e) => self.notices.push(Message::error(e.to_string())),
+            }
         }
         match self.backend.frame_at(at, self.scale) {
             Ok(frame) => match self.presenter.present_frame(frame) {
@@ -1552,6 +1637,7 @@ impl Host for Editor {
         if let Some(p) = result.presentation.filter(|_| self.preview) {
             self.last = Some(p);
         }
+        self.follow_frame_budget(session);
         if result.stopped {
             self.notices.push(Message::info("stopped".to_string()));
             // Show the frame we landed on, now that the pacer has let go.

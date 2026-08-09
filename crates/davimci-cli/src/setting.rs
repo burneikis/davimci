@@ -6,7 +6,7 @@
 //! only layers that own a session or a preview.
 
 pub use davimci_app::Numbers;
-pub use davimci_backend::DecodePolicy;
+pub use davimci_backend::{DecodePolicy, EncodePolicy};
 use davimci_core::{ClipProps, Fps, Frame, Resolution, Transition};
 pub use davimci_keys::VisualStart;
 
@@ -58,6 +58,10 @@ pub enum Setting {
     /// session policy about how pixels are produced, never about what the
     /// timeline holds, so it never enters the undo log.
     Decode(DecodePolicy),
+    /// `encode cpu|auto` - whether the next export may use a hardware
+    /// encoder. A preset that *requires* one is refused rather than
+    /// downgraded, which is decided by the backend, not here.
+    Encode(EncodePolicy),
     /// `proxy on|off` - whether an import that qualifies gets a proxy. A
     /// session policy: it changes what the next import does, never the
     /// timeline, so it stays out of the undo log.
@@ -148,6 +152,7 @@ impl Setting {
             self,
             Self::Preview(_)
                 | Self::Decode(_)
+                | Self::Encode(_)
                 | Self::Proxy(_)
                 | Self::PreviewHeight(_)
                 | Self::PreviewProtocol(_)
@@ -173,6 +178,7 @@ pub const PROPERTIES: &[&str] = &[
     "timeline.resolution",
     "preview",
     "decode",
+    "encode",
     "proxy",
     "previewheight",
     "previewprotocol",
@@ -188,6 +194,7 @@ pub fn values(prop: &str) -> Vec<String> {
     let words: &[&str] = match prop {
         "preview" | "proxy" => &["on", "off"],
         "decode" => DecodePolicy::NAMES,
+        "encode" => EncodePolicy::NAMES,
         "previewheight" => &["auto"],
         "previewprotocol" => &["auto", "kitty", "sixel", "blocks"],
         "numbers" => Numbers::NAMES,
@@ -207,6 +214,8 @@ pub struct CurrentSettings {
     pub preview: Option<bool>,
     /// Whether the backend may decode in hardware.
     pub decode: Option<DecodePolicy>,
+    /// Whether exports may use a hardware encoder.
+    pub encode: Option<EncodePolicy>,
     /// Whether proxies are generated for qualifying imports.
     pub proxy: Option<bool>,
     pub preview_height: Option<PreviewHeight>,
@@ -255,6 +264,7 @@ impl CurrentSettings {
                 .preview
                 .map(|on| if on { "on" } else { "off" }.to_string()),
             "decode" => self.decode.map(|d| d.name().to_string()),
+            "encode" => self.encode.map(|e| e.name().to_string()),
             "proxy" => self
                 .proxy
                 .map(|on| if on { "on" } else { "off" }.to_string()),
@@ -365,6 +375,9 @@ pub fn parse(prop: &str, value: &str) -> Result<Setting, CliError> {
         },
         "decode" => DecodePolicy::parse(value)
             .map(Setting::Decode)
+            .ok_or_else(|| bad(prop, "cpu or auto")),
+        "encode" => EncodePolicy::parse(value)
+            .map(Setting::Encode)
             .ok_or_else(|| bad(prop, "cpu or auto")),
         "proxy" => match value {
             "on" | "true" | "1" => Ok(Setting::Proxy(true)),
@@ -595,6 +608,20 @@ mod tests {
     }
 
     #[test]
+    fn encode_parses_its_two_policies_and_stays_out_of_the_undo_log() {
+        assert_eq!(
+            parse("encode", "cpu").ok(),
+            Some(Setting::Encode(EncodePolicy::Cpu))
+        );
+        assert_eq!(
+            parse("encode", "auto").ok(),
+            Some(Setting::Encode(EncodePolicy::Auto))
+        );
+        assert!(parse("encode", "auto").unwrap().is_view_only());
+        assert!(values("encode").contains(&"cpu".to_string()));
+    }
+
+    #[test]
     fn visualstart_parses_both_units() {
         assert_eq!(
             parse("visualstart", "frame").ok(),
@@ -619,6 +646,7 @@ mod tests {
             ("preview", "maybe"),
             ("proxy", "sometimes"),
             ("decode", "gpu"),
+            ("encode", "vaapi"),
             ("previewheight", "tall"),
             ("previewheight", "-1"),
             ("previewheight", "101%"),
