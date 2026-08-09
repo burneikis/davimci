@@ -1,5 +1,4 @@
 # TODO
-- on first media import, auto zoom tui, or maybe it just needs jump points better
 - plugin distribution and package management
 - still some weird freeze/hangs when closing the gui or tui, where the gui doesnt close immediately, the just run stays running etc.
 
