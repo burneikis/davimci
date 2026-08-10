@@ -269,10 +269,10 @@ impl Editor {
             std::collections::BTreeMap::new();
         for track in session.timeline().tracks() {
             if let Some(owner) = crate::plugins::provider_of_track_kind(track.kind.prefix())
-                && !self.plugins.is_active(owner.name)
+                && !self.plugins.is_active(owner.name())
             {
                 wanted
-                    .entry(owner.name)
+                    .entry(owner.name())
                     .or_insert_with(|| Need::TrackKind(track.name.clone()));
             }
             for clip in track.clips() {
@@ -282,11 +282,11 @@ impl Editor {
                 let Some(owner) = crate::plugins::provider_of_transition(kind) else {
                     continue;
                 };
-                if self.plugins.is_active(owner.name) {
+                if self.plugins.is_active(owner.name()) {
                     continue;
                 }
                 wanted
-                    .entry(owner.name)
+                    .entry(owner.name())
                     .or_insert_with(|| Need::Transition(kind.to_string()));
             }
         }
@@ -294,7 +294,7 @@ impl Editor {
             return;
         }
         for (owner, need) in wanted {
-            let Some(plugin) = crate::plugins::BUNDLED.iter().find(|p| p.name == owner) else {
+            let Some(plugin) = crate::plugins::BUNDLED.iter().find(|p| p.name() == owner) else {
                 continue;
             };
             if self.plugins.activate(plugin) {
@@ -1235,7 +1235,7 @@ impl Editor {
                 match crate::plugins::provider_of_motion(&missing) {
                     Some(owner) => out.say(Message::warning(format!(
                         "the motion '{missing}' comes from the bundled '{}' plugin; enable it in plugins.lua with require(\"davimci.plugins\").enable(\"{}\")",
-                        owner.name, owner.name
+                        owner.name(), owner.name()
                     ))),
                     None => out.say(Message::error(
                         davimci_lua::LuaError::NoSuchMotion(missing).to_string(),

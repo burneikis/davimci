@@ -1,0 +1,6 @@
+name = "scenes"
+version = "1.0.0"
+api = "^1.0"
+
+[provides]
+motions = ["next_scene", "prev_scene"]

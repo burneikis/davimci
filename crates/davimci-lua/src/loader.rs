@@ -1,10 +1,13 @@
 //! Finding and loading config.
 //!
 //! Load order mirrors Neovim's: `plugins.lua` first, because it only says
-//! which bundled plugins to run and the host needs that answer before it
-//! runs any of them; then `init.lua` (it may `require` the others itself),
-//! `keymaps.lua`, and every file in `motions/`, `presets/`, and `plugin/` in
-//! sorted order so a load is reproducible.
+//! which plugins to run and the host needs that answer before it runs any of
+//! them; then the packages on the runtime path; then `init.lua` (it may
+//! `require` the others itself), `keymaps.lua`, and every file in `motions/`,
+//! `presets/`, and `plugin/` in sorted order so a load is reproducible.
+//!
+//! Packages run before the user's own files so a config always wins over a
+//! plugin without either knowing about the other.
 //!
 //! Failures are isolated per file: one broken plugin costs you that plugin,
 //! not the editor.
@@ -14,27 +17,62 @@ use std::path::{Path, PathBuf};
 use davimci_core::Notice;
 
 use crate::error::LuaError;
+use crate::pack::{Plugin, Source};
 use crate::runtime::{Runtime, Sandbox};
 
-/// Where user config lives.
+/// Where user config and installed packages live.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigPaths {
     pub root: PathBuf,
+    /// The package root, holding `pack/<group>/{start,opt}/<plugin>`.
+    ///
+    /// `None` in a test or an embedded run, which is what keeps whatever the
+    /// developer happens to have installed out of a test's answer.
+    pub site: Option<PathBuf>,
 }
 
 impl ConfigPaths {
+    /// A config root with no packages: nothing is discovered but this tree.
     #[must_use]
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        Self {
+            root: root.into(),
+            site: None,
+        }
     }
 
-    /// `$XDG_CONFIG_HOME/davimci`, falling back to `~/.config/davimci`.
+    #[must_use]
+    pub fn with_site(mut self, site: impl Into<PathBuf>) -> Self {
+        self.site = Some(site.into());
+        self
+    }
+
+    /// `$XDG_CONFIG_HOME/davimci` for config and
+    /// `$XDG_DATA_HOME/davimci/site` for packages, with the usual `~`
+    /// fallbacks.
     #[must_use]
     pub fn from_env() -> Option<Self> {
-        let base = std::env::var_os("XDG_CONFIG_HOME")
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        let config = std::env::var_os("XDG_CONFIG_HOME")
             .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
-        Some(Self::new(base.join("davimci")))
+            .or_else(|| home.clone().map(|h| h.join(".config")))?;
+        let data = std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .or_else(|| home.map(|h| h.join(".local/share")))?;
+        Some(Self {
+            root: config.join("davimci"),
+            site: Some(data.join("davimci/site")),
+        })
+    }
+
+    /// Every plugin installed under [`ConfigPaths::site`], and whatever was
+    /// wrong with the ones that could not be read.
+    #[must_use]
+    pub fn packages(&self) -> (Vec<Plugin>, Vec<LuaError>) {
+        match &self.site {
+            Some(site) => crate::pack::discover(site),
+            None => (Vec::new(), Vec::new()),
+        }
     }
 
     /// The file that declares which bundled plugins to run, if it exists.
@@ -57,11 +95,35 @@ impl ConfigPaths {
                 out.push(p);
             }
         }
-        for dir in ["motions", "presets", "plugin"] {
-            out.extend(lua_files_in(&self.root.join(dir)));
-        }
+        out.extend(plugin_files(&self.root));
         out
     }
+}
+
+/// The files a plugin directory contributes, in load order. The layout is
+/// the config directory's own, so a config tree can be moved into a package
+/// unchanged.
+#[must_use]
+pub fn plugin_files(root: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for dir in ["motions", "presets", "plugin"] {
+        out.extend(lua_files_in(&root.join(dir)));
+    }
+    out
+}
+
+/// The `package.path` a `require` over the runtime path needs, so a plugin's
+/// `lua/foo/bar.lua` answers `require("foo.bar")` the way Neovim's does.
+#[must_use]
+pub fn search_path(roots: &[PathBuf]) -> String {
+    roots
+        .iter()
+        .map(|r| {
+            let lua = r.join("lua");
+            format!("{0}/?.lua;{0}/?/init.lua", lua.display())
+        })
+        .collect::<Vec<_>>()
+        .join(";")
 }
 
 fn lua_files_in(dir: &Path) -> Vec<PathBuf> {
@@ -114,6 +176,38 @@ impl Runtime {
             self.push_notice(&e);
         }
         self.take_notices()
+    }
+
+    /// Run one plugin directory's files, isolating failures per file.
+    pub fn load_plugin(&self, plugin: &Plugin) -> Vec<Notice> {
+        match &plugin.source {
+            Source::Builtin(src) => {
+                if let Err(e) = self.exec(src, plugin.name(), Sandbox::Trusted) {
+                    self.push_notice(&e);
+                }
+            }
+            Source::Start(root) | Source::Opt(root) => {
+                for file in plugin_files(root) {
+                    if let Err(e) = self.exec_file(&file, Sandbox::Trusted) {
+                        self.push_notice(&e);
+                    }
+                }
+            }
+        }
+        self.take_notices()
+    }
+
+    /// Point `require` at the `lua/` directory of every runtime path entry,
+    /// nearest first. The config root goes last so a package cannot shadow
+    /// a module the user wrote.
+    pub fn set_search_path(&self, roots: &[PathBuf]) -> Result<(), LuaError> {
+        self.set_package_path(&search_path(roots))
+    }
+
+    /// `opt` packages `plugins.lua` asked for, in the order it asked.
+    #[must_use]
+    pub fn packadds(&self) -> Vec<String> {
+        self.state_packadds()
     }
 
     /// Load the user's config tree. Every file failure becomes a notice and

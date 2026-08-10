@@ -7,21 +7,25 @@
 //! editor, and every edit back through `Session::exec`.
 
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 use davimci_app::{Message, Severity};
 use davimci_backend::{AudioCodec, Container, Preset, SubtitleMode, TrackSelection, VideoCodec};
 use davimci_core::{ErrorClass, Notice};
 use davimci_keys::Keymap;
 use davimci_lua::{
-    ConfigPaths, Dispatch, Event, LuaError, MotionEnv, Request, Runtime, TimelineConfig, Trust,
-    TrustPrompt,
+    ConfigPaths, Dispatch, Event, LuaError, Manifest, MotionEnv, Plugin, Request, Runtime, Source,
+    TimelineConfig, Trust, TrustPrompt,
 };
 
 /// The runtime plus whatever loading the config had to say about itself.
 pub struct Plugins {
     runtime: Runtime,
     notices: Vec<Notice>,
-    active: std::collections::BTreeSet<&'static str>,
+    /// Every plugin this session knows of: the bundled ones and whatever was
+    /// installed on the runtime path, in load order.
+    known: Vec<Plugin>,
+    active: std::collections::BTreeSet<String>,
 }
 
 impl std::fmt::Debug for Plugins {
@@ -32,123 +36,83 @@ impl std::fmt::Debug for Plugins {
     }
 }
 
-/// One plugin shipped in the binary.
-#[derive(Debug, Clone, Copy)]
-pub struct Bundled {
-    /// The name `davimci.plugins.enable` uses.
-    pub name: &'static str,
-    source: &'static str,
-    /// Whether it runs when config says nothing about it.
-    ///
-    /// Every bundled plugin is off: none of them is needed to edit, and a
-    /// default that is on in practice is core wearing a plugin's name. What
-    /// keeps that from losing anything is [`Bundled::provides`] - a plugin
-    /// that owns a name the project or the config actually uses is switched
-    /// on when that name comes up.
-    pub default_on: bool,
-    /// The names this plugin owns, and the only reason a session may turn it
-    /// on by itself.
-    pub provides: Provides,
-}
-
-/// What a bundled plugin registers, declared so the host can tell who owns a
-/// name it does not recognise.
-#[derive(Debug, Clone, Copy)]
-pub struct Provides {
-    /// Transition types, as they appear in a saved project.
-    pub transitions: &'static [&'static str],
-    /// Motions, as a config or a macro names them.
-    pub motions: &'static [&'static str],
-    /// Track kinds this plugin is the editing workflow for, as
-    /// [`davimci_core::TrackKind::prefix`] spells them. A project carrying
-    /// one is what asks for the plugin.
-    pub track_kinds: &'static [&'static str],
-}
-
-impl Provides {
-    const NOTHING: Self = Self {
-        transitions: &[],
-        motions: &[],
-        track_kinds: &[],
-    };
-}
-
-/// The bundled plugin that owns `name` as a transition type, if any.
-#[must_use]
-pub fn provider_of_transition(name: &str) -> Option<&'static Bundled> {
-    BUNDLED
-        .iter()
-        .find(|p| p.provides.transitions.contains(&name))
-}
-
-/// The bundled plugin that owns `name` as a motion, if any.
-#[must_use]
-pub fn provider_of_motion(name: &str) -> Option<&'static Bundled> {
-    BUNDLED.iter().find(|p| p.provides.motions.contains(&name))
-}
-
-/// The bundled plugin that owns `tag` as a track kind, if any.
-#[must_use]
-pub fn provider_of_track_kind(tag: &str) -> Option<&'static Bundled> {
-    BUNDLED
-        .iter()
-        .find(|p| p.provides.track_kinds.contains(&tag))
-}
+/// The sources of the plugins that ship with davimci, each a directory laid
+/// out exactly like an installed one: a manifest the host reads and Lua the
+/// host runs. Nothing about them is written in Rust.
+const BUNDLED_SOURCES: &[(&str, &str)] = &[
+    (
+        include_str!("../runtime/plugins/transitions/davimci.toml"),
+        include_str!("../runtime/plugins/transitions/plugin/init.lua"),
+    ),
+    (
+        include_str!("../runtime/plugins/silence/davimci.toml"),
+        include_str!("../runtime/plugins/silence/plugin/init.lua"),
+    ),
+    (
+        include_str!("../runtime/plugins/scenes/davimci.toml"),
+        include_str!("../runtime/plugins/scenes/plugin/init.lua"),
+    ),
+    (
+        include_str!("../runtime/plugins/text/davimci.toml"),
+        include_str!("../runtime/plugins/text/plugin/init.lua"),
+    ),
+    (
+        include_str!("../runtime/plugins/which-key/davimci.toml"),
+        include_str!("../runtime/plugins/which-key/plugin/init.lua"),
+    ),
+];
 
 /// The plugins every build ships with, run before the rest of the user
 /// config so a config can rebind or replace what they set up.
 ///
-/// They use the same `davimci.*` surface a third-party plugin does: if a
-/// bundled plugin needs something the API cannot express, that is a gap in
-/// the API rather than a reason to special-case it.
-pub const BUNDLED: &[Bundled] = &[
-    Bundled {
-        name: "transitions",
-        source: include_str!("../runtime/plugins/transitions.lua"),
-        default_on: false,
-        provides: Provides {
-            transitions: &["wipe_left", "wipe_right", "wipe_up", "wipe_down", "iris"],
-            motions: &[],
-            track_kinds: &[],
-        },
-    },
-    Bundled {
-        name: "silence",
-        source: include_str!("../runtime/plugins/silence.lua"),
-        default_on: false,
-        provides: Provides {
-            transitions: &[],
-            motions: &["next_silence", "prev_silence"],
-            track_kinds: &[],
-        },
-    },
-    Bundled {
-        name: "scenes",
-        source: include_str!("../runtime/plugins/scenes.lua"),
-        default_on: false,
-        provides: Provides {
-            transitions: &[],
-            motions: &["next_scene", "prev_scene"],
-            track_kinds: &[],
-        },
-    },
-    Bundled {
-        name: "text",
-        source: include_str!("../runtime/plugins/text.lua"),
-        default_on: false,
-        provides: Provides {
-            transitions: &[],
-            motions: &["next_text", "prev_text"],
-            track_kinds: &["T"],
-        },
-    },
-    Bundled {
-        name: "which-key",
-        source: include_str!("../runtime/plugins/which-key.lua"),
-        default_on: false,
-        provides: Provides::NOTHING,
-    },
-];
+/// They are examples as much as features: each uses the same `davimci.*`
+/// surface a third-party plugin does, and each is off until something asks
+/// for it. If a bundled plugin needs something the API cannot express, that
+/// is a gap in the API rather than a reason to special-case it.
+///
+/// A manifest that does not parse is a build defect, not a user error, so it
+/// is dropped with the rest of the plugin rather than crashing an editor a
+/// user is in the middle of.
+pub static BUNDLED: LazyLock<Vec<Plugin>> = LazyLock::new(|| {
+    BUNDLED_SOURCES
+        .iter()
+        .filter_map(|(manifest, source)| {
+            let manifest = Manifest::parse(manifest, "bundled davimci.toml").ok()?;
+            Some(Plugin {
+                manifest,
+                source: Source::Builtin(source),
+            })
+        })
+        .collect()
+});
+
+/// The bundled plugin that owns `name` as a transition type, if any.
+#[must_use]
+pub fn provider_of_transition(name: &str) -> Option<&'static Plugin> {
+    BUNDLED
+        .iter()
+        .find(|p| owns(&p.manifest.provides.transitions, name))
+}
+
+/// The bundled plugin that owns `name` as a motion, if any.
+#[must_use]
+pub fn provider_of_motion(name: &str) -> Option<&'static Plugin> {
+    BUNDLED
+        .iter()
+        .find(|p| owns(&p.manifest.provides.motions, name))
+}
+
+/// The bundled plugin that owns `tag` as a track kind, if any.
+#[must_use]
+pub fn provider_of_track_kind(tag: &str) -> Option<&'static Plugin> {
+    BUNDLED
+        .iter()
+        .find(|p| owns(&p.manifest.provides.track_kinds, tag))
+}
+
+fn owns(names: &[String], name: &str) -> bool {
+    names.iter().any(|n| n == name)
+}
 
 impl Plugins {
     /// A runtime with no user config loaded. Every build has one, so the Lua
@@ -159,6 +123,7 @@ impl Plugins {
             Ok(runtime) => Self {
                 runtime,
                 notices: Vec::new(),
+                known: BUNDLED.clone(),
                 active: std::collections::BTreeSet::new(),
             },
             // A runtime that cannot even be created costs the user their
@@ -166,6 +131,7 @@ impl Plugins {
             Err(e) => Self {
                 runtime: no_runtime(),
                 notices: vec![Notice::from_error(&e)],
+                known: BUNDLED.clone(),
                 active: std::collections::BTreeSet::new(),
             },
         }
@@ -216,36 +182,78 @@ impl Plugins {
         self.notices.extend(notice);
     }
 
-    /// Read `plugins.lua`, then run the bundled plugins it left enabled.
+    /// Read `plugins.lua`, discover what is installed, then run everything
+    /// it left enabled: the bundled plugins first, then the packages.
     fn load_choices_and_bundled(&mut self, paths: Option<&ConfigPaths>) {
         if let Some(paths) = paths {
             let notices = self.runtime.load_plugin_choices(paths);
             self.notices.extend(notices);
+            self.discover(paths);
         }
-        self.load_bundled();
+        self.load_enabled();
     }
 
-    /// Run every enabled bundled plugin. A bundled plugin that fails is a
-    /// notice like any other: the editor keeps working without it.
-    pub fn load_bundled(&mut self) {
-        for plugin in BUNDLED {
-            if self.wants(plugin) {
-                self.run_bundled(plugin);
+    /// Add the installed packages to what this session knows about, and put
+    /// their `lua/` directories on `require`'s path.
+    ///
+    /// A package whose manifest declares an API this build no longer offers
+    /// is refused rather than run, because a plugin from the future can ask
+    /// for edits this host would misread.
+    fn discover(&mut self, paths: &ConfigPaths) {
+        let (found, problems) = paths.packages();
+        self.notices.extend(problems.iter().map(Notice::from_error));
+        let mut roots: Vec<PathBuf> = Vec::new();
+        for plugin in found {
+            if !plugin.compatible() {
+                self.notices.push(Notice::from_error(&LuaError::Config(
+                    plugin.incompatible_notice(),
+                )));
+                continue;
+            }
+            if let Some(root) = plugin.root() {
+                roots.push(root.to_path_buf());
+            }
+            self.known.push(plugin);
+        }
+        // The config root goes last: a package must never shadow a module
+        // the user wrote.
+        roots.push(paths.root.clone());
+        if let Err(e) = self.runtime.set_search_path(&roots) {
+            self.notices.push(Notice::from_error(&e));
+        }
+    }
+
+    /// Run every plugin this session should start with: the ones config
+    /// enabled, the packages that are on the path, and the `opt` packages
+    /// `davimci.pack.add` named. A plugin that fails is a notice like any
+    /// other - the editor keeps working without it.
+    pub fn load_enabled(&mut self) {
+        for i in 0..self.known.len() {
+            if self.wants(&self.known[i]) {
+                self.run_plugin(i);
+            }
+        }
+        for name in self.runtime.packadds() {
+            match self.known.iter().position(|p| p.name() == name) {
+                Some(i) => self.run_plugin(i),
+                None => self
+                    .notices
+                    .push(Notice::from_error(&LuaError::Config(format!(
+                        "davimci.pack.add(\"{name}\"): no such plugin is installed"
+                    )))),
             }
         }
     }
 
-    /// Run one bundled plugin, at most once a session.
-    fn run_bundled(&mut self, plugin: &'static Bundled) {
-        if !self.active.insert(plugin.name) {
+    /// Run one known plugin, at most once a session.
+    fn run_plugin(&mut self, index: usize) {
+        let Some(plugin) = self.known.get(index).cloned() else {
+            return;
+        };
+        if !self.active.insert(plugin.name().to_string()) {
             return;
         }
-        if let Err(e) = self
-            .runtime
-            .exec(plugin.source, plugin.name, davimci_lua::Sandbox::Trusted)
-        {
-            self.notices.push(Notice::from_error(&e));
-        }
+        self.notices.extend(self.runtime.load_plugin(&plugin));
     }
 
     /// Whether `name` has run this session.
@@ -254,26 +262,40 @@ impl Plugins {
         self.active.contains(name)
     }
 
-    /// Turn a bundled plugin on because something asked for a name it owns.
+    /// Every plugin this session knows of, whether or not it has run.
+    #[must_use]
+    pub fn known(&self) -> &[Plugin] {
+        &self.known
+    }
+
+    /// Turn a plugin on because something asked for a name it owns.
     ///
     /// A config that said `disable(name)` is obeyed: an opinion the user
     /// wrote down outranks one the project implies. Answers whether the
     /// plugin is now running.
-    pub fn activate(&mut self, plugin: &'static Bundled) -> bool {
-        if self.runtime.plugin_choice(plugin.name) == Some(false) {
+    pub fn activate(&mut self, plugin: &Plugin) -> bool {
+        if self.runtime.plugin_choice(plugin.name()) == Some(false) {
             return false;
         }
-        self.run_bundled(plugin);
+        let index = self
+            .known
+            .iter()
+            .position(|p| p.name() == plugin.name())
+            .unwrap_or_else(|| {
+                self.known.push(plugin.clone());
+                self.known.len() - 1
+            });
+        self.run_plugin(index);
         true
     }
 
-    /// Whether a bundled plugin runs: what config asked for, or what the
-    /// plugin ships as when config said nothing.
+    /// Whether a plugin runs unasked: what config chose, or what the plugin
+    /// ships as when config said nothing.
     #[must_use]
-    pub fn wants(&self, plugin: &Bundled) -> bool {
+    pub fn wants(&self, plugin: &Plugin) -> bool {
         self.runtime
-            .plugin_choice(plugin.name)
-            .unwrap_or(plugin.default_on)
+            .plugin_choice(plugin.name())
+            .unwrap_or_else(|| plugin.default_on())
     }
 
     /// Startup notices, as status-line messages. Drained once by the host.
@@ -503,6 +525,130 @@ mod tests {
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         p
+    }
+
+    /// Write a package into `<site>/pack/<group>/<kind>/<name>`.
+    fn install(site: &Path, kind: &str, name: &str, manifest: &str, source: &str) {
+        let root = site.join("pack/test").join(kind).join(name);
+        std::fs::create_dir_all(root.join("plugin")).unwrap();
+        std::fs::write(root.join("davimci.toml"), manifest).unwrap();
+        std::fs::write(root.join("plugin/init.lua"), source).unwrap();
+    }
+
+    #[test]
+    fn a_start_package_runs_and_its_lua_directory_answers_require() {
+        let dir = scratch("pack-start");
+        let (cfg, site) = (dir.join("config"), dir.join("site"));
+        std::fs::create_dir_all(&cfg).unwrap();
+        install(
+            &site,
+            "start",
+            "beats",
+            "name = \"beats\"\napi = \"^1.0\"\n\n[provides]\nmotions = [\"next_beat\"]\n",
+            r#"local grid = require("beats.grid")
+               require("davimci.motions").register("next_beat", function() return grid.first end)"#,
+        );
+        let lua = site.join("pack/test/start/beats/lua/beats");
+        std::fs::create_dir_all(&lua).unwrap();
+        std::fs::write(lua.join("grid.lua"), "return { first = 12 }").unwrap();
+
+        let mut plugins = Plugins::load(
+            Some(&ConfigPaths::new(&cfg).with_site(&site)),
+            &cfg,
+            &DenyAll,
+        );
+        let notices = plugins.take_notices();
+        assert!(notices.is_empty(), "{notices:?}");
+        assert!(
+            plugins.is_active("beats"),
+            "an installed package did not run"
+        );
+        assert!(plugins.motion_names().iter().any(|m| m == "next_beat"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn an_opt_package_runs_only_when_plugins_lua_names_it() {
+        let dir = scratch("pack-opt");
+        let (cfg, site) = (dir.join("config"), dir.join("site"));
+        std::fs::create_dir_all(&cfg).unwrap();
+        let manifest = "name = \"proxies\"\napi = \"^1.0\"\n";
+        let source =
+            r#"require("davimci.motions").register("proxy_next", function() return 0 end)"#;
+        install(&site, "opt", "proxies", manifest, source);
+        let paths = ConfigPaths::new(&cfg).with_site(&site);
+
+        let plugins = Plugins::load(Some(&paths), &cfg, &DenyAll);
+        assert!(!plugins.is_active("proxies"), "an opt package ran unasked");
+
+        std::fs::write(
+            cfg.join("plugins.lua"),
+            r#"require("davimci.pack").add("proxies")"#,
+        )
+        .unwrap();
+        let mut plugins = Plugins::load(Some(&paths), &cfg, &DenyAll);
+        let notices = plugins.take_notices();
+        assert!(notices.is_empty(), "{notices:?}");
+        assert!(plugins.is_active("proxies"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A plugin written against an API this build does not offer is refused
+    /// rather than run: it would ask for edits the host would misread.
+    #[test]
+    fn a_package_needing_another_api_is_refused_with_a_sentence() {
+        let dir = scratch("pack-api");
+        let (cfg, site) = (dir.join("config"), dir.join("site"));
+        std::fs::create_dir_all(&cfg).unwrap();
+        install(
+            &site,
+            "start",
+            "future",
+            "name = \"future\"\napi = \"^9.0\"\n",
+            "error('this must never run')",
+        );
+        let mut plugins = Plugins::load(
+            Some(&ConfigPaths::new(&cfg).with_site(&site)),
+            &cfg,
+            &DenyAll,
+        );
+        let notices = plugins.take_notices();
+        assert_eq!(notices.len(), 1, "{notices:?}");
+        assert!(notices[0].text.contains("api"), "{notices:?}");
+        assert!(!plugins.is_active("future"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Packages run before the user's own files, so a config always wins.
+    #[test]
+    fn a_config_overrides_what_a_package_registered() {
+        let dir = scratch("pack-order");
+        let (cfg, site) = (dir.join("config"), dir.join("site"));
+        std::fs::create_dir_all(&cfg).unwrap();
+        install(
+            &site,
+            "start",
+            "marks",
+            "name = \"marks\"\napi = \"^1.0\"\n",
+            r#"require("davimci.motions").register("m", function() return 1 end)"#,
+        );
+        std::fs::write(
+            cfg.join("init.lua"),
+            r#"require("davimci.motions").register("m", function() return 99 end)"#,
+        )
+        .unwrap();
+        let mut plugins = Plugins::load(
+            Some(&ConfigPaths::new(&cfg).with_site(&site)),
+            &cfg,
+            &DenyAll,
+        );
+        assert!(plugins.take_notices().is_empty());
+        let env = davimci_lua::MotionEnv::default();
+        let answer = plugins
+            .run_motion("m", &davimci_lua::Opts::new(), &env)
+            .unwrap();
+        assert_eq!(answer, davimci_lua::MotionAnswer::Found(99));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

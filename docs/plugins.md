@@ -53,8 +53,10 @@ written against exactly the surface a third-party plugin gets.
 
 ## Bundled plugins
 
-Bundled plugins are compiled into the binary and listed in
-`davimci_cli::BUNDLED` (sources in `crates/davimci-cli/runtime/plugins/`).
+Bundled plugins are ordinary plugins that happen to ship in the binary:
+each is a directory under `crates/davimci-cli/runtime/plugins/<name>/` with
+the same `davimci.toml` and `plugin/init.lua` an installed plugin has, and
+nothing about one is written in Rust. They are examples as much as features.
 They run before the rest of the user config, so a config can rebind or
 replace anything they set up.
 
@@ -115,3 +117,74 @@ Saying nothing about a plugin leaves it off until a project or a call needs a
 name it owns. Saying `disable` means off even then - that is the one way to
 keep a plugin from ever running, and the editor reports what the project
 loses rather than pretending nothing did.
+
+## Installing plugins
+
+davimci ships the loading mechanism, not a package manager. Fetching a plugin
+from anywhere is a separate program's job; what the editor guarantees is
+where a plugin goes, when it runs, and what it may assume about the host.
+
+Packages live under `$XDG_DATA_HOME/davimci/site`:
+
+```text
+site/pack/<group>/start/<plugin>/   runs at startup
+site/pack/<group>/opt/<plugin>/     runs when davimci.pack.add names it
+```
+
+The group level exists so a fetcher can own one directory without touching
+what a user dropped in by hand. A plugin directory is laid out like the
+config directory, so a config tree can be moved into a package unchanged:
+
+```text
+beats/
+  davimci.toml        what the host may know without running anything
+  plugin/init.lua     run on load
+  lua/beats/grid.lua  require("beats.grid")
+  motions/*.lua
+  presets/*.lua
+```
+
+`require` searches the `lua/` directory of every package, then the config
+root last, so a package can never shadow a module the user wrote.
+
+## Manifests
+
+```toml
+name = "beats"          # must match the directory it is installed as
+version = "0.3.1"
+api = "^1.0"            # the davimci.* surface it was written against
+requires = ["aubio"]    # external programs, reported rather than checked
+
+[provides]
+motions = ["next_beat", "prev_beat"]
+transitions = []
+track_kinds = []
+```
+
+A manifest is declarative and is never executed, so the host can answer "who
+owns `wipe_left`?" without running a stranger's Lua. `api` is a range over
+`davimci.api_version`, which moves independently of the binary's version: a
+plugin outside the range is refused with a sentence rather than run, because
+a plugin written for another API asks for edits this host would misread. A
+directory with no manifest still loads - the manifest is what buys the host
+the ability to speak for the plugin before it runs.
+
+## Load order
+
+1. `plugins.lua`, alone, so every choice is known before anything runs.
+2. Bundled plugins that are enabled.
+3. `start` packages, in group then name order.
+4. `opt` packages named by `davimci.pack.add`, in the order named.
+5. `init.lua`, `keymaps.lua`, then `motions/`, `presets/`, `plugin/` in the
+   config root.
+6. The project-local `.davimci.lua`, if it is trusted.
+
+Plugins run before the user's own files, so a config always wins over a
+plugin without either knowing about the other. Failures stay isolated per
+file: one broken plugin costs you that plugin, not the editor.
+
+```lua
+-- ~/.config/davimci/plugins.lua
+require("davimci.plugins").enable({ "silence", "which-key" })
+require("davimci.pack").add("proxies")   -- an opt package, wanted today
+```

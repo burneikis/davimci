@@ -99,6 +99,8 @@ pub(crate) struct State {
     /// means "whatever the plugin ships as", so a config only records the
     /// choices it actually made.
     pub plugin_choices: BTreeMap<String, bool>,
+    /// `opt` packages a config asked for by name, in the order it asked.
+    pub packadds: Vec<String>,
     next_id: HandlerId,
 }
 
@@ -114,6 +116,7 @@ impl fmt::Debug for State {
             .field("autocmds", &self.autocmds)
             .field("requests", &self.requests)
             .field("plugin_choices", &self.plugin_choices)
+            .field("packadds", &self.packadds)
             .finish_non_exhaustive()
     }
 }

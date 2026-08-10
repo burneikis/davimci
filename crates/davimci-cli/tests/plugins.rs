@@ -541,7 +541,7 @@ fn a_bundled_plugin_that_is_off_by_default_does_not_run_unasked() {
     assert!(
         davimci_cli::BUNDLED
             .iter()
-            .any(|p| p.name == "which-key" && !p.default_on),
+            .any(|p| p.name() == "which-key" && !p.default_on()),
         "which-key is no longer opt-in"
     );
     let cfg = Scratch::with_config("which-key-off", &[("init.lua", "")]);
@@ -564,14 +564,14 @@ fn plugin_choices_are_read_before_the_bundled_plugins_run() {
     );
     let mut plugins = Plugins::load(Some(&ConfigPaths::new(cfg.path())), cfg.path(), &DenyAll);
     assert!(plugins.take_notices().is_empty());
-    for p in davimci_cli::BUNDLED {
+    for p in davimci_cli::BUNDLED.iter() {
         // The one it named is on; the rest keep whatever they ship as.
-        let expected = if p.name == "which-key" {
+        let expected = if p.name() == "which-key" {
             true
         } else {
-            p.default_on
+            p.default_on()
         };
-        assert_eq!(plugins.wants(p), expected, "{}", p.name);
+        assert_eq!(plugins.wants(p), expected, "{}", p.name());
     }
 }
 
@@ -950,27 +950,27 @@ fn a_config_that_disabled_a_plugin_is_not_overridden_by_a_project() {
 /// a name says which names those are.
 #[test]
 fn no_bundled_plugin_is_on_by_default_and_each_declares_what_it_owns() {
-    for p in davimci_cli::BUNDLED {
-        assert!(!p.default_on, "{} is on by default", p.name);
+    for p in davimci_cli::BUNDLED.iter() {
+        assert!(!p.default_on(), "{} is on by default", p.name());
     }
     assert_eq!(
-        davimci_cli::provider_of_transition("wipe_left").map(|p| p.name),
+        davimci_cli::provider_of_transition("wipe_left").map(davimci_lua::Plugin::name),
         Some("transitions")
     );
     assert_eq!(
-        davimci_cli::provider_of_motion("next_silence").map(|p| p.name),
+        davimci_cli::provider_of_motion("next_silence").map(davimci_lua::Plugin::name),
         Some("silence")
     );
     assert_eq!(
-        davimci_cli::provider_of_motion("next_scene").map(|p| p.name),
+        davimci_cli::provider_of_motion("next_scene").map(davimci_lua::Plugin::name),
         Some("scenes")
     );
     assert_eq!(
-        davimci_cli::provider_of_motion("next_text").map(|p| p.name),
+        davimci_cli::provider_of_motion("next_text").map(davimci_lua::Plugin::name),
         Some("text")
     );
     assert_eq!(
-        davimci_cli::provider_of_track_kind("T").map(|p| p.name),
+        davimci_cli::provider_of_track_kind("T").map(davimci_lua::Plugin::name),
         Some("text")
     );
     assert!(davimci_cli::provider_of_transition("dissolve").is_none());

@@ -43,7 +43,7 @@ pub use error::CliError;
 pub use excmd::{ExCommand, ExOutcome, parse, vocabulary};
 pub use export::{ExportEvent, Exporter};
 pub use plugins::{
-    AskOnTerminal, BUNDLED, Bundled, Plugins, Provides, provider_of_motion, provider_of_track_kind,
+    AskOnTerminal, BUNDLED, Plugins, provider_of_motion, provider_of_track_kind,
     provider_of_transition,
 };
 pub use proxy::Proxies;

@@ -81,9 +81,13 @@ fn string_list(t: &Table) -> mlua::Result<Vec<String>> {
 pub(crate) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
     let davimci = lua.create_table()?;
     davimci.set("version", env!("CARGO_PKG_VERSION"))?;
+    // The API's own version, which is what a plugin is written against and
+    // what its manifest declares a range of.
+    davimci.set("api_version", crate::pack::API_VERSION.to_string())?;
 
-    let modules: [(&str, Table); 10] = [
+    let modules: [(&str, Table); 11] = [
         ("plugins", plugins_module(lua, state)?),
+        ("pack", pack_module(lua, state)?),
         ("ui", ui_module(lua, state)?),
         ("keymap", keymap_module(lua, state)?),
         ("motions", motions_module(lua, state)?),
@@ -164,6 +168,28 @@ fn plugin_names(values: &Variadic<Value>) -> mlua::Result<Vec<String>> {
         )));
     }
     Ok(out)
+}
+
+/// `davimci.pack`: ask for an `opt` package by name.
+///
+/// A declaration like every other in `plugins.lua`: the host reads the list
+/// and loads those packages in order, so no Lua call ever touches the disk.
+fn pack_module(lua: &Lua, state: &Shared) -> mlua::Result<Table> {
+    let t = lua.create_table()?;
+    let st = Rc::clone(state);
+    t.set(
+        "add",
+        lua.create_function(move |_, names: Variadic<Value>| {
+            let mut st = st.borrow_mut();
+            for name in plugin_names(&names)? {
+                if !st.packadds.contains(&name) {
+                    st.packadds.push(name);
+                }
+            }
+            Ok(())
+        })?,
+    )?;
+    Ok(t)
 }
 
 fn keymap_module(lua: &Lua, state: &Shared) -> mlua::Result<Table> {

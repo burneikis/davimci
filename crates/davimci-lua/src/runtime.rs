@@ -138,6 +138,23 @@ impl Runtime {
         Ok(env)
     }
 
+    /// Set `package.path`, which is the whole of how a `require` finds a
+    /// module a plugin shipped. Nothing else changes what Lua may read: a
+    /// path with no runtime path entries resolves nothing off disk.
+    pub(crate) fn set_package_path(&self, path: &str) -> Result<(), LuaError> {
+        let set = || -> mlua::Result<()> {
+            self.lua
+                .globals()
+                .get::<Table>("package")?
+                .set("path", path)
+        };
+        set().map_err(|e| LuaError::Runtime(tidy(&e)))
+    }
+
+    pub(crate) fn state_packadds(&self) -> Vec<String> {
+        self.state.borrow().packadds.clone()
+    }
+
     /// Requests queued by Lua since the last drain.
     pub fn take_requests(&self) -> Vec<Request> {
         std::mem::take(&mut self.state.borrow_mut().requests)

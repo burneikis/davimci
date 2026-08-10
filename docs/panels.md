@@ -94,6 +94,6 @@ end)
 
 The keymap is the only thing that knows which keys are live, so a plugin
 reads it from here rather than keeping a copy. The bundled which-key plugin
-(`crates/davimci-cli/runtime/plugins/which-key.lua`) is a view of exactly
+(`crates/davimci-cli/runtime/plugins/which-key/plugin/init.lua`) is a view of exactly
 this event and nothing else. It is opt-in; see `docs/plugins.md` for how a
 config turns a bundled plugin on.
