@@ -183,6 +183,7 @@ fn needs_backend(line: &str) -> bool {
         Ok(ExCommand::Export { .. }
             | ExCommand::Render { .. }
             | ExCommand::Presets
+            | ExCommand::CheckHealth
             | ExCommand::CancelRender)
     )
 }

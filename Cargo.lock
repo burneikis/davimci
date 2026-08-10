@@ -898,6 +898,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "davimci-pack"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "davimci-lua",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "davimci-present"
 version = "0.0.0"
 dependencies = [

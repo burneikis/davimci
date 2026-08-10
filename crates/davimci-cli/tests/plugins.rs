@@ -1000,3 +1000,25 @@ fn text_motions_arrive_only_with_the_text_plugin() {
         davimci_keys::keymap::Lookup::NoMatch
     ));
 }
+
+/// `:checkhealth` answers from the running editor, because what is loaded is
+/// the editor's to know: the workspace has no runtime to ask.
+#[test]
+fn checkhealth_reports_the_api_and_every_plugin_it_knows_of() {
+    let cfg = Scratch::with_config(
+        "health",
+        &[(
+            "plugins.lua",
+            r#"require("davimci.plugins").enable("silence")"#,
+        )],
+    );
+    let (mut app, mut editor, _) = editor_with(&cfg);
+    app.event(Event::Command(":checkhealth".into()), &mut editor);
+    let said = app.view().message.expect("a status line").text;
+    assert!(said.contains("plugin api"), "{said}");
+    assert!(
+        said.contains("silence") && said.contains("running"),
+        "{said}"
+    );
+    assert!(said.contains("which-key") && said.contains("off"), "{said}");
+}

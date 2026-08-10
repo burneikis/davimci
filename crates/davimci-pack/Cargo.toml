@@ -1,0 +1,25 @@
+[package]
+name = "davimci-pack"
+description = "davimci plugin fetcher"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "davimci_pack"
+path = "src/lib.rs"
+
+[[bin]]
+name = "davimci-pack"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+davimci-lua.workspace = true
+anyhow.workspace = true
+serde = { workspace = true }
+serde_json.workspace = true

@@ -1,6 +1,4 @@
 # TODO
-- a fetcher for plugins (separate program, lockfile over site/pack)
-- :checkhealth: api ranges, missing `requires`, name conflicts
 - make lightweight
 - core feature stripdown
   - define the core

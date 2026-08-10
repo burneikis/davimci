@@ -71,6 +71,8 @@ pub enum ExCommand {
     Render { preset: String },
     /// `:presets` - list what `:render` will accept.
     Presets,
+    /// `:checkhealth` - what is wrong with this session's plugins.
+    CheckHealth,
     /// `:cancel` - stop the running export.
     CancelRender,
     /// `:gain <db>` - absolute gain on the clip under the playhead.
@@ -209,6 +211,7 @@ pub fn parse(line: &str) -> Result<ExCommand, CliError> {
         },
         "analyze" | "analyse" => Ok(ExCommand::Analyze),
         "presets" => Ok(ExCommand::Presets),
+        "checkhealth" | "health" => Ok(ExCommand::CheckHealth),
         "cancel" => Ok(ExCommand::CancelRender),
         "new" => Ok(ExCommand::New),
         "ls" | "buffers" => Ok(ExCommand::List),
@@ -513,6 +516,7 @@ impl Workspace {
             ExCommand::Export { .. }
             | ExCommand::Render { .. }
             | ExCommand::Presets
+            | ExCommand::CheckHealth
             | ExCommand::CancelRender => Err(CliError::ExportFailed {
                 reason: "exporting needs a running editor, and this session has no render backend"
                     .into(),

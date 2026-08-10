@@ -204,14 +204,16 @@ impl Plugins {
         self.notices.extend(problems.iter().map(Notice::from_error));
         let mut roots: Vec<PathBuf> = Vec::new();
         for plugin in found {
-            if !plugin.compatible() {
+            // An incompatible plugin is still known, so `:checkhealth` can
+            // say what happened to it; it simply never runs.
+            if plugin.compatible() {
+                if let Some(root) = plugin.root() {
+                    roots.push(root.to_path_buf());
+                }
+            } else {
                 self.notices.push(Notice::from_error(&LuaError::Config(
                     plugin.incompatible_notice(),
                 )));
-                continue;
-            }
-            if let Some(root) = plugin.root() {
-                roots.push(root.to_path_buf());
             }
             self.known.push(plugin);
         }
@@ -250,6 +252,9 @@ impl Plugins {
         let Some(plugin) = self.known.get(index).cloned() else {
             return;
         };
+        if !plugin.compatible() {
+            return;
+        }
         if !self.active.insert(plugin.name().to_string()) {
             return;
         }
@@ -266,6 +271,17 @@ impl Plugins {
     #[must_use]
     pub fn known(&self) -> &[Plugin] {
         &self.known
+    }
+
+    /// What `:checkhealth` reports: API ranges, missing external programs,
+    /// and names two plugins both claim.
+    #[must_use]
+    pub fn health(&self) -> Vec<String> {
+        crate::health::report(
+            &self.known,
+            &|name| self.is_active(name),
+            &crate::health::on_path,
+        )
     }
 
     /// Turn a plugin on because something asked for a name it owns.

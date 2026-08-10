@@ -357,6 +357,15 @@ impl Editor {
         &mut self.exporter
     }
 
+    /// Run a command about the plugins themselves. The workspace cannot
+    /// answer these: it has no runtime, and what is loaded is the editor's.
+    fn plugin_command(&self, cmd: &ExCommand) -> Option<Result<String, CliError>> {
+        match cmd {
+            ExCommand::CheckHealth => Some(Ok(self.plugins.health().join("  |  "))),
+            _ => None,
+        }
+    }
+
     /// Run an export command. Split out from [`Editor::command`] because
     /// these are the only `:` commands the workspace cannot answer: they
     /// need the render backend, which only the editor holds.
@@ -1609,7 +1618,8 @@ impl Host for Editor {
         // neither a backend nor the analysis.
         if let Ok(cmd) = crate::excmd::parse(line)
             && let Some(result) = self
-                .export_command(&cmd, session)
+                .plugin_command(&cmd)
+                .or_else(|| self.export_command(&cmd, session))
                 .or_else(|| self.audio_command(&cmd, session, selection))
         {
             return match result {

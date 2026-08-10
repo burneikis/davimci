@@ -120,9 +120,16 @@ loses rather than pretending nothing did.
 
 ## Installing plugins
 
-davimci ships the loading mechanism, not a package manager. Fetching a plugin
-from anywhere is a separate program's job; what the editor guarantees is
-where a plugin goes, when it runs, and what it may assume about the host.
+davimci ships the loading mechanism, not a package manager. Fetching is
+`davimci-pack`'s job, a separate program; what the editor guarantees is where
+a plugin goes, when it runs, and what it may assume about the host.
+
+The split is not tidiness. Lua here may ask and never write - no `os`, no
+`io`, no spawning - and a fetcher inside the editor would mean adding those
+to the API for every plugin, including the project-local `.davimci.lua` that
+arrives with someone else's footage. A package manager running inside the
+editor would also be mutating the runtime path while the editor is reading
+it.
 
 Packages live under `$XDG_DATA_HOME/davimci/site`:
 
@@ -188,3 +195,57 @@ file: one broken plugin costs you that plugin, not the editor.
 require("davimci.plugins").enable({ "silence", "which-key" })
 require("davimci.pack").add("proxies")   -- an opt package, wanted today
 ```
+
+## davimci-pack
+
+```sh
+davimci-pack add user/beatgrid        # clone and pin
+davimci-pack add --opt user/proxies   # into opt/, loaded when asked for
+davimci-pack update [name...]         # pull and re-pin
+davimci-pack sync                     # install what the lockfile names
+davimci-pack remove beatgrid
+davimci-pack list
+```
+
+Everything it writes lives under `site/pack/fetched/`, so `pack/manual/`
+stays whatever the user put there and an update can never delete work done by
+hand. It shells out to `git` rather than linking a git library, the way
+export shells out to `ffmpeg`, which keeps the editor's dependencies clear of
+it entirely.
+
+`<config>/davimci-lock.json` pins each plugin to a commit, so a config
+repository restores the editor a project was cut on. A project outlives a
+branch, which is why the pin is a revision and not a tag.
+
+```json
+{
+  "plugins": {
+    "beatgrid": {
+      "url": "https://github.com/user/beatgrid",
+      "rev": "9c1f0aa...",
+      "kind": "start"
+    }
+  }
+}
+```
+
+An install whose manifest disagrees with its directory, or that needs an API
+this build does not offer, fails at install time in a terminal rather than as
+a notice in the middle of an edit.
+
+## :checkhealth
+
+```text
+davimci plugin api 1.0
+5 bundled, 2 installed
+OK   silence 1.0.0 (bundled, running)
+OK   which-key 1.0.0 (bundled, off)
+WARN the plugin 'beatgrid' needs davimci api >=9.0 and this build offers 1.0; it was not loaded
+WARN beats needs 'aubio', which is not on PATH; install it or the plugin will fail where it uses it
+WARN the motion 'next_beat' is claimed by beats and beatgrid; the last loaded wins, which is beatgrid
+```
+
+Three things it can catch: an API a plugin cannot use, an external program a
+manifest declares under `requires` and the machine does not have, and a name
+two plugins both claim. A plugin refused for its API is still reported, so
+"it did nothing" always has an answer.

@@ -26,6 +26,7 @@ davimci-present   = { path = "crates/davimci-present" }
 davimci-gui       = { path = "crates/davimci-gui" }
 davimci-tui       = { path = "crates/davimci-tui" }
 davimci-headless  = { path = "crates/davimci-headless" }
+davimci-pack      = { path = "crates/davimci-pack" }
 
 # external
 thiserror = "2"

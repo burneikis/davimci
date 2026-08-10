@@ -19,6 +19,7 @@ pub mod editor;
 pub mod error;
 pub mod excmd;
 pub mod export;
+pub mod health;
 #[cfg(feature = "window")]
 pub mod planar_video;
 pub mod plugins;
