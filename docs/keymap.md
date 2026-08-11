@@ -9,6 +9,10 @@ Counts, registers, marks and text objects are grammar, not bindings:
 What `v` and `V` select, and how `j`/`k` widen a selection across
 tracks, is in `docs/visual-mode.md`.
 
+These are core's bindings only. Keys a plugin owns - `gx` and `dax`
+from `transitions`, `]s`, `]v` and `]c` from theirs - are listed in
+`docs/plugins.md`.
+
 ## Audio
 
 | Keys | Action |
@@ -25,11 +29,9 @@ tracks, is in `docs/visual-mode.md`.
 | `.` | repeat the last edit |
 | `>` | trim the nearest edge one jump point later |
 | `a` | append media after the current clip |
-| `dax` | delete the transition at the nearest cut |
 | `gp` | paste after the playhead, overwriting |
 | `gP` | paste before the playhead, overwriting |
 | `gs` | split at the playhead on every track |
-| `gx` | create a transition at the nearest cut |
 | `i` | insert media at the playhead |
 | `p` | paste after the playhead, rippling |
 | `P` | paste before the playhead, rippling |

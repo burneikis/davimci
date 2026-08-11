@@ -10,8 +10,7 @@ use std::path::PathBuf;
 use davimci_analysis::{FfprobeProber, ImportOptions, Prober};
 use davimci_cmd::EditCommand;
 use davimci_core::{
-    ClipProps, DEFAULT_TRANSITION, DEFAULT_TRANSITION_FRAMES, Frame, Selection, TimelineProps,
-    Transition,
+    ClipProps, DEFAULT_TRANSITION_FRAMES, Frame, Selection, TimelineProps, Transition,
 };
 
 use crate::autosave::OnRecovery;
@@ -328,10 +327,9 @@ fn parse_duck(line: &Line<'_>) -> Result<ExCommand, CliError> {
 fn parse_transition(line: &Line<'_>) -> Result<ExCommand, CliError> {
     const USAGE: &str = "<name|none> [frames]";
     match line.args.as_slice() {
-        [] => Ok(ExCommand::Transition {
-            kind: Some(DEFAULT_TRANSITION.to_string()),
-            frames: None,
-        }),
+        // No type is core, so a bare `:transition` has nothing to default
+        // to: naming one is the user's, and the catalogue plugin's, business.
+        // That falls through to the usage arm at the bottom.
         ["none"] => Ok(ExCommand::Transition {
             kind: None,
             frames: None,
@@ -390,10 +388,7 @@ pub fn vocabulary_with(
                 .collect(),
         )
         .with_arguments("fade", words(&["in", "out"]));
-    let transitions: Vec<String> = davimci_mlt::transitions::names()
-        .into_iter()
-        .map(str::to_string)
-        .chain(std::iter::once("none".to_string()))
+    let transitions: Vec<String> = std::iter::once("none".to_string())
         .chain(davimci_mlt::transitions::registered_names())
         .collect();
     for prop in crate::setting::PROPERTIES {

@@ -47,5 +47,10 @@ default = ["window"]
 # The window. Off, the binary is the scriptable driver and needs no display.
 window = ["dep:eframe", "dep:egui", "davimci-gui/window", "davimci-present/gpu"]
 slow-tests = ["davimci-analysis/slow-tests", "davimci-mlt/slow-tests"]
-# The terminal frontend. Explicitly optional: the window is the primary UI.
+# The terminal frontend. Either frontend satisfies the rule that a build a
+# user runs can show them the timeline; which one is the build's choice.
 tui = ["dep:davimci-tui"]
+# A build with no frontend at all: the scripted driver the tests and batch
+# exports run through. It has to be asked for by name, because a binary that
+# cannot show a timeline is not the editor.
+driver-only = []

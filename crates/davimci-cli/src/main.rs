@@ -132,8 +132,10 @@ fn run(args: Args) -> Result<()> {
         return run_session(ws, &keys, args.ticks);
     }
 
+    // A build with no window still has to be able to show a timeline, so in
+    // one the terminal is the editor rather than an alternative to it.
     #[cfg(feature = "tui")]
-    if args.tui {
+    if args.tui || (cfg!(not(feature = "window")) && args.commands.is_empty() && !args.no_window) {
         return run_tui(ws, args.numbers);
     }
     // Without the feature the flag never gets this far, but the bindings are
@@ -259,6 +261,7 @@ fn assemble(ws: Workspace) -> (App, Editor) {
 /// Assemble for a frontend that can put a question on the screen, so
 /// project-local config is asked about in the window or the TUI rather than
 /// on whatever terminal the editor was launched from.
+#[cfg(any(feature = "window", feature = "tui"))]
 fn assemble_asking_in_frontend(ws: Workspace, host: PresentHost) -> (App, Editor) {
     let root = ws.root().to_path_buf();
     let (plugins, pending) =

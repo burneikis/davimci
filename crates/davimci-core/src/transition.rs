@@ -5,6 +5,11 @@
 //! clip laid over two others. It is a property of the *incoming* clip: a
 //! named type and a duration, attached to the cut at that clip's start.
 //!
+//! No transition type is core. The model stores whatever name it was given
+//! and never checks it against a catalogue: naming what an overlap looks like
+//! is a plugin's job, and a name nothing registered still round-trips through
+//! save and load unchanged.
+//!
 //! The overlap is materialised at render time out of handle frames. A
 //! transition of `d` frames on a cut is centred on it: the outgoing clip runs
 //! [`Transition::tail`] frames past its out-point, the incoming clip starts
@@ -16,17 +21,18 @@ use serde::{Deserialize, Serialize};
 
 use crate::time::Frame;
 
-/// The transition `gx` creates when the user names nothing.
-pub const DEFAULT_TRANSITION: &str = "dissolve";
-
 /// The default transition length in frames.
+///
+/// A length is core because the model owns the overlap; the *type* is not,
+/// so nothing here names one.
 pub const DEFAULT_TRANSITION_FRAMES: u64 = 12;
 
 /// A transition attached to the head of a clip.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Transition {
-    /// Registry name, e.g. `dissolve`. Types are extensible from Lua
-    ///, so the model stores the name rather than an enum.
+    /// Registry name. Every type, including the plainest cross-fade, is
+    /// registered by a plugin, so the model stores the name rather than an
+    /// enum and never asserts that any particular one exists.
     pub kind: String,
     /// Length of the overlap in timeline frames. Always non-zero.
     pub duration: Frame,
@@ -41,10 +47,10 @@ impl Transition {
         }
     }
 
-    /// A default-length dissolve.
+    /// `kind` at the default length.
     #[must_use]
-    pub fn dissolve() -> Self {
-        Self::new(DEFAULT_TRANSITION, Frame(DEFAULT_TRANSITION_FRAMES))
+    pub fn of(kind: impl Into<String>) -> Self {
+        Self::new(kind, Frame(DEFAULT_TRANSITION_FRAMES))
     }
 
     /// Frames the overlap reaches *before* the cut, taken from the incoming
@@ -91,8 +97,8 @@ mod tests {
     }
 
     #[test]
-    fn the_default_is_a_twelve_frame_dissolve() {
-        let t = Transition::dissolve();
+    fn a_type_at_the_default_length_is_twelve_frames() {
+        let t = Transition::of("dissolve");
         assert_eq!(t.kind, "dissolve");
         assert_eq!(t.duration, Frame(DEFAULT_TRANSITION_FRAMES));
         assert_eq!((t.head(), t.tail()), (6, 6));

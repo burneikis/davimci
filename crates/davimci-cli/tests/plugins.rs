@@ -973,7 +973,12 @@ fn no_bundled_plugin_is_on_by_default_and_each_declares_what_it_owns() {
         davimci_cli::provider_of_track_kind("T").map(davimci_lua::Plugin::name),
         Some("text")
     );
-    assert!(davimci_cli::provider_of_transition("dissolve").is_none());
+    // Every type is the catalogue's, including the plainest cross-fade, so
+    // a project that uses one asks for the plugin the same way a wipe does.
+    assert_eq!(
+        davimci_cli::provider_of_transition("dissolve").map(davimci_lua::Plugin::name),
+        Some("transitions")
+    );
     // Video and audio tracks are the editor, not a plugin's opinion.
     assert!(davimci_cli::provider_of_track_kind("V").is_none());
     assert!(davimci_cli::provider_of_track_kind("A").is_none());
@@ -998,6 +1003,43 @@ fn text_motions_arrive_only_with_the_text_plugin() {
     assert!(!matches!(
         plugins.keymap().lookup(&davimci_keys::Key::parse_str("]c")),
         davimci_keys::keymap::Lookup::NoMatch
+    ));
+}
+
+/// No transition type is core, so neither is the key that creates one: `gx`
+/// and `dax` arrive with the catalogue that gives them something to name.
+#[test]
+fn transition_keys_arrive_only_with_the_transitions_plugin() {
+    use davimci_keys::Key;
+    use davimci_keys::keymap::Lookup;
+
+    let cfg = Scratch::with_config("transitions-off", &[]);
+    let mut plugins = Plugins::load(Some(&ConfigPaths::new(cfg.path())), cfg.path(), &DenyAll);
+    let _ = plugins.take_notices();
+    assert!(!plugins.is_active("transitions"));
+    assert!(matches!(
+        plugins.keymap().lookup(&Key::parse_str("gx")),
+        Lookup::NoMatch
+    ));
+
+    let owner =
+        davimci_cli::provider_of_transition("dissolve").expect("nothing owns the cross-fade");
+    assert!(plugins.activate(owner));
+    let notices = plugins.take_notices();
+    assert!(notices.is_empty(), "{notices:?}");
+    let keymap = plugins.keymap();
+    assert!(!matches!(
+        keymap.lookup(&Key::parse_str("gx")),
+        Lookup::NoMatch
+    ));
+    assert!(!matches!(
+        keymap.lookup(&Key::parse_str("dax")),
+        Lookup::NoMatch
+    ));
+    // `d` stays an operator with a literal bound over it.
+    assert!(matches!(
+        keymap.lookup(&Key::parse_str("d")),
+        Lookup::PendingWithFallback(_)
     ));
 }
 

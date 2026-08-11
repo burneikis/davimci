@@ -37,7 +37,10 @@ pub fn keymap_markdown() -> String {
          Counts, registers, marks and text objects are grammar, not bindings:\n\
          `3dw`, `\"ay`, `` `a `` and `dic` compose out of the entries below.\n\n\
          What `v` and `V` select, and how `j`/`k` widen a selection across\n\
-         tracks, is in `docs/visual-mode.md`.\n",
+         tracks, is in `docs/visual-mode.md`.\n\n\
+         These are core's bindings only. Keys a plugin owns - `gx` and `dax`\n\
+         from `transitions`, `]s`, `]v` and `]c` from theirs - are listed in\n\
+         `docs/plugins.md`.\n",
     );
     let mut current = "";
     for (keys, text, section) in rows {
@@ -173,7 +176,7 @@ fn standalone(a: &Action) -> (&'static str, String) {
                 if *forward { "later" } else { "earlier" }
             ),
         ),
-        Action::CreateTransition => (edit, "create a transition at the nearest cut".into()),
+        Action::CreateTransition { kind } => (edit, format!("create a {kind} at the nearest cut")),
         Action::DeleteTransition => (edit, "delete the transition at the nearest cut".into()),
         Action::EnterVisual(mode) => (
             visual,

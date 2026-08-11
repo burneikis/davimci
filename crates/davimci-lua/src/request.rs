@@ -122,6 +122,12 @@ pub fn parse_editor_command(rhs: &str) -> Option<Action> {
     };
     let name = name.strip_prefix("editor.").unwrap_or(name);
     let count = |arg: Option<&str>| -> Option<i64> { arg.and_then(|a| a.parse::<i64>().ok()) };
+    // A quoted argument, e.g. `editor.transition_create("dissolve")`. Empty
+    // is rejected: a transition with no type would name nothing to render.
+    let name_arg = |arg: Option<&str>| -> Option<String> {
+        let text = arg?.trim_matches(|c| c == '"' || c == '\'').trim();
+        (!text.is_empty()).then(|| text.to_string())
+    };
 
     Some(match name {
         "split_at_playhead" => Action::SplitCurrent,
@@ -140,6 +146,11 @@ pub fn parse_editor_command(rhs: &str) -> Option<Action> {
             ripple: true,
             register: None,
         },
+        // No transition type is core, so the type is the plugin's to name.
+        "transition_create" => Action::CreateTransition {
+            kind: name_arg(arg)?,
+        },
+        "transition_delete" => Action::DeleteTransition,
         "play_pause" => Action::PlayPause,
         "interrupt_transport" => Action::InterruptTransport,
         "step_frame" | "step_jump_point" => {

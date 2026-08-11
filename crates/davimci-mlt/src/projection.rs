@@ -705,7 +705,7 @@ mod tests {
             .map(Entry::length)
             .sum();
 
-        tl.set_transition(track, right, Some(davimci_core::Transition::dissolve()))
+        tl.set_transition(track, right, Some(davimci_core::Transition::of("dissolve")))
             .unwrap();
         let p = Projection::of(&tl);
         let entries = &p.tracks[0].entries;

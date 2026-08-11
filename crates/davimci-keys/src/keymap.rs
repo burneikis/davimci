@@ -267,9 +267,8 @@ pub fn default_bindings() -> Vec<(Vec<Key>, LeafAction)> {
         (k("-"), standalone(Action::GainAdjust(-1))),
         (k("<Space>m"), standalone(Action::ToggleMute)),
         (k("<Space>s"), standalone(Action::ToggleSolo)),
-        // -- transitions --
-        (k("gx"), standalone(Action::CreateTransition)),
-        (k("dax"), standalone(Action::DeleteTransition)),
+        // Transitions bind nothing here: no type is core, so `gx` and `dax`
+        // come from the plugin that registers the type they would create.
         // -- transport --
         (k("<Space><Space>"), standalone(Action::PlayPause)),
         (k("H"), standalone(Action::Shuttle { forward: false })),
@@ -314,8 +313,9 @@ mod tests {
 
     #[test]
     fn a_bound_key_that_also_prefixes_a_longer_one_carries_a_fallback() {
-        let km = Keymap::new();
-        // "d" is bound (RippleDelete) and also prefixes "dax".
+        // "d" is bound (RippleDelete); a plugin binding "dax" over it must
+        // leave "d" usable as an operator rather than swallowing it.
+        let km = Keymap::new().with_overrides([(k("dax"), standalone(Action::Undo))]);
         assert_eq!(
             km.lookup(&k("d")),
             Lookup::PendingWithFallback(op(Operator::RippleDelete))

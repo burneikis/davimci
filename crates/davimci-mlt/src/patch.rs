@@ -256,8 +256,12 @@ mod tests {
         let track = track_id(&tl, "V1");
         let ids = clip_ids(&tl, "V1");
         let before = proj(&tl);
-        tl.set_transition(track, ids[1], Some(davimci_core::Transition::dissolve()))
-            .unwrap();
+        tl.set_transition(
+            track,
+            ids[1],
+            Some(davimci_core::Transition::of("dissolve")),
+        )
+        .unwrap();
         let after = proj(&tl);
         let Patch::Tracks(patches) = diff(&before, &after) else {
             panic!("expected playlist ops, not a rebuild");

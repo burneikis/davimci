@@ -657,7 +657,11 @@ fn transition_command_adds_replaces_and_removes_at_the_nearest_cut() {
             .and_then(|(_, c)| c.transition_in.clone())
     };
 
-    ws.run("transition", OnRecovery::Discard).unwrap();
+    // Naming no type is a usage error: no type is core, so there is
+    // nothing for `:transition` to fall back to.
+    assert!(ws.run("transition", OnRecovery::Discard).is_err());
+
+    ws.run("transition dissolve", OnRecovery::Discard).unwrap();
     assert_eq!(
         at(&ws).map(|t| (t.kind, t.duration.get())),
         Some(("dissolve".into(), 12))
@@ -771,7 +775,7 @@ fn set_transition_changes_type_and_duration_without_re_running_transition() {
         ws.run(":set transition.duration 20", OnRecovery::Discard)
             .is_err()
     );
-    ws.run("transition", OnRecovery::Discard).unwrap();
+    ws.run("transition dissolve", OnRecovery::Discard).unwrap();
     ws.run(":set transition.duration 20", OnRecovery::Discard)
         .unwrap();
     assert_eq!(at(&ws), Some(("dissolve".into(), 20)));

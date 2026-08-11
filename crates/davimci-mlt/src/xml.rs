@@ -276,7 +276,7 @@ mod tests {
     fn golden_transition_between_two_clips() {
         let mut tl = media_fixture(&[(0, 100, 20, 400), (100, 100, 20, 400)]);
         let (track, right) = (tl.tracks()[0].id, tl.tracks()[0].clips()[1].id);
-        tl.set_transition(track, right, Some(davimci_core::Transition::dissolve()))
+        tl.set_transition(track, right, Some(davimci_core::Transition::of("dissolve")))
             .unwrap();
         insta::assert_snapshot!(to_xml(&Projection::of(&tl)));
     }

@@ -69,6 +69,12 @@ cargo build -p davimci-cli --features tui    # optional terminal frontend
 cargo run -p davimci-cli --features tui -- --tui path/to/video.mkv
 ```
 
+Seeing the timeline is core, so every build ships a frontend that can show
+one; which one is the build's choice. A build with neither `window` nor `tui`
+is refused at compile time unless it asks for `--features driver-only`, the
+scripted driver the tests and batch exports run through. `just weigh` prints
+what each profile links, against its budget.
+
 In both frontends the ruler can number its jump points, the way vim numbers
 lines: `--numbers relative` (the count `3l` needs), `--numbers absolute` (the
 frame), `--numbers both` (absolute at the playhead, relative elsewhere; also
@@ -95,8 +101,11 @@ them in a shader, which is three eighths of the bytes of an RGBA upload and
 no CPU colour conversion; a machine without one composites on the CPU and
 looks identical. An export preset may demand hardware with `hardware = true`,
 in which case an export that cannot deliver it is refused rather than
-silently encoded in software. See `docs/gpu_plan.md` for what is measured and
-what is not done.
+silently encoded in software.
+
+None of this is what makes a build heavy: the shader adds no dependency the
+window did not already pull in, and the decode and encode switches are
+runtime choices inside MLT. See `docs/plugins.md` for the weight budgets.
 
 ## Testing
 
@@ -109,6 +118,7 @@ just test-all        # everything, including sanitizer and GPU snapshot tests
 just perf            # timing budgets and scaling checks, in release
 just bench           # criterion benchmarks
 just soak-asan       # the soak fuzz under AddressSanitizer
+just weigh           # what each build profile links, against its budget
 just docs            # regenerate docs/keymap.md
 just lint            # clippy (deny warnings) + rustfmt --check
 ```

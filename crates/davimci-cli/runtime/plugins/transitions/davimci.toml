@@ -3,4 +3,4 @@ version = "1.0.0"
 api = "^1.0"
 
 [provides]
-transitions = ["wipe_left", "wipe_right", "wipe_up", "wipe_down", "iris"]
+transitions = ["dissolve", "wipe_left", "wipe_right", "wipe_up", "wipe_down", "iris"]

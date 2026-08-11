@@ -256,8 +256,8 @@ impl Editor {
     /// Turn on the bundled plugins this project's own contents need.
     ///
     /// A saved project names transition types, and a type nothing registered
-    /// renders as a dissolve - silently losing what the editor that wrote
-    /// the file could do; a project with a text track opened without the
+    /// renders as a plain overlap - silently losing what the editor that
+    /// wrote the file could do; a project with a text track opened without the
     /// plugin that owns text tracks would have cues nothing could edit. So
     /// the project is what asks: opening one that uses a wipe switches the
     /// plugin that owns wipes on, and says so. A config that disabled the
@@ -1368,7 +1368,7 @@ impl Need {
     fn cost(&self, owner: &str) -> String {
         match self {
             Self::Transition(_) => {
-                format!("which the disabled '{owner}' plugin owns; it renders as a dissolve")
+                format!("which the disabled '{owner}' plugin owns; it renders as a plain overlap")
             }
             Self::TrackKind(_) => format!(
                 "which the disabled '{owner}' plugin edits; its cues stay in the project but cannot be edited"

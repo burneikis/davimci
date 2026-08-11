@@ -20,15 +20,23 @@ the only write path to something the model owns.
   preview, seek, scrub and encode, including the measurements analysis takes
   (loudness hops, detected scene changes). Measuring is core; what the
   numbers mean for an edit is not.
-- One transition type, `dissolve`. It is the fallback an unregistered name
-  renders as, so a project always opens.
+- The transition *model*: an overlap on a cut, its length, and the command
+  that writes it. No transition **type** is core, not even the plainest
+  cross-fade. What is core is that a name nothing registered still renders,
+  as a bare overlap, so a project always opens - rendering something is a
+  backend guarantee, naming it is a catalogue's job.
 - A clip's text payload and the commands that write it: `SetClipText`, and
   `:track` / `:text`, which make a track and put a cue on it. Creating
   what the model can hold is core however few people want it. What `i` means
   on a text track, and cue-to-cue movement, are not - those are the
   `text` plugin.
 - The view: timeline lanes, ruler, video pane, status line and `:` line
-  (`davimci-app`, `davimci-present`, `davimci-gui`, `davimci-tui`).
+  (`davimci-app`, `davimci-present`, `davimci-gui`, `davimci-tui`). Seeing
+  the media and the timeline is core: an editor you cannot watch is not one.
+  *Which* frontend shows it is a build's choice - the window or the terminal
+  both satisfy the rule - but a build with neither is refused at compile
+  time unless it asks for `driver-only`, the scripted driver the tests and
+  batch exports run through.
 - The plugin surface itself: the Lua runtime, the event list, panels, and the
   request queue that turns a plugin's intent into a command.
 
@@ -38,9 +46,11 @@ A thing is a plugin when it is a *view* of state core already has, or an
 opinion about how to edit that the model does not need to hold.
 
 - Anything that only reads events and draws: which-key above all.
-- The transition catalogue: every wipe and iris is a `luma` plus a geometry,
-  which is a registration, not a backend feature. Export presets and effect
-  chains likewise.
+- The transition catalogue, all of it: `dissolve` as much as every wipe and
+  iris, each a `luma` plus a geometry, which is a registration rather than a
+  backend feature. The keys that create one go with it, because a key that
+  creates a transition has to name a type and core names none. Export
+  presets and effect chains likewise.
 - Analysis-driven editing: where a scene cut is worth landing on, what
   loudness counts as silence, beat detection as a jump source.
 - Audio processing beyond the built-in duck: EQ, compression, noise
@@ -50,6 +60,33 @@ opinion about how to edit that the model does not need to hold.
 If a bundled plugin needs something `davimci.*` cannot express, that is a gap
 in the API, not a reason to special-case it in the host. Bundled plugins are
 written against exactly the surface a third-party plugin gets.
+
+## How light is light
+
+The reason the boundary is drawn this tightly is that installed features must
+not cost anything to a session that did not ask for them - the property that
+makes vim feel small is not a short feature list, it is that nothing you do
+not use is loaded, linked or run.
+
+So lightness is a budget, checked by `just weigh` rather than hoped for:
+
+| Profile | Build | Budget |
+|---|---|---|
+| `driver` | `--no-default-features --features driver-only` | 90 crates |
+| `tui` | `--no-default-features --features tui` | 135 crates |
+| `window` | default | 210 crates |
+
+The window is the only heavy profile, and it must stay the only one: almost
+all of its weight is one toolkit (`eframe` -> `egui` -> `wgpu`/`winit` and the
+platform stack under them). GPU acceleration is not what makes it heavy -
+the planar YUV shader uploads three eighths of the bytes an RGBA upload does
+and adds no crate the window did not already pull in, and VAAPI decode and
+hardware encode are runtime switches into MLT that cost no dependency at all.
+
+With every plugin off, the editor still opens media, cuts, rearranges,
+multi-tracks, marks, saves and exports, and shows all of it. That list is the
+question to ask of anything proposed for core; a dependency that arrives
+without an entry on it belongs to a plugin.
 
 ## Bundled plugins
 
@@ -62,7 +99,7 @@ replace anything they set up.
 
 | Plugin | Default | Owns | What it does |
 |---|---|---|---|
-| `transitions` | off | `wipe_left`, `wipe_right`, `wipe_up`, `wipe_down`, `iris` | The video transition catalogue: a `luma` plus a geometry. |
+| `transitions` | off | `dissolve`, `wipe_left`, `wipe_right`, `wipe_up`, `wipe_down`, `iris`, `gx`, `dax` | The whole video transition catalogue - a `luma` plus a geometry - and the keys that put one on a cut. Turns itself on when a project holds a transition of any type. |
 | `silence` | off | `next_silence`, `prev_silence` | Those motions and `]s` / `[s`, over a threshold you can change. |
 | `scenes` | off | `next_scene`, `prev_scene` | Those motions and `]v` / `[v`, over the detected cuts. |
 | `text` | off | `next_text`, `prev_text`, `text` tracks | `]c` / `[c` cue to cue, and `i` on a text track editing the cue under the playhead instead of inserting media. Subtitle tracks are text tracks, so imported cues land here too. Turns itself on when a text track appears, whether from an import or from `:track text`. |
@@ -89,7 +126,7 @@ turns it on when one of those names comes up.
   `next_silence` comes from the bundled `silence` plugin; enable it in
   `plugins.lua`". A missing name is never a silent no-op.
 - **An explicit `disable`** outranks both. The project still opens, the wipe
-  still renders as a `dissolve`, and the status line says that is what
+  still renders as a plain overlap, and the status line says that is what
   happened rather than leaving it to be noticed.
 
 So the split is honest in both directions: a fresh install draws and binds

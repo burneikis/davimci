@@ -921,7 +921,7 @@ mod tests {
         assert_eq!(tl, before, "a refused transition changes nothing");
 
         assert_eq!(
-            tl.set_transition(track, right, Some(Transition::dissolve())),
+            tl.set_transition(track, right, Some(Transition::of("dissolve"))),
             Ok(None)
         );
         let (_, c) = tl.find_clip(right).unwrap();
@@ -944,11 +944,11 @@ mod tests {
         let ids: Vec<ClipId> = tl.tracks()[0].clips().iter().map(|c| c.id).collect();
         // The first clip has no predecessor; the second is across a gap.
         assert!(
-            tl.set_transition(track, ids[0], Some(Transition::dissolve()))
+            tl.set_transition(track, ids[0], Some(Transition::of("dissolve")))
                 .is_err()
         );
         assert!(
-            tl.set_transition(track, ids[1], Some(Transition::dissolve()))
+            tl.set_transition(track, ids[1], Some(Transition::of("dissolve")))
                 .is_err()
         );
     }
@@ -964,9 +964,9 @@ mod tests {
         ]);
         let track = tl.tracks()[0].id;
         let ids: Vec<ClipId> = tl.tracks()[0].clips().iter().map(|c| c.id).collect();
-        tl.set_transition(track, ids[1], Some(Transition::dissolve()))
+        tl.set_transition(track, ids[1], Some(Transition::of("dissolve")))
             .unwrap();
-        tl.set_transition(track, ids[2], Some(Transition::dissolve()))
+        tl.set_transition(track, ids[2], Some(Transition::of("dissolve")))
             .unwrap();
 
         tl.ripple_delete_clip(track, ids[0]).unwrap();
@@ -1005,7 +1005,7 @@ mod tests {
         );
 
         assert_eq!(tl.transition_at(track, Frame(100)), None);
-        tl.set_transition(track, ids[1], Some(Transition::dissolve()))
+        tl.set_transition(track, ids[1], Some(Transition::of("dissolve")))
             .unwrap();
         assert_eq!(
             tl.transition_at(track, Frame(96))
@@ -1031,7 +1031,7 @@ mod tests {
                 .unwrap()
         };
         assert_eq!(range(&tl), (Frame(100), Frame(200)));
-        tl.set_transition(track, ids[1], Some(Transition::dissolve()))
+        tl.set_transition(track, ids[1], Some(Transition::of("dissolve")))
             .unwrap();
         tl.set_transition(track, ids[2], Some(Transition::new("dissolve", Frame(7))))
             .unwrap();

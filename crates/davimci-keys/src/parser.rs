@@ -761,8 +761,10 @@ mod tests {
     }
 
     #[test]
-    fn dax_is_a_literal_binding_distinct_from_operator_d() {
-        assert_eq!(run("dax"), Step::Complete(Action::DeleteTransition));
+    fn a_literal_binding_over_an_operator_key_is_distinct_from_it() {
+        // No transition type is core, so `dax` is a plugin's binding; what
+        // the grammar owes it is that binding a literal over `d` works.
+        assert_eq!(run("dax"), Step::Invalid);
         // `d` alone followed by a genuine motion still works.
         assert_eq!(
             run("dw"),

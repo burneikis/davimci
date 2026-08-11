@@ -17,6 +17,25 @@ fn scene() -> (Engine, Session) {
     )
 }
 
+/// An engine bound the way the bundled `transitions` plugin binds itself.
+/// No transition type is core, so these keys do not exist until a catalogue
+/// registers one, and a test that uses them has to say which.
+fn transition_engine() -> Engine {
+    use crate::action::{Action, LeafAction};
+    Engine::with_keymap(crate::keymap::Keymap::new().with_overrides([
+        (
+            Key::parse_str("gx"),
+            LeafAction::Standalone(Action::CreateTransition {
+                kind: "dissolve".to_string(),
+            }),
+        ),
+        (
+            Key::parse_str("dax"),
+            LeafAction::Standalone(Action::DeleteTransition),
+        ),
+    ]))
+}
+
 fn feed(engine: &mut Engine, session: &mut Session, s: &str) -> Vec<Outcome> {
     Key::parse_str(s)
         .into_iter()
@@ -404,15 +423,15 @@ fn i_edits_text_on_a_subtitle_track_and_picks_media_elsewhere() {
     }
 }
 
-/// `gx` puts a default dissolve on the nearest cut, `dax` takes it
-/// away, and `u` undoes either as one step.
+/// Bound to a registered type, `gx` puts one on the nearest cut, `dax` takes
+/// it away, and `u` undoes either as one step.
 #[test]
 fn gx_and_dax_add_and_remove_a_transition_at_the_nearest_cut() {
     let mut s = Session::new(davimci_core::testing::media_fixture(&[
         (0, 100, 20, 400),
         (100, 100, 20, 400),
     ]));
-    let mut e = Engine::new();
+    let mut e = transition_engine();
     let right = s.timeline().tracks()[0].clips()[1].id;
     let has = |s: &Session| {
         s.timeline()
@@ -444,7 +463,7 @@ fn gx_without_handles_reports_why_and_changes_nothing() {
         (0, 100, 0, 100),
         (100, 100, 0, 100),
     ]));
-    let mut e = Engine::new();
+    let mut e = transition_engine();
     let before = s.timeline().clone();
     let out = feed(&mut e, &mut s, "gx");
     let Some(Outcome::Error(msg)) = out.last() else {
@@ -456,7 +475,8 @@ fn gx_without_handles_reports_why_and_changes_nothing() {
 
 #[test]
 fn dax_on_a_track_with_no_transition_says_so() {
-    let (mut e, mut s) = scene();
+    let (_, mut s) = scene();
+    let mut e = transition_engine();
     let out = feed(&mut e, &mut s, "dax");
     assert!(matches!(out.last(), Some(Outcome::Error(_))), "{out:?}");
 }

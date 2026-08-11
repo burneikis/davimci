@@ -211,9 +211,14 @@ pub enum Action {
     ToggleMute,
     /// `<Space>s`: toggle solo on the current track.
     ToggleSolo,
-    /// `gx`: create a transition at the nearest cut.
-    CreateTransition,
-    /// `dax`: delete the transition at the nearest cut.
+    /// Put a transition of a named type on the nearest cut. Unbound by
+    /// default: no type is core, so the keys belong to whatever plugin
+    /// registered the type it names.
+    CreateTransition {
+        kind: String,
+    },
+    /// Take the transition at the nearest cut away. Unbound by default, for
+    /// the same reason its counterpart is.
     DeleteTransition,
     /// `<Space><Space>`.
     PlayPause,
@@ -278,7 +283,7 @@ impl Action {
             | Self::GainAdjust(_)
             | Self::ToggleMute
             | Self::ToggleSolo
-            | Self::CreateTransition
+            | Self::CreateTransition { .. }
             | Self::DeleteTransition
             | Self::InterruptTransport => Interrupt,
             // The transport family owns the clock itself; the rest is view

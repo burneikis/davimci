@@ -45,7 +45,7 @@ perf:
 
 # Run a scripted-session file (keys plus assertions) through the editor.
 script FILE:
-    cargo run -p davimci-cli --no-default-features -- --script {{FILE}}
+    cargo run -p davimci-cli --no-default-features --features driver-only -- --script {{FILE}}
 
 # A long editing session under ASan: the soak fuzz, sanitized.
 soak-asan:
@@ -55,6 +55,11 @@ soak-asan:
 lint:
     cargo clippy --workspace --all-targets -- -D warnings
     cargo fmt --check
+
+# What each build profile links. Lightness is a budget, not a habit: the
+# window is the only heavy thing here, and it has to stay the only one.
+weigh:
+    ./scripts/weigh.sh
 
 fix:
     cargo clippy --workspace --all-targets --fix --allow-dirty

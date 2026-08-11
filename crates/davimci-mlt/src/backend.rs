@@ -1788,11 +1788,7 @@ impl RenderBackend for MltBackend {
     }
 
     fn transition_names(&self) -> Vec<String> {
-        let mut names: Vec<String> = crate::transitions::names()
-            .into_iter()
-            .map(str::to_string)
-            .collect();
-        names.extend(crate::transitions::registered_names());
+        let mut names: Vec<String> = crate::transitions::registered_names();
         names.sort();
         names.dedup();
         names

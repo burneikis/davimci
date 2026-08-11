@@ -2,14 +2,16 @@
 //!
 //! The model stores a transition as a *name*, because types are extensible
 //! and `davimci-core` may not know what MLT is. This is the one place that
-//! turns a name into a service: audio types cross-fade with `mix`, and any
-//! video name that nothing registered falls back to a plain dissolve rather
-//! than failing a render.
+//! turns a name into a service: audio types cross-fade with `mix`, and video
+//! types come entirely from registrations.
 //!
-//! The catalogue of video types is not core. `dissolve` exists here because
-//! it is the fallback every project needs to open; the wipes and the iris
-//! are the bundled `transitions` plugin, registered through the same
-//! `davimci.transition.register` a third-party plugin uses.
+//! No type is built in, not even the plainest cross-fade - the whole
+//! catalogue is the bundled `transitions` plugin, registered through the
+//! same `davimci.transition.register` a third-party plugin uses. What is
+//! built in is the *degradation*: a name nothing registered still renders,
+//! as a bare `luma`, so a project written elsewhere opens in a session whose
+//! catalogue is off. Rendering something is a backend guarantee; naming it
+//! is not.
 
 use std::collections::BTreeMap;
 use std::sync::{OnceLock, RwLock};
@@ -34,10 +36,6 @@ impl TransitionSpec {
         }
     }
 }
-
-/// The one video type the backend knows without a plugin: a `luma` with no
-/// resource, which is a plain cross-dissolve.
-const DEFAULT: &str = "dissolve";
 
 /// Types registered at runtime, on top of the built-ins.
 ///
@@ -72,16 +70,10 @@ pub fn registered_names() -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Every transition type a user may name without a plugin.
-#[must_use]
-pub fn names() -> Vec<&'static str> {
-    vec![DEFAULT]
-}
-
 /// Whether `name` is a transition type this session can render as named.
 #[must_use]
 pub fn is_known(name: &str) -> bool {
-    name == DEFAULT || registered().read().is_ok_and(|m| m.contains_key(name))
+    registered().read().is_ok_and(|m| m.contains_key(name))
 }
 
 /// The service and properties for `kind` on a track of `track_kind`.
@@ -99,7 +91,8 @@ pub fn spec(kind: &str, track_kind: TrackKind) -> TransitionSpec {
         return found;
     }
     // An unregistered name still renders: a project made with a wipe has to
-    // open in a session where the transitions plugin is off.
+    // open in a session where the transitions plugin is off. A bare `luma`
+    // is the least opinionated overlap MLT has, not a type this crate owns.
     TransitionSpec::new("luma", &[])
 }
 
@@ -113,16 +106,16 @@ mod tests {
         assert_eq!(spec("dissolve", TrackKind::Audio).service, "mix");
     }
 
+    /// The catalogue is empty until a plugin fills it: `dissolve` is a
+    /// registration like every other type, so nothing here claims it.
     #[test]
-    fn a_dissolve_is_a_bare_luma_and_needs_no_plugin() {
-        assert_eq!(spec("dissolve", TrackKind::Video).service, "luma");
-        assert!(spec("dissolve", TrackKind::Video).props.is_empty());
-        assert!(is_known("dissolve"));
-        assert_eq!(names(), vec!["dissolve"]);
+    fn no_type_is_known_before_a_plugin_registers_it() {
+        assert!(!is_known("dissolve"));
+        assert!(!registered_names().contains(&"dissolve".to_string()));
     }
 
     /// A wipe is a plugin's registration, not a built-in: before it is
-    /// registered the name still renders, as a dissolve.
+    /// registered the name still renders, without its geometry.
     #[test]
     fn a_wipe_carries_its_geometry_only_once_a_plugin_registers_it() {
         assert!(spec("wipe_test", TrackKind::Video).props.is_empty());
@@ -160,7 +153,7 @@ mod tests {
     /// An unknown name must still render: a project made with a Lua-defined
     /// type has to open in a build that does not have that type.
     #[test]
-    fn an_unknown_type_degrades_to_a_dissolve() {
+    fn an_unknown_type_degrades_to_a_bare_overlap() {
         assert_eq!(spec("sparkle", TrackKind::Video).service, "luma");
         assert!(spec("sparkle", TrackKind::Video).props.is_empty());
         assert!(!is_known("sparkle"));

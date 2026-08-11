@@ -12,6 +12,14 @@
 //! transport at once. That has to live here rather than in a frontend,
 //! because no frontend may reference MLT.
 
+// Seeing the timeline is core. Which frontend shows it is a build's choice,
+// but a build that has none is the scripted driver, and has to say so.
+#[cfg(not(any(feature = "window", feature = "tui", feature = "driver-only")))]
+compile_error!(
+    "a build with no frontend cannot show a timeline; enable `window` or `tui`, \
+     or ask for the scripted driver with `--features driver-only`"
+);
+
 pub mod analyse;
 pub mod audio;
 pub mod autosave;

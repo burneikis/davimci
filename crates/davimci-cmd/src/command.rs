@@ -1292,14 +1292,14 @@ mod tests {
             &EditCommand::SetTransition {
                 track,
                 clip: right,
-                transition: Some(Transition::dissolve()),
+                transition: Some(Transition::of("dissolve")),
             },
         );
         // And deleting one, which is the same command with `None`.
         EditCommand::SetTransition {
             track,
             clip: right,
-            transition: Some(Transition::dissolve()),
+            transition: Some(Transition::of("dissolve")),
         }
         .apply(&mut tl)
         .unwrap();
@@ -1617,7 +1617,7 @@ mod tests {
             EditCommand::SetTransition {
                 track,
                 clip,
-                transition: Some(Transition::dissolve()),
+                transition: Some(Transition::of("dissolve")),
             },
             EditCommand::Relink {
                 clip,
