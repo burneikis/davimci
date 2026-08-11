@@ -17,9 +17,23 @@ the only write path to something the model owns.
   `davimci-keys`): the grammar is the interface, not a feature of it.
 - Project load, save and autosave, including conforming a source on import.
 - The render backend seam and export (`davimci-backend`, `davimci-mlt`):
-  preview, seek, scrub and encode, including the measurements analysis takes
-  (loudness hops, detected scene changes). Measuring is core; what the
-  numbers mean for an edit is not.
+  preview, seek, scrub and encode. The *ability* to measure a source is core
+  because decoding is; measuring is not, so nothing decodes until something
+  asks - a waveform lane switched on, a plugin whose motions read hops, or a
+  command that cannot answer without them. `davimci.analysis.demand(reason)`
+  is how a plugin asks, and the reasons are held by name so two askers
+  cannot switch each other off.
+- Probing and conforming a source on import. What a file *is* has to be
+  known before it can go on a timeline at all; what its loudness means for
+  an edit does not.
+- One export preset, `mkv`: an export must always be possible, and Matroska
+  is the only container that keeps every audio track separate. A *catalogue*
+  of presets is registration data, so it is not core.
+- The media picker behind `i`, `a` and `r`. `i` is a core verb and it has to
+  be able to name a file, so listing a directory is the mechanism that verb
+  needs rather than a view of state core already has.
+- Gain, mute and solo: they are what the mix is, and the model holds them.
+  Deciding one track should sit under another is not.
 - The transition *model*: an overlap on a cut, its length, and the command
   that writes it. No transition **type** is core, not even the plainest
   cross-fade. What is core is that a name nothing registered still renders,
@@ -49,13 +63,18 @@ opinion about how to edit that the model does not need to hold.
 - The transition catalogue, all of it: `dissolve` as much as every wipe and
   iris, each a `luma` plus a geometry, which is a registration rather than a
   backend feature. The keys that create one go with it, because a key that
-  creates a transition has to name a type and core names none. Export
-  presets and effect chains likewise.
+  creates a transition has to name a type and core names none.
+- The export catalogue beyond the `mkv` fallback, and effect chains, by the
+  same argument: a container-and-codec pairing someone found useful is a
+  registration.
 - Analysis-driven editing: where a scene cut is worth landing on, what
   loudness counts as silence, beat detection as a jump source.
-- Audio processing beyond the built-in duck: EQ, compression, noise
-  reduction.
+- Loudness opinions: `:duck`, `:normalize`, and the EQ, compression and
+  noise reduction that will join them. A command a plugin owns is refused by
+  name rather than silently missing.
 - Workflow opinions: proxy policies, naming schemes, per-project layouts.
+  The host owns the transcoder, because encoding is I/O; what qualifies for
+  a proxy, at what height and in what codec, it does not.
 
 If a bundled plugin needs something `davimci.*` cannot express, that is a gap
 in the API, not a reason to special-case it in the host. Bundled plugins are
@@ -88,6 +107,13 @@ multi-tracks, marks, saves and exports, and shows all of it. That list is the
 question to ask of anything proposed for core; a dependency that arrives
 without an entry on it belongs to a plugin.
 
+Weight is not only what is linked. A fresh session also decodes nothing it
+was not asked to: no waveform, no proxy transcode, no loudness pass. Four
+key namespaces are reserved so a plugin can bind without a future core
+binding taking the keys from under it - the `[` and `]` pairs, `<Space>` as
+leader, and `g` or `z` plus an uppercase letter - and a test in
+`davimci-keys` fails if core takes a new one.
+
 ## Bundled plugins
 
 Bundled plugins are ordinary plugins that happen to ship in the binary:
@@ -99,6 +125,9 @@ replace anything they set up.
 
 | Plugin | Default | Owns | What it does |
 |---|---|---|---|
+| `presets` | off | `mkv_h265`, `mp4`, `mp4_h265`, `webm`, `prores` | The export catalogue over the `mkv` fallback the editor keeps. |
+| `proxies` | off | - | Transcodes heavy imports to something that scrubs, on thresholds you can change. Nothing is transcoded with it off. |
+| `audio` | off | `:duck`, `:normalize` | The loudness opinions, over hops it asks to have measured. Gain, mute and solo stay core. |
 | `transitions` | off | `dissolve`, `wipe_left`, `wipe_right`, `wipe_up`, `wipe_down`, `iris`, `gx`, `dax` | The whole video transition catalogue - a `luma` plus a geometry - and the keys that put one on a cut. Turns itself on when a project holds a transition of any type. |
 | `silence` | off | `next_silence`, `prev_silence` | Those motions and `]s` / `[s`, over a threshold you can change. |
 | `scenes` | off | `next_scene`, `prev_scene` | Those motions and `]v` / `[v`, over the detected cuts. |
@@ -125,6 +154,9 @@ turns it on when one of those names comes up.
 - **Calling a motion** nothing registered names its owner: "the motion
   `next_silence` comes from the bundled `silence` plugin; enable it in
   `plugins.lua`". A missing name is never a silent no-op.
+- **Running a command** a plugin owns: ":duck comes from the bundled 'audio'
+  plugin; enable it in plugins.lua". Refused before it edits, never a
+  silent no-op.
 - **An explicit `disable`** outranks both. The project still opens, the wipe
   still renders as a plain overlap, and the status line says that is what
   happened rather than leaving it to be noticed.
@@ -203,6 +235,7 @@ requires = ["aubio"]    # external programs, reported rather than checked
 motions = ["next_beat", "prev_beat"]
 transitions = []
 track_kinds = []
+commands = []
 ```
 
 A manifest is declarative and is never executed, so the host can answer "who

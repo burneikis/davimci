@@ -101,6 +101,9 @@ pub struct Editor {
     /// `:set preview off`: no frame is pulled or composed, which
     /// is what makes a no-display session possible.
     preview: bool,
+    /// `:set waveform on|off`: off by default, because an envelope costs a
+    /// full decode of every source and measuring is not core.
+    waveforms: bool,
     /// `:set decode cpu|auto`: what the session has *asked* for. What it
     /// gets is the backend's business, since a probe may refuse.
     decode: DecodePolicy,
@@ -188,6 +191,7 @@ impl Editor {
             last_export: None,
             known_clips: std::collections::BTreeSet::new(),
             preview: true,
+            waveforms: false,
             decode: DecodePolicy::default(),
             encode: davimci_backend::EncodePolicy::default(),
             planar_preview: false,
@@ -218,6 +222,9 @@ impl Editor {
         // written with a plugin this session has not run.
         let session = self.workspace.current_session();
         self.activate_plugins_for(&session);
+        // If anything asked to measure while loading, start now rather than
+        // at the first edit.
+        self.analyser.sync(session.timeline());
         self
     }
 
@@ -246,6 +253,18 @@ impl Editor {
                 self.notices.push(Message::warning(format!(
                     "the transition type '{name}' is not available: {e}"
                 )));
+            }
+        }
+        if let Some(setup) = self.plugins.take_proxy_policy() {
+            self.apply_proxy_policy(setup);
+        }
+        // A plugin that reads hops must have asked before the first
+        // keystroke, so this is not left for the tick that drains the rest.
+        for (reason, wanted) in self.plugins.take_measurement_demands() {
+            if wanted {
+                self.analyser.demand(&reason);
+            } else {
+                self.analyser.release(&reason);
             }
         }
         self.notices.extend(problems);
@@ -424,6 +443,11 @@ impl Editor {
             ExCommand::Set(crate::setting::Setting::Proxy(on)) => {
                 Some(Ok(self.proxies.set_enabled(*on)))
             }
+            // Drawing an envelope is what makes a session measure, so the
+            // lane and the decoding behind it are the same switch.
+            ExCommand::Set(crate::setting::Setting::Waveform(on)) => {
+                Some(Ok(self.set_waveforms(*on, session)))
+            }
             // Acceleration is never a command: it changes how pixels are
             // produced, not what the timeline holds. The backend answers
             // with what it is actually doing, which may be software.
@@ -532,6 +556,79 @@ impl Editor {
         }
     }
 
+    /// `:set waveform on|off`: the audio lanes' envelope, and with it the
+    /// only reason a fresh session decodes anything it was not asked to.
+    fn set_waveforms(&mut self, on: bool, session: &Session) -> String {
+        self.waveforms = on;
+        if on {
+            self.analyser.demand("waveform");
+            self.analyser.sync(session.timeline());
+            "waveform on; measuring".into()
+        } else {
+            self.analyser.release("waveform");
+            "waveform off".into()
+        }
+    }
+
+    /// Fold a stated proxy policy into the one in force. Fields the config
+    /// left out keep their current value, so a plugin that only raises a
+    /// threshold does not silently reset a codec.
+    fn apply_proxy_policy(&mut self, setup: davimci_lua::ProxySetup) {
+        let mut policy = self.proxies.policy();
+        if let Some(auto) = setup.auto {
+            policy.auto = auto;
+        }
+        if let Some(height) = setup.height {
+            policy.height = height;
+        }
+        if let Some(codec) = setup.codec {
+            policy.codec = codec;
+        }
+        if let Some(max) = setup.max_native_height {
+            policy.max_native_height = max;
+        }
+        if let Some(codecs) = setup.expensive_codecs {
+            policy.expensive_codecs = codecs;
+        }
+        if let Some(depth) = setup.max_native_bit_depth {
+            policy.max_native_bit_depth = depth;
+        }
+        self.proxies.set_policy(policy);
+    }
+
+    /// Run a bundled plugin by name, as a project's contents do when they
+    /// need one. Answers false when no bundled plugin has that name.
+    pub fn enable_bundled(&mut self, name: &str) -> bool {
+        let Some(plugin) = crate::plugins::BUNDLED.iter().find(|p| p.name() == name) else {
+            return false;
+        };
+        let ran = self.plugins.activate(plugin);
+        if ran {
+            self.install_registrations();
+        }
+        ran
+    }
+
+    /// Whether qualifying imports get a proxy (`:set proxy`, or the bundled
+    /// `proxies` plugin).
+    #[must_use]
+    pub fn proxies_enabled(&self) -> bool {
+        self.proxies.enabled()
+    }
+
+    /// Whether anything has asked this session to measure loudness. Nothing
+    /// does by default: measuring is not core.
+    #[must_use]
+    pub fn is_measuring(&self) -> bool {
+        self.analyser.is_demanded()
+    }
+
+    /// Whether audio lanes draw an envelope (`:set waveform`).
+    #[must_use]
+    pub fn waveforms_enabled(&self) -> bool {
+        self.waveforms
+    }
+
     /// Whether the preview is showing frames at all (`:set preview`).
     #[must_use]
     pub fn preview_enabled(&self) -> bool {
@@ -587,6 +684,7 @@ impl Editor {
             decode: Some(self.decode),
             encode: Some(self.encode),
             proxy: Some(self.proxies.enabled()),
+            waveform: Some(self.waveforms),
             preview_height: self.preview_height,
             preview_protocol: Some(self.preview_protocol),
             numbers: Some(self.numbers),
@@ -625,14 +723,18 @@ impl Editor {
         selection: Option<&Selection>,
     ) -> Option<Result<String, CliError>> {
         match cmd {
-            ExCommand::Normalize { target_db } => {
-                Some(self.normalize(*target_db, session, selection))
-            }
-            ExCommand::Duck { track, db } => Some(self.duck(track, *db, session, selection)),
+            ExCommand::Normalize { target_db } => Some(match self.owned_by_plugin("normalize") {
+                Some(refusal) => refusal,
+                None => self.normalize(*target_db, session, selection),
+            }),
+            ExCommand::Duck { track, db } => Some(match self.owned_by_plugin("duck") {
+                Some(refusal) => refusal,
+                None => self.duck(track, *db, session, selection),
+            }),
             // Every envelope is dropped and re-measured, reported like any
             // other background job.
             ExCommand::Analyze => {
-                let n = self.analyser.reanalyse();
+                let n = self.analyser.reanalyse(session.timeline());
                 Some(Ok(if n == 0 {
                     "there is no audio in this timeline to analyse".to_string()
                 } else {
@@ -641,6 +743,32 @@ impl Editor {
             }
             _ => None,
         }
+    }
+
+    /// Refuse a command a disabled plugin owns, naming the owner.
+    ///
+    /// Gain, mute and solo are the mix and stay core; deciding that a track
+    /// should duck under another, or that every clip should land on one
+    /// loudness, is an opinion about how to mix and belongs to whoever holds
+    /// it. A command with no owner, or an owner already running, is nobody's
+    /// business but the editor's.
+    fn owned_by_plugin(&self, cmd: &'static str) -> Option<Result<String, CliError>> {
+        let owner = crate::plugins::provider_of_command(cmd)?;
+        if self.plugins.is_active(owner.name()) {
+            return None;
+        }
+        Some(Err(CliError::PluginOwns {
+            cmd,
+            plugin: owner.name().to_string(),
+        }))
+    }
+
+    /// Ask for loudness in a command's name, and queue whatever that turns
+    /// out to need. The command still fails if the numbers are not in yet;
+    /// what this buys is that the second attempt succeeds.
+    fn measure_on_demand(&mut self, session: &Session) {
+        self.analyser.demand("command");
+        self.analyser.sync(session.timeline());
     }
 
     /// `:normalize` - each clip in the selection is measured and gained on
@@ -652,6 +780,9 @@ impl Editor {
         session: &mut Session,
         selection: Option<&Selection>,
     ) -> Result<String, CliError> {
+        // Loudness is measured on demand, so a command that needs it is one
+        // of the things that asks.
+        self.measure_on_demand(session);
         let fps = session.timeline().props.fps;
         let clips = crate::audio::targets(session.timeline(), selection, "normalize")?;
         let mut cmds = Vec::with_capacity(clips.len());
@@ -682,6 +813,7 @@ impl Editor {
         session: &mut Session,
         selection: Option<&Selection>,
     ) -> Result<String, CliError> {
+        self.measure_on_demand(session);
         let reference = session
             .timeline()
             .track_by_name(name)
@@ -1131,11 +1263,20 @@ impl Editor {
                 session,
             )),
             Request::Analyze { track } => {
-                let n = self.analyser.reanalyse();
+                let n = self.analyser.reanalyse(session.timeline());
                 out.say(Message::info(match track {
                     Some(name) => format!("re-analysing {name}"),
                     None => format!("re-analysing {n} track(s)"),
                 }));
+            }
+            Request::Proxy(setup) => self.apply_proxy_policy(setup),
+            Request::Measure { reason, wanted } => {
+                if wanted {
+                    self.analyser.demand(&reason);
+                    self.analyser.sync(session.timeline());
+                } else {
+                    self.analyser.release(&reason);
+                }
             }
             Request::Motion { name, opts } => {
                 self.move_by_plugin_motion(&name, &opts, session, out);

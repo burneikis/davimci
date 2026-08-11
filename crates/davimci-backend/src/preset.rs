@@ -340,7 +340,7 @@ pub struct PresetRegistry {
 
 impl Default for PresetRegistry {
     fn default() -> Self {
-        Self::with_builtins()
+        Self::with_fallback()
     }
 }
 
@@ -352,42 +352,20 @@ impl PresetRegistry {
         }
     }
 
-    /// The presets that exist before any config runs.
+    /// The one preset that exists before any config runs.
     ///
-    /// `mkv` is the default because it is the only container here that keeps
-    /// every audio track separate, which is the export M3 is defined by.
+    /// A *catalogue* of presets is registration data and belongs to a
+    /// plugin, the same as the transition catalogue. Being able to export at
+    /// all is not, so exactly one survives here: `mkv`, because it is the
+    /// only container that keeps every audio track separate, which is what
+    /// an export of a multi-track timeline has to do.
     #[must_use]
-    pub fn with_builtins() -> Self {
+    pub fn with_fallback() -> Self {
         let mut r = Self::empty();
-        let builtins = [
-            ("mkv", Container::Mkv, VideoCodec::H264, AudioCodec::Flac),
-            (
-                "mkv_h265",
-                Container::Mkv,
-                VideoCodec::H265,
-                AudioCodec::Flac,
-            ),
-            ("mp4", Container::Mp4, VideoCodec::H264, AudioCodec::Aac),
-            (
-                "mp4_h265",
-                Container::Mp4,
-                VideoCodec::H265,
-                AudioCodec::Aac,
-            ),
-            ("webm", Container::WebM, VideoCodec::Vp9, AudioCodec::Opus),
-            (
-                "prores",
-                Container::Mov,
-                VideoCodec::ProRes,
-                AudioCodec::Pcm,
-            ),
-        ];
-        for (name, container, video, audio) in builtins {
-            // Builtins are validated by the same rule as user presets; if one
-            // is wrong the test suite says so rather than a user finding out.
-            if let Ok(p) = Preset::new(name, container, video, audio) {
-                r.presets.insert(p.name.clone(), p);
-            }
+        // Validated by the same rule as a user preset; if it is wrong the
+        // test suite says so rather than a user finding out after a render.
+        if let Ok(p) = Preset::new("mkv", Container::Mkv, VideoCodec::H264, AudioCodec::Flac) {
+            r.presets.insert(p.name.clone(), p);
         }
         r
     }
@@ -503,13 +481,13 @@ mod tests {
     }
 
     #[test]
-    fn every_builtin_preset_is_a_legal_pairing() {
-        let r = PresetRegistry::with_builtins();
-        assert!(!r.names().is_empty());
+    fn the_fallback_preset_is_a_legal_pairing_and_stands_alone() {
+        let r = PresetRegistry::with_fallback();
+        assert_eq!(r.names(), ["mkv"], "the catalogue belongs to a plugin");
         for p in r.all() {
             assert!(
                 p.container.accepts(p.video, p.audio),
-                "builtin '{}' is not a legal pairing",
+                "the fallback '{}' is not a legal pairing",
                 p.name
             );
         }
@@ -527,7 +505,7 @@ mod tests {
 
     #[test]
     fn a_user_preset_may_override_a_builtin_by_name() {
-        let mut r = PresetRegistry::with_builtins();
+        let mut r = PresetRegistry::with_fallback();
         let mine = Preset::new("mkv", Container::Mkv, VideoCodec::H265, AudioCodec::Opus).unwrap();
         r.define(mine);
         assert_eq!(r.get("mkv").unwrap().video, VideoCodec::H265);
@@ -535,7 +513,7 @@ mod tests {
 
     #[test]
     fn an_unknown_preset_lists_the_ones_that_exist() {
-        let r = PresetRegistry::with_builtins();
+        let r = PresetRegistry::with_fallback();
         let msg = r.get("youtube").unwrap_err().to_string();
         assert!(msg.contains("no export preset called 'youtube'"), "{msg}");
         assert!(msg.contains("mkv"), "{msg}");
@@ -549,9 +527,18 @@ mod tests {
 
     #[test]
     fn an_extension_picks_a_matching_preset() {
-        let r = PresetRegistry::with_builtins();
+        let mut r = PresetRegistry::with_fallback();
+        // As the bundled `presets` plugin registers it.
+        r.define(Preset::new("webm", Container::WebM, VideoCodec::Vp9, AudioCodec::Opus).unwrap());
         assert_eq!(r.for_extension("webm").container, Container::WebM);
-        // Unknown extensions fall back rather than failing the export.
+        // Unknown extensions fall back rather than failing the export, and
+        // so does every extension in a session with no catalogue.
         assert_eq!(r.for_extension("wat").container, Container::Mkv);
+        assert_eq!(
+            PresetRegistry::with_fallback()
+                .for_extension("webm")
+                .container,
+            Container::Mkv
+        );
     }
 }

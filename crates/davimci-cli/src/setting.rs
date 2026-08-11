@@ -66,6 +66,11 @@ pub enum Setting {
     /// session policy: it changes what the next import does, never the
     /// timeline, so it stays out of the undo log.
     Proxy(bool),
+    /// `waveform on|off` - whether audio lanes draw their envelope. Off by
+    /// default: an envelope costs a full decode of every source, and a
+    /// session that never looks at one must not pay for it. A view setting,
+    /// so it never enters the undo log.
+    Waveform(bool),
     /// `previewheight auto|<rows>|<percent>%` - the terminal's inline preview
     /// band; `0` is off. Inert outside the terminal frontend.
     PreviewHeight(PreviewHeight),
@@ -154,6 +159,7 @@ impl Setting {
                 | Self::Decode(_)
                 | Self::Encode(_)
                 | Self::Proxy(_)
+                | Self::Waveform(_)
                 | Self::PreviewHeight(_)
                 | Self::PreviewProtocol(_)
                 | Self::Numbers(_)
@@ -180,6 +186,7 @@ pub const PROPERTIES: &[&str] = &[
     "decode",
     "encode",
     "proxy",
+    "waveform",
     "previewheight",
     "previewprotocol",
     "numbers",
@@ -192,7 +199,7 @@ pub const PROPERTIES: &[&str] = &[
 #[must_use]
 pub fn values(prop: &str) -> Vec<String> {
     let words: &[&str] = match prop {
-        "preview" | "proxy" => &["on", "off"],
+        "preview" | "proxy" | "waveform" => &["on", "off"],
         "decode" => DecodePolicy::NAMES,
         "encode" => EncodePolicy::NAMES,
         "previewheight" => &["auto"],
@@ -218,6 +225,9 @@ pub struct CurrentSettings {
     pub encode: Option<EncodePolicy>,
     /// Whether proxies are generated for qualifying imports.
     pub proxy: Option<bool>,
+    /// Whether audio lanes draw an envelope, which is what makes the session
+    /// measure at all.
+    pub waveform: Option<bool>,
     pub preview_height: Option<PreviewHeight>,
     pub preview_protocol: Option<PreviewProtocol>,
     pub numbers: Option<Numbers>,
@@ -267,6 +277,9 @@ impl CurrentSettings {
             "encode" => self.encode.map(|e| e.name().to_string()),
             "proxy" => self
                 .proxy
+                .map(|on| if on { "on" } else { "off" }.to_string()),
+            "waveform" => self
+                .waveform
                 .map(|on| if on { "on" } else { "off" }.to_string()),
             "previewheight" => self.preview_height.map(PreviewHeight::value),
             "previewprotocol" => self.preview_protocol.map(|p| p.name().to_string()),
@@ -382,6 +395,11 @@ pub fn parse(prop: &str, value: &str) -> Result<Setting, CliError> {
         "proxy" => match value {
             "on" | "true" | "1" => Ok(Setting::Proxy(true)),
             "off" | "false" | "0" => Ok(Setting::Proxy(false)),
+            _ => Err(bad(prop, "on or off")),
+        },
+        "waveform" => match value {
+            "on" | "true" | "1" => Ok(Setting::Waveform(true)),
+            "off" | "false" | "0" => Ok(Setting::Waveform(false)),
             _ => Err(bad(prop, "on or off")),
         },
         // The upper bound is half the screen, which only the terminal knows;

@@ -111,6 +111,10 @@ pub struct Provides {
     /// Track kinds this plugin is the editing workflow for, as
     /// `davimci_core::TrackKind::prefix` spells them.
     pub track_kinds: Vec<String>,
+    /// `:` commands this plugin is the opinion behind, without the colon.
+    /// The host can then refuse one by naming its owner rather than
+    /// pretending the command does not exist.
+    pub commands: Vec<String>,
 }
 
 /// A plugin's `davimci.toml`: everything the host may know about a plugin
@@ -186,6 +190,10 @@ impl Manifest {
                 ("provides", "motions") => {
                     provides.motions = list_value(value)
                         .ok_or_else(|| fail(n + 1, "motions must be a list of strings"))?;
+                }
+                ("provides", "commands") => {
+                    provides.commands = list_value(value)
+                        .ok_or_else(|| fail(n + 1, "commands must be a list of strings"))?;
                 }
                 ("provides", "track_kinds") => {
                     provides.track_kinds = list_value(value)

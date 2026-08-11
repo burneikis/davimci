@@ -46,7 +46,7 @@ pub use motion::{MotionAnswer, MotionEnv, Sample, TrackData};
 pub use pack::{API_VERSION, ApiRange, Manifest, Plugin, Provides, Source, Version};
 pub use preset::{ExportPreset, SubtitleSelection, TrackSelection};
 pub use registry::{HandlerId, KeyBinding, Rhs, TransitionDef};
-pub use request::{OptValue, Opts, Request, parse_editor_command};
+pub use request::{OptValue, Opts, ProxySetup, Request, parse_editor_command};
 pub use runtime::{ClipInfo, ObjectForm, Runtime, Sandbox};
 pub use ui::{
     PanelAnchor, PanelContent, PanelHandle, PanelLine, PanelRequest, PanelRole, PanelSpan,

@@ -177,7 +177,7 @@ impl Exporter {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            presets: PresetRegistry::with_builtins(),
+            presets: PresetRegistry::with_fallback(),
             running: None,
             next_id: EXPORT_JOB_BASE,
         }
@@ -433,6 +433,23 @@ mod tests {
         e.start(b, Path::new(out), None, &timeline())
     }
 
+    /// An exporter with the catalogue the bundled `presets` plugin
+    /// registers. The editor ships one fallback; anything else has to be
+    /// asked for, so a test about a named preset has to ask too.
+    fn with_catalogue() -> Exporter {
+        use davimci_backend::{AudioCodec, Container, Preset, VideoCodec};
+        let mut e = Exporter::new();
+        for (name, container, video, audio) in [
+            ("mp4", Container::Mp4, VideoCodec::H264, AudioCodec::Aac),
+            ("webm", Container::WebM, VideoCodec::Vp9, AudioCodec::Opus),
+        ] {
+            if let Ok(p) = Preset::new(name, container, video, audio) {
+                e.presets_mut().define(p);
+            }
+        }
+        e
+    }
+
     #[test]
     fn an_export_names_the_file_and_the_preset() {
         let (mut e, mut b) = (Exporter::new(), backend());
@@ -447,7 +464,7 @@ mod tests {
         let (mut e, mut b) = (Exporter::new(), backend());
         let msg = start(&mut e, &mut b, "/tmp/out.mkv").unwrap();
         assert!(msg.contains("audio tracks stay separate"), "{msg}");
-        let mut e2 = Exporter::new();
+        let mut e2 = with_catalogue();
         let msg = start(&mut e2, &mut backend(), "/tmp/out.mp4").unwrap();
         assert!(!msg.contains("stay separate"), "{msg}");
     }
@@ -485,14 +502,14 @@ mod tests {
 
     #[test]
     fn the_extension_picks_the_preset_when_none_is_named() {
-        let (mut e, mut b) = (Exporter::new(), backend());
+        let (mut e, mut b) = (with_catalogue(), backend());
         let msg = start(&mut e, &mut b, "/tmp/clip.webm").unwrap();
         assert!(msg.contains("webm"), "{msg}");
     }
 
     #[test]
     fn a_missing_extension_is_filled_in_from_the_preset() {
-        let (mut e, mut b) = (Exporter::new(), backend());
+        let (mut e, mut b) = (with_catalogue(), backend());
         let msg = e
             .start(&mut b, Path::new("/tmp/out"), Some("mp4"), &timeline())
             .unwrap();

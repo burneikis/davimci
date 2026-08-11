@@ -98,6 +98,18 @@ pub enum Request {
     /// `require("davimci.media").analyze(track)` - re-run analysis after a
     /// gain or fade change.
     Analyze { track: Option<String> },
+    /// `require("davimci.analysis").demand(reason)` /`.release(reason)`.
+    ///
+    /// Measuring is not core and nothing runs unasked, so a plugin that
+    /// reads hops - silence, scenes, beats - has to say so. The reason is
+    /// held by name, so plugins cannot switch each other off.
+    Measure { reason: String, wanted: bool },
+    /// `require("davimci.proxy").setup{...}`.
+    ///
+    /// Whether to proxy, above what resolution and in what codec is a
+    /// workflow opinion, so the host holds the encoder and a plugin holds
+    /// the policy. Absent fields leave what is in force alone.
+    Proxy(ProxySetup),
     /// `require("davimci.editor").message(text)`, for the status line.
     Message(String),
     /// `require("davimci.editor").set(property, value)` - `:set`, so a config
@@ -106,6 +118,18 @@ pub enum Request {
     /// `require("davimci.ui")` - open, fill, show, hide or close a panel.
     /// Never an edit: a panel is view state and stays out of the undo log.
     Panel(crate::ui::PanelRequest),
+}
+
+/// A proxy policy as Lua stated it. Every field is optional: a plugin that
+/// only raises the resolution threshold should not have to restate a codec.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProxySetup {
+    pub auto: Option<bool>,
+    pub height: Option<u32>,
+    pub codec: Option<String>,
+    pub max_native_height: Option<u32>,
+    pub expensive_codecs: Option<Vec<String>>,
+    pub max_native_bit_depth: Option<u32>,
 }
 
 /// Map an `editor.*` string from a keymap right-hand side onto

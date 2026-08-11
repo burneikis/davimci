@@ -160,6 +160,14 @@ impl Runtime {
         std::mem::take(&mut self.state.borrow_mut().requests)
     }
 
+    /// Put requests back at the head of the queue, for a host that drained
+    /// them to pick out the ones it must act on before the first tick.
+    pub fn requeue(&self, mut requests: Vec<Request>) {
+        let state = &mut self.state.borrow_mut().requests;
+        requests.append(state);
+        *state = requests;
+    }
+
     /// Status-line notices produced by error isolation since the last drain.
     pub fn take_notices(&self) -> Vec<Notice> {
         std::mem::take(&mut self.notices.borrow_mut())

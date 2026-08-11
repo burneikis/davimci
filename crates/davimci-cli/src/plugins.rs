@@ -57,6 +57,18 @@ const BUNDLED_SOURCES: &[(&str, &str)] = &[
         include_str!("../runtime/plugins/text/plugin/init.lua"),
     ),
     (
+        include_str!("../runtime/plugins/presets/davimci.toml"),
+        include_str!("../runtime/plugins/presets/plugin/init.lua"),
+    ),
+    (
+        include_str!("../runtime/plugins/audio/davimci.toml"),
+        include_str!("../runtime/plugins/audio/plugin/init.lua"),
+    ),
+    (
+        include_str!("../runtime/plugins/proxies/davimci.toml"),
+        include_str!("../runtime/plugins/proxies/plugin/init.lua"),
+    ),
+    (
         include_str!("../runtime/plugins/which-key/davimci.toml"),
         include_str!("../runtime/plugins/which-key/plugin/init.lua"),
     ),
@@ -100,6 +112,14 @@ pub fn provider_of_motion(name: &str) -> Option<&'static Plugin> {
     BUNDLED
         .iter()
         .find(|p| owns(&p.manifest.provides.motions, name))
+}
+
+/// The bundled plugin that owns `name` as a `:` command, if any.
+#[must_use]
+pub fn provider_of_command(name: &str) -> Option<&'static Plugin> {
+    BUNDLED
+        .iter()
+        .find(|p| owns(&p.manifest.provides.commands, name))
 }
 
 /// The bundled plugin that owns `tag` as a track kind, if any.
@@ -390,6 +410,50 @@ impl Plugins {
             }
         }
         (presets, problems)
+    }
+
+    /// Take the measurement demands a config queued while loading.
+    ///
+    /// Pulled at install time rather than left in the request queue: a
+    /// plugin that reads loudness hops has to have asked before the first
+    /// keystroke, or its motions would answer `Pending` for a session that
+    /// did in fact ask.
+    pub fn take_measurement_demands(&mut self) -> Vec<(String, bool)> {
+        let mut demands = Vec::new();
+        self.take_startup(|r| match r {
+            Request::Measure { reason, wanted } => {
+                demands.push((reason, wanted));
+                None
+            }
+            other => Some(other),
+        });
+        demands
+    }
+
+    /// Take the proxy policy a config stated while loading, for the same
+    /// reason: an import on the first tick has to see it.
+    pub fn take_proxy_policy(&mut self) -> Option<davimci_lua::ProxySetup> {
+        let mut found = None;
+        self.take_startup(|r| match r {
+            Request::Proxy(setup) => {
+                found = Some(setup);
+                None
+            }
+            other => Some(other),
+        });
+        found
+    }
+
+    /// Pull the requests a host must act on at install time out of the
+    /// queue, leaving the rest for the first tick.
+    fn take_startup(&mut self, mut take: impl FnMut(Request) -> Option<Request>) {
+        let kept: Vec<Request> = self
+            .runtime
+            .take_requests()
+            .into_iter()
+            .filter_map(&mut take)
+            .collect();
+        self.runtime.requeue(kept);
     }
 
     /// Run a keymap callback and collect what it asked for. A callback that

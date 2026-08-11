@@ -52,7 +52,12 @@ pub enum CliError {
     #[error("the focused track is not a text track; :track text makes one")]
     NotATextTrack,
 
-    #[error("{0} needs analysis of that track; it is still running or has not started")]
+    #[error(
+        ":{cmd} comes from the bundled '{plugin}' plugin; enable it in plugins.lua with require(\"davimci.plugins\").enable(\"{plugin}\")"
+    )]
+    PluginOwns { cmd: &'static str, plugin: String },
+
+    #[error("{0} needs that track's analysis; measuring has started, so try again when it lands")]
     AnalysisNotReady(&'static str),
 
     #[error("an export to {output} is already running; wait for it or :cancel it")]
@@ -132,6 +137,7 @@ impl Classify for CliError {
             | Self::UnknownProperty(_)
             | Self::BadPropertyValue { .. }
             | Self::AnalysisNotReady(_)
+            | Self::PluginOwns { .. }
             | Self::NothingToExport
             | Self::NoExportRunning
             | Self::ExportRefused { .. }

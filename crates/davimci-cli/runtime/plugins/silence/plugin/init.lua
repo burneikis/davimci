@@ -1,12 +1,17 @@
 -- silence: jump by silence, on the threshold you choose.
 --
--- The editor measures loudness; what counts as silence is an opinion, so it
+-- The editor can measure loudness; what counts as silence is an opinion, so it
 -- lives here. `find_next` walks the analysis hops and this only decides
 -- which hop is quiet enough, which is why changing the threshold needs no
 -- new build.
 
 local motions = require("davimci.motions")
 local keymap = require("davimci.keymap")
+local analysis = require("davimci.analysis")
+
+-- Jumping by silence reads the loudness hops, and nothing is
+-- measured unasked, so the plugin that wants them is what asks.
+analysis.demand("silence")
 
 local M = { threshold_db = -40 }
 

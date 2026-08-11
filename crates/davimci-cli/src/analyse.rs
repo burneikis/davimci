@@ -1,13 +1,18 @@
 //! Background analysis, wired to a live session.
 //!
-//! `davimci-analysis` could already measure a file; nothing called it, because
-//! until Phase 9e there was no editor to measure *for*. This is that caller:
-//! it watches the timeline, queues one job per audio source, publishes the
-//! resulting envelopes to the view state, and drops them again when a gain or
-//! fade changes, since a measurement of the pre-gain signal is no longer a
+//! Measuring is not core, so nothing here runs unasked: an envelope costs a
+//! full decode of the source, and a session that never draws a waveform,
+//! never jumps by silence and never normalises must not pay for one. Something
+//! has to [`Analyser::demand`] measurement first - a waveform lane switched
+//! on, a plugin that reads hops, or a command that cannot answer without
+//! them. Until then this watches the timeline and does nothing.
+//!
+//! Once asked, it queues one job per audio source, publishes the resulting
+//! envelopes to the view state, and drops them again when a gain or fade
+//! changes, since a measurement of the pre-gain signal is no longer a
 //! description of what will be heard.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -38,6 +43,9 @@ pub struct Analyser {
     requested: BTreeMap<TrackId, Source>,
     /// Signature of each track's audible properties, to notice a change.
     signatures: BTreeMap<TrackId, u64>,
+    /// Who is asking to be measured, by name. Empty means nobody is, and
+    /// nothing decodes.
+    demands: BTreeSet<String>,
     /// Tracks whose published envelope is stale, waiting to be reported.
     stale: Vec<TrackId>,
     updates: Vec<JobUpdate>,
@@ -64,6 +72,7 @@ impl Analyser {
             analyses: BTreeMap::new(),
             requested: BTreeMap::new(),
             signatures: BTreeMap::new(),
+            demands: BTreeSet::new(),
             stale: Vec::new(),
             updates: Vec::new(),
             labels: BTreeMap::new(),
@@ -81,12 +90,36 @@ impl Analyser {
         self.analyses.get(&track)
     }
 
+    /// Ask for measurement in `reason`'s name, and say whether that was new.
+    ///
+    /// A reason is held until it is [released](Self::release), so two askers
+    /// cannot switch each other off: the waveform lane going away does not
+    /// stop the silence plugin being able to jump.
+    pub fn demand(&mut self, reason: &str) -> bool {
+        self.demands.insert(reason.to_string())
+    }
+
+    /// Withdraw one reason. Measuring stops when the last one goes.
+    pub fn release(&mut self, reason: &str) -> bool {
+        self.demands.remove(reason)
+    }
+
+    /// Whether anything is asking to be measured.
+    #[must_use]
+    pub fn is_demanded(&self) -> bool {
+        !self.demands.is_empty()
+    }
+
     /// Bring analysis in step with the timeline.
     ///
-    /// Called after every edit: a new audio track is queued, and one whose
-    /// gain or fades changed is invalidated and queued again. Both are cheap
-    /// enough to do on an edit and wrong to do on a timer.
+    /// Called after every edit: with something asking, a new audio track is
+    /// queued and one whose gain or fades changed is invalidated and queued
+    /// again. Both are cheap enough to do on an edit and wrong to do on a
+    /// timer. With nothing asking, this is the whole of the work.
     pub fn sync(&mut self, tl: &Timeline) {
+        if self.demands.is_empty() {
+            return;
+        }
         for track in tl.tracks() {
             if track.kind != TrackKind::Audio {
                 continue;
@@ -110,19 +143,20 @@ impl Analyser {
         }
     }
 
-    /// Re-run analysis for every known track (`:analyze`).
-    pub fn reanalyse(&mut self) -> usize {
-        let sources: Vec<(TrackId, Source)> = self
-            .requested
-            .iter()
-            .map(|(t, s)| (*t, s.clone()))
-            .collect();
-        for (track, source) in &sources {
-            self.analyses.remove(track);
-            self.stale.push(*track);
-            self.queue(*track, source.clone());
-        }
-        sources.len()
+    /// Re-run analysis for every audio track (`:analyze`).
+    ///
+    /// Asking to re-measure is itself a demand: `:analyze` in a session that
+    /// has never measured anything has to measure rather than report that
+    /// there is nothing to do. Everything held is dropped first, so `sync`
+    /// sees every track as new work.
+    pub fn reanalyse(&mut self, tl: &Timeline) -> usize {
+        self.demand("command");
+        self.stale.extend(self.requested.keys().copied());
+        self.analyses.clear();
+        self.requested.clear();
+        self.signatures.clear();
+        self.sync(tl);
+        self.requested.len()
     }
 
     fn queue(&mut self, track: TrackId, (path, stream): Source) {
@@ -300,6 +334,7 @@ mod tests {
         // Gain invalidates the analysis for that clip.
         let dir = tmpdir("stale");
         let mut a = Analyser::new(&dir);
+        a.demand("test");
         let mut tl = multi_audio_fixture(1, Some(2));
         a.sync(&tl);
         assert!(a.take_stale().is_empty(), "nothing was published yet");
@@ -332,6 +367,7 @@ mod tests {
     fn analyze_drops_every_envelope_and_requeues_the_work() {
         let dir = tmpdir("reanalyse");
         let mut a = Analyser::new(&dir);
+        a.demand("test");
         let tl = multi_audio_fixture(1, Some(2));
         a.sync(&tl);
         let track = tl
@@ -341,7 +377,7 @@ mod tests {
             .unwrap()
             .id;
         let _ = a.take_stale();
-        assert_eq!(a.reanalyse(), 1, ":analyze re-queued the audio track");
+        assert_eq!(a.reanalyse(&tl), 1, ":analyze re-queued the audio track");
         assert!(
             a.analysis(track).is_none(),
             "the old envelope survived :analyze"
@@ -355,6 +391,7 @@ mod tests {
     fn an_unchanged_timeline_is_not_analysed_twice() {
         let dir = tmpdir("once");
         let mut a = Analyser::new(&dir);
+        a.demand("test");
         let tl = multi_audio_fixture(1, Some(2));
         a.sync(&tl);
         let queued = a.requested.len();
@@ -366,10 +403,37 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Measuring is not core: a session nothing asks of decodes nothing,
+    /// however much audio the timeline holds.
+    #[test]
+    fn nothing_is_measured_until_something_asks() {
+        let dir = tmpdir("unasked");
+        let mut a = Analyser::new(&dir);
+        let tl = multi_audio_fixture(1, Some(2));
+        a.sync(&tl);
+        assert!(!a.is_demanded());
+        assert!(a.requested.is_empty(), "an unasked session decoded audio");
+
+        assert!(a.demand("waveform"));
+        a.sync(&tl);
+        assert_eq!(a.requested.len(), 1, "asking did not queue the work");
+
+        // One asker leaving does not stop another: the demands are held by
+        // name, not counted.
+        assert!(a.demand("silence"));
+        assert!(a.release("waveform"));
+        assert!(a.is_demanded());
+        assert!(a.release("silence"));
+        assert!(!a.is_demanded());
+        a.cancel_all();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn a_video_track_is_never_queued_for_a_waveform() {
         let dir = tmpdir("video");
         let mut a = Analyser::new(&dir);
+        a.demand("test");
         let tl = multi_audio_fixture(2, Some(2));
         a.sync(&tl);
         let video = track_id(&tl, "V1");

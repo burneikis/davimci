@@ -13,6 +13,11 @@ These are core's bindings only. Keys a plugin owns - `gx` and `dax`
 from `transitions`, `]s`, `]v` and `]c` from theirs - are listed in
 `docs/plugins.md`.
 
+Four namespaces are reserved for plugins and configs, and core takes
+no new binding in them: the `[` and `]` pairs, `<Space>` as leader,
+and `g` or `z` followed by an uppercase letter. What core already
+holds there is grandfathered and listed below; nothing joins it.
+
 ## Audio
 
 | Keys | Action |

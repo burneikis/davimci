@@ -388,10 +388,18 @@ fn cancel_stops_a_running_export() {
 #[test]
 fn presets_lists_what_render_will_accept() {
     let (mut app, mut editor) = editor();
+    // The catalogue is a plugin's; the editor ships the one fallback that
+    // makes an export possible at all.
     app.event(Event::Command(":presets".into()), &mut editor);
     let msg = app.view().message.clone().expect("a status line");
     assert!(msg.text.contains("mkv"), "{msg:?}");
+    assert!(!msg.text.contains("webm"), "{msg:?}");
+
+    assert!(editor.enable_bundled("presets"));
+    app.event(Event::Command(":presets".into()), &mut editor);
+    let msg = app.view().message.clone().expect("a status line");
     assert!(msg.text.contains("webm"), "{msg:?}");
+    assert!(msg.text.contains("prores"), "{msg:?}");
 }
 
 #[test]
@@ -746,10 +754,33 @@ fn a_fade_with_no_direction_reports_its_usage() {
     );
 }
 
+/// Gain is the mix and stays core; ducking one track under another is an
+/// opinion about how to mix, so the command names its owner rather than
+/// running for a session that never asked for it.
+#[test]
+fn duck_and_normalize_name_the_plugin_that_owns_them() {
+    let (mut app, mut editor) = editor();
+    let before = app.session().timeline().clone();
+    for cmd in [":duck A1 -12", ":normalize"] {
+        app.event(Event::Command(cmd.into()), &mut editor);
+        let msg = app.view().message.expect("a message").text;
+        assert!(msg.contains("audio"), "{msg}");
+        assert!(msg.contains("plugins.lua"), "{msg}");
+    }
+    assert_eq!(app.session().timeline(), &before, "a refusal must not edit");
+
+    // `+` still adjusts gain with no plugin at all: that is the model.
+    feed(&mut app, &mut editor, "j+");
+    assert_ne!(app.session().timeline(), &before);
+}
+
 /// `:normalize` needs a measurement, and says so rather than guessing at one.
 #[test]
 fn normalising_without_analysis_says_so_and_changes_nothing() {
     let (mut app, mut editor) = editor();
+    // The loudness opinions belong to the audio plugin; what is under test
+    // here is what happens once it is running.
+    assert!(editor.enable_bundled("audio"));
     app.event(Event::Command(":normalize".into()), &mut editor);
     let msg = app.view().message.expect("a message").text;
     assert!(msg.contains("analysis"), "{msg}");
@@ -786,6 +817,7 @@ fn muting_a_track_reprojects_the_graph() {
 #[test]
 fn ducking_without_analysis_leaves_the_timeline_alone() {
     let (mut app, mut editor) = editor();
+    assert!(editor.enable_bundled("audio"));
     let before = app.session().timeline().clone();
     app.event(Event::Command(":duck A1 -12".into()), &mut editor);
     let msg = app.view().message.expect("a message").text;

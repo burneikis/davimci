@@ -7,8 +7,12 @@
 //! A proxy is a decoding detail, not an edit: the timeline always names the
 //! original, and the substitution happens on the way to the preview graph.
 //! That is what keeps a background encode out of the undo log, out of `.`,
-//! out of the project file and out of every export. `:set proxy on|off` is
-//! the switch.
+//! out of the project file and out of every export.
+//!
+//! The mechanism is the host's, because encoding is; the *policy* - whether
+//! to proxy at all, above what resolution, in what codec - is not, so it
+//! starts off. `:set proxy on|off` is the manual switch and the bundled
+//! `proxies` plugin is the standing opinion.
 
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
@@ -51,13 +55,32 @@ impl Proxies {
     #[must_use]
     pub fn new(project_dir: &Path) -> Self {
         Self {
-            policy: ProxyPolicy::default(),
+            // Off until something asks. A proxy policy is a workflow
+            // opinion, and generating one costs a whole transcode of the
+            // import; a session that never asked must not pay for it.
+            policy: ProxyPolicy::disabled(),
             runner: JobRunner::new(),
             cache: AnalysisCache::for_project(project_dir),
             inbox: Arc::new(Mutex::new(Vec::new())),
             map: ProxyMap::default(),
             updates: Vec::new(),
         }
+    }
+
+    /// Adopt a policy a config or plugin stated. Whether it is `auto` is
+    /// part of it: a plugin that sets thresholds and leaves them off is
+    /// stating a preference for later, not a contradiction.
+    pub fn set_policy(&mut self, policy: ProxyPolicy) {
+        if !policy.auto {
+            self.runner.cancel_all();
+        }
+        self.policy = policy;
+    }
+
+    /// The policy in force, so a plugin can amend rather than restate it.
+    #[must_use]
+    pub fn policy(&self) -> ProxyPolicy {
+        self.policy.clone()
     }
 
     /// `:set proxy on|off`. Turning proxies off stops the encodes that have
@@ -297,6 +320,27 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// A proxy policy is a workflow opinion, so a session that stated none
+    /// transcodes nothing however heavy the import is.
+    #[test]
+    fn a_fresh_session_proxies_nothing_until_asked() {
+        let root = dir("unasked");
+        let source = root.join("uhd.mkv");
+        std::fs::write(&source, b"not really media, but it hashes").unwrap();
+        let info = uhd(&source.display().to_string());
+
+        let mut proxies = Proxies::new(&root);
+        assert!(!proxies.enabled());
+        assert!(
+            proxies
+                .queue_for_import(&info, TimelineProps::default())
+                .is_none(),
+            "an unasked session started a transcode"
+        );
+        proxies.cancel_all();
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// Regression: the proxy path is keyed by a hash of the file's
     /// contents, and computing it on the import thread froze the session for
     /// as long as it took to read the media - seconds, on the multi-gigabyte
@@ -308,6 +352,7 @@ mod tests {
         let root = dir("noread");
         let info = uhd(&root.join("not-on-disk.mkv").display().to_string());
         let mut proxies = Proxies::new(&root);
+        proxies.set_enabled(true);
         assert!(
             proxies
                 .queue_for_import(&info, TimelineProps::default())

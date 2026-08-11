@@ -1043,6 +1043,75 @@ fn transition_keys_arrive_only_with_the_transitions_plugin() {
     ));
 }
 
+/// Measuring is not core, so a session decodes nothing until something asks:
+/// a plugin whose motions read hops, or the waveform lane.
+#[test]
+fn nothing_measures_until_a_plugin_or_the_lane_asks() {
+    let plain = Scratch::with_config("measure-off", &[]);
+    let (_, editor, _) = editor_with(&plain);
+    assert!(
+        !editor.is_measuring(),
+        "a session nobody asked of is decoding audio"
+    );
+
+    let asked = Scratch::with_config(
+        "measure-on",
+        &[(
+            "plugins.lua",
+            r#"require("davimci.plugins").enable("silence")"#,
+        )],
+    );
+    let (_, editor, _) = editor_with(&asked);
+    assert!(
+        editor.is_measuring(),
+        "the silence plugin reads hops and did not ask for them"
+    );
+}
+
+/// The waveform lane is the other asker, and switching it off gives the
+/// demand up again.
+#[test]
+fn the_waveform_lane_is_what_makes_a_plain_session_measure() {
+    let cfg = Scratch::with_config("waveform", &[]);
+    let (mut app, mut editor, _) = editor_with(&cfg);
+    assert!(!editor.is_measuring());
+
+    app.event(Event::Command(":set waveform on".into()), &mut editor);
+    assert!(editor.is_measuring(), "the lane did not ask");
+    assert!(editor.waveforms_enabled());
+
+    app.event(Event::Command(":set waveform off".into()), &mut editor);
+    assert!(
+        !editor.is_measuring(),
+        "the lane did not give the demand up"
+    );
+}
+
+/// A proxy policy is a workflow opinion: nothing transcodes an import until
+/// a config says to, and the bundled plugin is how it says so.
+#[test]
+fn proxies_are_a_plugins_opinion_not_a_default() {
+    let plain = Scratch::with_config("proxy-off", &[]);
+    let (_, editor, _) = editor_with(&plain);
+    assert!(
+        !editor.proxies_enabled(),
+        "a fresh session is transcoding imports"
+    );
+
+    let asked = Scratch::with_config(
+        "proxy-on",
+        &[(
+            "plugins.lua",
+            r#"require("davimci.plugins").enable("proxies")"#,
+        )],
+    );
+    let (_, editor, _) = editor_with(&asked);
+    assert!(
+        editor.proxies_enabled(),
+        "the plugin did not state a policy"
+    );
+}
+
 /// `:checkhealth` answers from the running editor, because what is loaded is
 /// the editor's to know: the workspace has no runtime to ask.
 #[test]

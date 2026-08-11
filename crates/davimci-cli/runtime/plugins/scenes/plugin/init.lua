@@ -1,11 +1,16 @@
 -- scenes: jump to the cuts the analysis found in the footage.
 --
--- The detector is core, because decoding is; deciding that a detected change
--- is a place worth landing on is not, so the jump lives here. A track with
+-- The detector is the backend's; deciding that a detected change is a place
+-- worth landing on is not, so the jump lives here. A track with
 -- no detection reports nothing rather than guessing a frame.
 
 local motions = require("davimci.motions")
 local keymap = require("davimci.keymap")
+local analysis = require("davimci.analysis")
+
+-- Landing on a detected cut reads what analysis found, and nothing
+-- is measured unasked, so the plugin that wants it is what asks.
+analysis.demand("scenes")
 
 local function changes(ctx, opts)
   local track = ctx.tracks[opts.track or ctx.track]

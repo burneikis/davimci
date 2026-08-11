@@ -1,0 +1,8 @@
+name = "proxies"
+version = "1.0.0"
+api = "^1.0"
+
+[provides]
+motions = []
+transitions = []
+track_kinds = []

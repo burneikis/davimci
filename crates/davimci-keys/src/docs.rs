@@ -40,7 +40,11 @@ pub fn keymap_markdown() -> String {
          tracks, is in `docs/visual-mode.md`.\n\n\
          These are core's bindings only. Keys a plugin owns - `gx` and `dax`\n\
          from `transitions`, `]s`, `]v` and `]c` from theirs - are listed in\n\
-         `docs/plugins.md`.\n",
+         `docs/plugins.md`.\n\n\
+         Four namespaces are reserved for plugins and configs, and core takes\n\
+         no new binding in them: the `[` and `]` pairs, `<Space>` as leader,\n\
+         and `g` or `z` followed by an uppercase letter. What core already\n\
+         holds there is grandfathered and listed below; nothing joins it.\n",
     );
     let mut current = "";
     for (keys, text, section) in rows {

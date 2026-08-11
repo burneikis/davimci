@@ -85,7 +85,7 @@ pub(crate) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
     // what its manifest declares a range of.
     davimci.set("api_version", crate::pack::API_VERSION.to_string())?;
 
-    let modules: [(&str, Table); 11] = [
+    let modules: [(&str, Table); 13] = [
         ("plugins", plugins_module(lua, state)?),
         ("pack", pack_module(lua, state)?),
         ("ui", ui_module(lua, state)?),
@@ -97,6 +97,8 @@ pub(crate) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
         ("media", media_module(lua, state)?),
         ("autocmd", autocmd_module(lua, state)?),
         ("transition", transition_module(lua, state)?),
+        ("analysis", analysis_module(lua, state)?),
+        ("proxy", proxy_module(lua, state)?),
     ];
     let editor = editor_module(lua, state)?;
 
@@ -338,6 +340,33 @@ fn transition_module(lua: &Lua, state: &Shared) -> mlua::Result<Table> {
                     props,
                 },
             );
+            Ok(())
+        })?,
+    )?;
+    Ok(t)
+}
+
+/// `davimci.proxy`: the standing opinion about proxy media.
+///
+/// The host owns the encoder because encoding is I/O; what qualifies for a
+/// proxy, at what height and in what codec, is a workflow opinion and lives
+/// out here. A field left out leaves what is in force alone.
+fn proxy_module(lua: &Lua, state: &Shared) -> mlua::Result<Table> {
+    let t = lua.create_table()?;
+    let st = Rc::clone(state);
+    t.set(
+        "setup",
+        lua.create_function(move |_, opts: Table| {
+            let codecs: Option<Vec<String>> = opts.get("expensive_codecs")?;
+            let setup = crate::request::ProxySetup {
+                auto: opts.get("auto")?,
+                height: opts.get("height")?,
+                codec: opts.get("codec")?,
+                max_native_height: opts.get("max_native_height")?,
+                expensive_codecs: codecs,
+                max_native_bit_depth: opts.get("max_native_bit_depth")?,
+            };
+            st.borrow_mut().requests.push(Request::Proxy(setup));
             Ok(())
         })?,
     )?;
@@ -679,6 +708,29 @@ fn media_module(lua: &Lua, state: &Shared) -> mlua::Result<Table> {
             Ok(())
         })?,
     )?;
+    Ok(t)
+}
+
+/// `davimci.analysis`: ask for measurement, and give it up again.
+///
+/// Nothing measures unasked, because an envelope costs a full decode of the
+/// source. A plugin whose motions read hops declares that here rather than
+/// discovering at the first keystroke that there is nothing to read.
+fn analysis_module(lua: &Lua, state: &Shared) -> mlua::Result<Table> {
+    let t = lua.create_table()?;
+    for (name, wanted) in [("demand", true), ("release", false)] {
+        let st = Rc::clone(state);
+        t.set(
+            name,
+            lua.create_function(move |_, reason: Option<String>| {
+                let reason = reason.unwrap_or_else(|| "plugin".to_string());
+                st.borrow_mut()
+                    .requests
+                    .push(Request::Measure { reason, wanted });
+                Ok(())
+            })?,
+        )?;
+    }
     Ok(t)
 }
 
