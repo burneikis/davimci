@@ -290,6 +290,19 @@ impl Workspace {
         Ok(id)
     }
 
+    /// Take the current state as the buffer's baseline, so it is not dirty
+    /// until the user edits it.
+    ///
+    /// Importing one media file builds a timeline the user never authored;
+    /// refusing `:q` on it would demand `:q!` to close something with nothing
+    /// to lose.
+    pub fn pin_clean(&mut self) {
+        let node = self.current().session.history().current();
+        let b = self.current_mut();
+        b.saved_at = node;
+        b.recovered = false;
+    }
+
     /// `:new`: an empty timeline with the given properties.
     pub fn new_timeline(&mut self, props: TimelineProps) -> usize {
         self.harvest_globals();

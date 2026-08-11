@@ -3,6 +3,8 @@
 opening a single clip in davimci shouldn't block :q until its edited, or more clips are opened.
 a single clip isn't really an editing project that needs save-safety (we shouldn't have to :q!)
 
+fix flashing cursor in tui when typing commands
+
 # Plugins
 - check transitions work, make them work in preview
 - advanced audio: EQ, compression, noise reduction beyond `:duck`

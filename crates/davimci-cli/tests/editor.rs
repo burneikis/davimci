@@ -923,3 +923,42 @@ fn shutdown_stops_the_work_a_quit_would_otherwise_wait_for() {
     // A frontend may reach quit twice; the second ask must not complain.
     editor.shutdown();
 }
+
+#[test]
+fn opening_one_clip_into_an_empty_timeline_leaves_it_quittable() {
+    // A single imported clip is not a project; `:q` must not need `:q!`.
+    let session = Session::new(davimci_core::Timeline::new(
+        davimci_core::TimelineProps::default(),
+    ));
+    let mut ws = Workspace::new(std::env::temp_dir()).without_autosave();
+    ws.set_current_session(session.clone());
+    let presenter = Presenter::new(
+        PresentHost::Embedded,
+        Resolution {
+            width: 32,
+            height: 16,
+        },
+        Fps::FPS_60,
+    );
+    let mut editor = Editor::new(
+        ws,
+        Box::new(MockBackend::new(Resolution {
+            width: 8,
+            height: 4,
+        })),
+        presenter,
+    )
+    .with_prober(Box::new(FakeProber));
+    let mut app = App::new(session);
+    editor.prime(app.session());
+
+    app.event(Event::Key(Key::Char('i')), &mut editor);
+    app.event(Event::MediaChosen("/m/new.mkv".into()), &mut editor);
+
+    app.event(Event::Command("q".into()), &mut editor);
+    let msg = app.view().message.clone().expect("a status line");
+    assert!(
+        !msg.text.contains("unsaved"),
+        "an unedited imported clip should close: {msg:?}"
+    );
+}

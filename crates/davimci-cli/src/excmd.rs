@@ -656,6 +656,9 @@ impl Workspace {
         };
         let imported = self.with_session(|s| davimci_analysis::import(s, &info, &opts))?;
         self.sync_autosave()?;
+        // A freshly imported clip is not an edit the user made, so `:q` must
+        // not ask them to save or force it.
+        self.pin_clean();
         let mut msg = format!(
             "imported {} ({} tracks)",
             imported.path,

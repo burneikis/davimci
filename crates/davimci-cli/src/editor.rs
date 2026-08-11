@@ -866,6 +866,14 @@ impl Editor {
         session: &mut Session,
     ) -> Result<String, CliError> {
         let info = self.prober.probe(path)?;
+        // Filling an empty unnamed timeline with one clip is opening media,
+        // not authoring a project; see the pin below.
+        let was_empty = self.workspace.current().path().is_none()
+            && session
+                .timeline()
+                .tracks()
+                .iter()
+                .all(|t| t.clips().is_empty());
         let head = session.timeline().playhead();
         let clip = session
             .timeline()
@@ -926,6 +934,15 @@ impl Editor {
             .queue_for_import(&info, session.timeline().props);
         if let Some(msg) = proxying {
             self.notices.push(Message::info(msg));
+        }
+
+        // A clip opened into an empty scratch timeline has nothing to lose,
+        // so `:q` must not demand `:w` or `:q!` for it. The workspace holds a
+        // stale copy of the session between `:` commands, so hand it the live
+        // one before pinning or it would pin the empty state.
+        if was_empty {
+            self.workspace.set_current_session(session.clone());
+            self.workspace.pin_clean();
         }
 
         let verb = match intent {

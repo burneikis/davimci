@@ -247,6 +247,62 @@ fn quit_refuses_on_unsaved_changes_and_quit_bang_discards() {
     assert_eq!(ws.buffers().len(), 1);
 }
 
+/// A prober that answers with one video stream, so import is testable with
+/// no media and no ffprobe.
+#[derive(Debug)]
+struct StubProber;
+
+impl davimci_analysis::Prober for StubProber {
+    fn probe(
+        &self,
+        path: &Path,
+    ) -> Result<davimci_analysis::MediaInfo, davimci_analysis::AnalysisError> {
+        Ok(davimci_analysis::MediaInfo {
+            path: path.display().to_string(),
+            duration_seconds: 10.0,
+            streams: vec![davimci_analysis::StreamInfo {
+                index: 0,
+                kind: davimci_analysis::StreamKind::Video,
+                codec: "h264".into(),
+                title: None,
+                language: None,
+                fps: Some(davimci_core::Fps::new(25, 1).unwrap()),
+                resolution: Some(davimci_core::Resolution {
+                    width: 1920,
+                    height: 1080,
+                }),
+                sample_rate: None,
+                channels: None,
+                frames: Some(250),
+                bit_depth: Some(8),
+            }],
+        })
+    }
+}
+
+#[test]
+fn a_freshly_imported_clip_quits_without_force() {
+    let dir = Scratch::new("importquit");
+    let mut ws = Workspace::new(dir.path()).without_autosave();
+    ws.import_media(&dir.join("clip.mkv"), &StubProber).unwrap();
+    assert!(
+        !ws.current().is_dirty(),
+        "an import is not an edit the user made"
+    );
+    assert!(ws.run("q", OnRecovery::Discard).is_ok());
+
+    ws.import_media(&dir.join("clip.mkv"), &StubProber).unwrap();
+    let cmd = split(ws.current().timeline(), 100);
+    ws.exec(&cmd).unwrap();
+    assert!(
+        matches!(
+            ws.run("q", OnRecovery::Discard),
+            Err(CliError::UnsavedChanges)
+        ),
+        "editing the imported clip makes it worth saving"
+    );
+}
+
 #[test]
 fn undoing_back_to_the_saved_state_is_clean_again() {
     let dir = Scratch::new("undirty");
@@ -1032,4 +1088,24 @@ fn ungrouping_where_nothing_is_grouped_is_a_user_error() {
     let err = ws.run("ungroup", OnRecovery::Discard).unwrap_err();
     assert_eq!(err.class(), ErrorClass::User);
     assert!(!err.user_message().is_empty());
+}
+
+#[test]
+fn a_second_import_does_not_pin_the_edited_first_one_clean() {
+    let dir = Scratch::new("importquit2");
+    let mut ws = Workspace::new(dir.path()).without_autosave();
+    ws.import_media(&dir.join("a.mkv"), &StubProber).unwrap();
+    let edited = ws.current().id();
+    let cmd = split(ws.current().timeline(), 100);
+    ws.exec(&cmd).unwrap();
+
+    ws.import_media(&dir.join("b.mkv"), &StubProber).unwrap();
+    assert!(!ws.current().is_dirty(), "the new import is its own buffer");
+
+    let i = ws.buffers().iter().position(|b| b.id() == edited).unwrap();
+    ws.goto_buffer(i).unwrap();
+    assert!(
+        ws.current().is_dirty(),
+        "an edited buffer stays protected when another import arrives"
+    );
 }
