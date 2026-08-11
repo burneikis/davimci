@@ -62,6 +62,9 @@ pub fn analyse(
     if let Some(hit) = cache.load(&hash)
         && hit.params == params
     {
+        // A hit still cost the file read the hash needed, so the bar is
+        // finished rather than abandoned a third of the way along.
+        whole.report(1, 1);
         return Ok(hit);
     }
 

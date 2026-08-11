@@ -15,6 +15,7 @@
 //! `proxies` plugin is the standing opinion.
 
 use std::borrow::Cow;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -41,6 +42,11 @@ pub struct Proxies {
     inbox: Arc<Mutex<Vec<Ready>>>,
     map: ProxyMap,
     updates: Vec<JobUpdate>,
+    /// Sources with an encode already running, by job. Two encodes of one
+    /// file write the same partial container and race each other to rename
+    /// it, so a second import of the same media joins the first job instead
+    /// of starting one.
+    encoding: BTreeMap<u64, String>,
 }
 
 impl std::fmt::Debug for Proxies {
@@ -64,6 +70,7 @@ impl Proxies {
             inbox: Arc::new(Mutex::new(Vec::new())),
             map: ProxyMap::default(),
             updates: Vec::new(),
+            encoding: BTreeMap::new(),
         }
     }
 
@@ -73,6 +80,7 @@ impl Proxies {
     pub fn set_policy(&mut self, policy: ProxyPolicy) {
         if !policy.auto {
             self.runner.cancel_all();
+            self.encoding.clear();
         }
         self.policy = policy;
     }
@@ -92,6 +100,7 @@ impl Proxies {
             "proxy on".into()
         } else {
             self.runner.cancel_all();
+            self.encoding.clear();
             "proxy off".into()
         }
     }
@@ -112,13 +121,17 @@ impl Proxies {
         if !self.policy.needs_proxy(info.video()?) {
             return None;
         }
+        if self.encoding.values().any(|s| *s == info.path) {
+            return None;
+        }
         let name = file_name(&info.path);
         let inbox = Arc::clone(&self.inbox);
         let policy = self.policy.clone();
         let root = self.cache.root().to_path_buf();
         let info = info.clone();
         let label = format!("encoding a proxy for {name}");
-        self.runner.spawn(label.clone(), move |ctx| {
+        let source = info.path.clone();
+        let id = self.runner.spawn(label.clone(), move |ctx| {
             let conformed = davimci_analysis::conform::conform(
                 &info,
                 props,
@@ -154,6 +167,7 @@ impl Proxies {
             }
             Ok(())
         });
+        self.encoding.insert(id.0, source);
         Some(label)
     }
 
@@ -170,6 +184,13 @@ impl Proxies {
                 JobEvent::Started { label, .. } => {
                     self.updates.push(JobUpdate::Started { id, label });
                 }
+                _ if event.is_terminal() => {
+                    self.encoding.remove(&id);
+                    self.updates.push(JobUpdate::Finished {
+                        id,
+                        state: terminal_state(&event),
+                    });
+                }
                 JobEvent::Progress { done, total, .. } => {
                     let permille = u16::try_from(
                         done.checked_mul(1000)
@@ -180,20 +201,8 @@ impl Proxies {
                     .unwrap_or(999);
                     self.updates.push(JobUpdate::Progress { id, permille });
                 }
-                JobEvent::Finished { .. } => self.updates.push(JobUpdate::Finished {
-                    id,
-                    state: JobState::Done,
-                }),
-                JobEvent::Cancelled { .. } => self.updates.push(JobUpdate::Finished {
-                    id,
-                    state: JobState::Cancelled,
-                }),
-                // A proxy that will not encode costs the session its faster
-                // decode and nothing else: the original is still there.
-                JobEvent::Failed { .. } => self.updates.push(JobUpdate::Finished {
-                    id,
-                    state: JobState::Failed,
-                }),
+                // Every terminal event is handled above.
+                _ => {}
             }
         }
         let ready: Vec<Ready> = self
@@ -254,6 +263,18 @@ impl Proxies {
     /// Stop every encode: closing a project cancels the work it started.
     pub fn cancel_all(&mut self) {
         self.runner.cancel_all();
+        self.encoding.clear();
+    }
+}
+
+/// How a job ended, for the status line. A proxy that will not encode costs
+/// the session its faster decode and nothing else: the original is still
+/// there.
+fn terminal_state(event: &JobEvent) -> JobState {
+    match event {
+        JobEvent::Cancelled { .. } => JobState::Cancelled,
+        JobEvent::Failed { .. } => JobState::Failed,
+        _ => JobState::Done,
     }
 }
 
@@ -298,6 +319,27 @@ mod tests {
                 bit_depth: Some(8),
             }],
         }
+    }
+
+    /// Regression: importing one file twice ran two encodes of it, and both
+    /// wrote the same partial container and raced to rename it.
+    #[test]
+    fn a_second_import_of_the_same_file_joins_the_encode_already_running() {
+        let root = dir("twice");
+        let source = root.join("uhd.mkv");
+        std::fs::write(&source, b"not really media, but it hashes").unwrap();
+        let info = uhd(&source.display().to_string());
+        let props = TimelineProps::default();
+
+        let mut proxies = Proxies::new(&root);
+        proxies.set_enabled(true);
+        assert!(proxies.queue_for_import(&info, props).is_some());
+        assert!(
+            proxies.queue_for_import(&info, props).is_none(),
+            "the same source was queued for a second encode"
+        );
+        proxies.cancel_all();
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// The switch is the whole point of the setting: with proxies off, a 4K
