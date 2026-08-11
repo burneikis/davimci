@@ -1,5 +1,8 @@
 # TODO
 
+opening a single clip in davimci shouldn't block :q until its edited, or more clips are opened.
+a single clip isn't really an editing project that needs save-safety (we shouldn't have to :q!)
+
 ## Core stripdown
 
 The boundary is `docs/plugins.md`; the budgets are `just weigh`. Done:
