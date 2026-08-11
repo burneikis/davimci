@@ -90,8 +90,23 @@ fn protocol_from_reply(reply: &str) -> Option<Protocol> {
 }
 
 /// A terminal in raw mode on the alternate screen, restored on drop.
+/// What one screen consists of, so an identical one is not drawn twice.
+fn fingerprint(lines: &[Line<'_>], preview: Option<&[u8]>, cursor: Option<(u16, u16)>) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    lines.hash(&mut hasher);
+    preview.hash(&mut hasher);
+    cursor.hash(&mut hasher);
+    hasher.finish()
+}
+
 pub struct Terminal {
     inner: ratatui::Terminal<CrosstermBackend<Stdout>>,
+    /// What was last put on screen. A repaint of the identical screen is
+    /// skipped: the caret has to be hidden while the rows and the picture are
+    /// written, and hiding it sixty times a second to redraw what is already
+    /// there is what makes it flash under a typed `:` line.
+    last: Option<u64>,
 }
 
 impl std::fmt::Debug for Terminal {
@@ -110,7 +125,7 @@ impl Terminal {
         execute!(out, EnterAlternateScreen)?;
         let _ = execute!(out, EnableMouseCapture);
         let inner = ratatui::Terminal::new(CrosstermBackend::new(out))?;
-        Ok(Self { inner })
+        Ok(Self { inner, last: None })
     }
 
     /// Current size in cells.
@@ -181,7 +196,11 @@ impl Terminal {
                         out.push(TermEvent::Key(key, mods));
                     }
                 }
-                CtEvent::Resize(width, height) => out.push(TermEvent::Resize { width, height }),
+                CtEvent::Resize(width, height) => {
+                    // The screen the last fingerprint described is gone.
+                    self.last = None;
+                    out.push(TermEvent::Resize { width, height });
+                }
                 CtEvent::Mouse(m) if m.kind == MouseEventKind::Down(MouseButton::Left) => {
                     out.push(TermEvent::Click {
                         column: m.column,
@@ -207,28 +226,32 @@ impl Terminal {
         preview: Option<&[u8]>,
         cursor: Option<(u16, u16)>,
     ) -> io::Result<()> {
+        let screen = fingerprint(lines, preview, cursor);
+        if self.last == Some(screen) {
+            return Ok(());
+        }
+        self.last = Some(screen);
+        // The caret is hidden for the whole repaint and put back afterwards.
+        // A visible caret is dragged across every cell the diff writes, and
+        // sits at the home position while a picture is blitted there, which
+        // is what makes it flicker under a typed `:` line.
+        let mut out = io::stdout();
+        queue!(out, Hide)?;
+        out.flush()?;
         self.inner.draw(|frame| {
             frame.render_widget(Paragraph::new(lines.to_vec()), frame.area());
-            // Shown only while something is being typed: a block caret parked
-            // on the timeline would read as a second playhead.
-            if let Some((column, row)) = cursor {
-                frame.set_cursor_position((column, row));
-            }
         })?;
         if let Some(bytes) = preview {
-            let mut out = io::stdout();
             queue!(out, MoveTo(0, 0))?;
             out.write_all(bytes)?;
-            // The picture is written at the home position, which leaves the
-            // caret there; put it back where the screen says it belongs, or
-            // the user watches it blink between the `:` line and the top-left
-            // corner once per composed frame.
-            match cursor {
-                Some((column, row)) => queue!(out, MoveTo(column, row), Show)?,
-                None => queue!(out, Hide)?,
-            }
-            out.flush()?;
         }
+        // Shown only while something is being typed: a block caret parked on
+        // the timeline would read as a second playhead.
+        match cursor {
+            Some((column, row)) => queue!(out, MoveTo(column, row), Show)?,
+            None => queue!(out, Hide)?,
+        }
+        out.flush()?;
         Ok(())
     }
 
@@ -251,6 +274,33 @@ impl Drop for Terminal {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression: the caret flashed under a typed `:` line, because every
+    /// tick hid it, redrew the identical screen and the identical picture,
+    /// and showed it again. An unchanged screen is not drawn at all.
+    #[test]
+    fn an_identical_screen_has_the_same_fingerprint() {
+        let rows = [Line::from("A1  clip.mkv"), Line::from(":w")];
+        let picture = b"\x1b_Gf=24;AAAA\x1b\\".as_slice();
+        let same = fingerprint(&rows, Some(picture), Some((2, 1)));
+        assert_eq!(same, fingerprint(&rows, Some(picture), Some((2, 1))));
+        assert_ne!(
+            same,
+            fingerprint(&rows, Some(picture), Some((3, 1))),
+            "a moved caret must still be drawn"
+        );
+        assert_ne!(
+            same,
+            fingerprint(
+                &rows,
+                Some(b"\x1b_Gf=24;BBBB\x1b\\".as_slice()),
+                Some((2, 1))
+            ),
+            "a new preview frame must still be drawn"
+        );
+        let typed = [Line::from("A1  clip.mkv"), Line::from(":wq")];
+        assert_ne!(same, fingerprint(&typed, Some(picture), Some((2, 1))));
+    }
 
     #[test]
     fn a_probe_reply_names_the_protocol_it_proves() {

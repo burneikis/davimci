@@ -13,7 +13,7 @@ use crate::analysis::{Analysis, AnalysisParams, analyze_samples};
 use crate::cache::{AnalysisCache, entry_key};
 use crate::decode;
 use crate::error::AnalysisError;
-use crate::jobs::{JobContext, JobId, JobRunner};
+use crate::jobs::{JobContext, JobId, JobRunner, Phase};
 use crate::probe::StreamKind;
 
 /// One track's analysis request.
@@ -51,8 +51,11 @@ pub fn analyse(
 ) -> Result<Analysis, AnalysisError> {
     let check = |ctx: Option<&JobContext>| ctx.map_or(Ok(()), JobContext::check);
     check(ctx)?;
+    // Hashing gigabytes is a third of a short analysis, so it owns the first
+    // third of the bar rather than reporting nothing until ffmpeg starts.
+    let whole = Phase::whole(ctx);
     let hash = entry_key(
-        &crate::cache::hash_file(&request.path, ctx)?,
+        &crate::cache::hash_file(&request.path, whole.slice(0, 300))?,
         request.stream,
         request.kind,
     );
@@ -62,13 +65,15 @@ pub fn analyse(
         return Ok(hit);
     }
 
-    if let Some(ctx) = ctx {
-        ctx.progress(0, 2);
-    }
     check(ctx)?;
     let mut analysis = match request.kind {
         StreamKind::Audio => {
-            let samples = decode::decode_mono(&request.path, request.stream, sample_rate, ctx)?;
+            let samples = decode::decode_mono(
+                &request.path,
+                request.stream,
+                sample_rate,
+                whole.slice(300, 1000),
+            )?;
             check(ctx)?;
             analyze_samples(&samples, sample_rate, params)
         }
@@ -77,23 +82,22 @@ pub fn analyse(
         _ => Analysis::empty(&hash, params),
     };
     if request.kind == StreamKind::Video {
-        if let Some(ctx) = ctx {
-            ctx.progress(1, 2);
-        }
         check(ctx)?;
         // Scene detection is optional: losing it must not lose the waveform.
         // A cancelled detection is not a loss to absorb, though - it means
         // the editor is closing and this thread is being waited on.
-        match decode::scene_changes(&request.path, decode::SCENE_THRESHOLD, ctx) {
+        match decode::scene_changes(
+            &request.path,
+            decode::SCENE_THRESHOLD,
+            whole.slice(300, 1000),
+        ) {
             Err(AnalysisError::Cancelled) => return Err(AnalysisError::Cancelled),
             other => analysis.scene_changes = other.unwrap_or_default(),
         }
     }
     hash.clone_into(&mut analysis.source_hash);
     let _ = cache.store(&hash, &analysis);
-    if let Some(ctx) = ctx {
-        ctx.progress(2, 2);
-    }
+    whole.report(1, 1);
     Ok(analysis)
 }
 
@@ -113,7 +117,7 @@ pub fn queue_analysis(
     for request in requests {
         let cache = cache.clone();
         let mut publish = publish.clone();
-        let label = format!("analysing {}", short(&request.path));
+        let label = format!("analysing audio in {}", short(&request.path));
         ids.push(runner.spawn(label, move |ctx| {
             let analysis = analyse(&request, params, &cache, sample_rate, Some(ctx))?;
             publish(AnalysisReady {

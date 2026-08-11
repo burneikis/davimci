@@ -1,8 +1,5 @@
 # TODO
 
-fix flashing cursor in tui when typing commands
-the analyzing percentage in tui status footer is stuck at 0% until done
-
 # Plugins
 - check transitions work, make them work in preview
 - advanced audio: EQ, compression, noise reduction beyond `:duck`

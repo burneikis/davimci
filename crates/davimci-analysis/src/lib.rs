@@ -34,7 +34,7 @@ pub use import::{
     ImportOptions, ImportPlan, Imported, Placement, StreamMapping, ids_needed, import, plan,
 };
 pub use index::AnalysisIndex;
-pub use jobs::{JobEvent, JobId, JobRunner};
+pub use jobs::{JobEvent, JobId, JobRunner, Phase};
 pub use probe::{FfprobeProber, MediaInfo, Prober, StreamInfo, StreamKind};
 pub use proxy::{ProxyMap, ProxyPolicy, ProxySpec, export_guard};
 pub use subtitle::{Cue, extract_all, parse_srt, to_srt};

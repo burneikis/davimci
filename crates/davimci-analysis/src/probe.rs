@@ -158,6 +158,37 @@ impl Prober for FfprobeProber {
     }
 }
 
+/// How long a file plays, in microseconds, or `None` when ffprobe cannot say.
+///
+/// Only progress reporting needs this: a decode is measured against the media
+/// it is chewing through, and a file with no stated duration reports
+/// indeterminate progress rather than failing.
+#[must_use]
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "a positive duration in microseconds fits, and the value only drives a percentage"
+)]
+pub fn duration_us(path: &Path) -> Option<u64> {
+    let out = Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "csv=p=0",
+        ])
+        .arg(path)
+        .output()
+        .ok()?;
+    let seconds: f64 = String::from_utf8_lossy(&out.stdout).trim().parse().ok()?;
+    if seconds <= 0.0 {
+        return None;
+    }
+    Some((seconds * 1e6) as u64)
+}
+
 /// Parse `ffprobe -of json` output. Pure; the unit under test.
 pub fn parse_ffprobe(path: &str, json: &str) -> Result<MediaInfo, AnalysisError> {
     let bad = |reason: String| AnalysisError::ProbeFailed {

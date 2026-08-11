@@ -170,7 +170,7 @@ impl Analyser {
         let params = self.params;
         let cache = self.cache.clone();
         let label = format!(
-            "analysing {}",
+            "analysing audio in {}",
             path.file_name().map_or_else(
                 || path.display().to_string(),
                 |n| n.to_string_lossy().into()

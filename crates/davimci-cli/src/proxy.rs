@@ -117,13 +117,18 @@ impl Proxies {
         let policy = self.policy.clone();
         let root = self.cache.root().to_path_buf();
         let info = info.clone();
-        self.runner.spawn(format!("proxy {name}"), move |ctx| {
+        let label = format!("encoding a proxy for {name}");
+        self.runner.spawn(label.clone(), move |ctx| {
             let conformed = davimci_analysis::conform::conform(
                 &info,
                 props,
                 davimci_analysis::conform::ConformOptions::default(),
             );
-            let hash = davimci_analysis::cache::hash_file(Path::new(&info.path), Some(ctx))?;
+            // Content-hashing gigabytes is minutes before ffmpeg is even
+            // started, so it owns the first slice of the bar.
+            let whole = davimci_analysis::Phase::whole(Some(ctx));
+            let hash =
+                davimci_analysis::cache::hash_file(Path::new(&info.path), whole.slice(0, 150))?;
             let Some(spec) =
                 davimci_analysis::proxy::plan_proxy(&info, &conformed, &policy, &root, &hash)
             else {
@@ -142,14 +147,14 @@ impl Proxies {
                 let _ = std::fs::remove_file(&spec.path);
             }
             if !spec.path.is_file() {
-                davimci_analysis::proxy::generate(&spec, Some(ctx))?;
+                davimci_analysis::proxy::generate(&spec, whole.slice(150, 1000))?;
             }
             if let Ok(mut q) = inbox.lock() {
                 q.push(ready);
             }
             Ok(())
         });
-        Some(format!("encoding a proxy for {name}"))
+        Some(label)
     }
 
     fn adopt(&mut self, ready: &Ready) {

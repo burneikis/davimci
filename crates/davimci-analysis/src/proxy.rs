@@ -145,6 +145,9 @@ impl ProxySpec {
         let mut args = vec![
             "-v".into(),
             "error".into(),
+            "-nostats".into(),
+            "-progress".into(),
+            "pipe:2".into(),
             "-y".into(),
             "-i".into(),
             self.source.clone(),
@@ -165,6 +168,19 @@ impl ProxySpec {
         args.push("-an".into());
         args.push(self.partial_path().display().to_string());
         args
+    }
+
+    /// How long the encode has to run, in microseconds of source media, so
+    /// its progress can be a percentage rather than a spinner.
+    #[must_use]
+    pub fn duration_us(&self) -> u64 {
+        if self.fps.num == 0 {
+            return 0;
+        }
+        self.frames
+            .saturating_mul(u64::from(self.fps.den))
+            .saturating_mul(1_000_000)
+            / u64::from(self.fps.num)
     }
 
     /// Timeline frames the proxy covers, at the timeline rate. Must equal the
@@ -199,14 +215,10 @@ pub fn is_usable(path: &Path) -> bool {
 
 /// Encode a proxy with ffmpeg. Cancellable, since a 4K transcode is the
 /// longest job davimci runs.
-pub fn generate(
-    spec: &ProxySpec,
-    ctx: Option<&crate::jobs::JobContext>,
-) -> Result<(), AnalysisError> {
-    if let Some(ctx) = ctx {
-        ctx.check()?;
-        ctx.progress(0, 1);
-    }
+pub fn generate(spec: &ProxySpec, phase: crate::jobs::Phase<'_>) -> Result<(), AnalysisError> {
+    let total_us = spec.duration_us();
+    phase.check()?;
+    phase.report(0, total_us.max(1));
     if let Some(parent) = spec.path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| AnalysisError::CacheUnwritable {
             reason: e.to_string(),
@@ -215,7 +227,10 @@ pub fn generate(
     let partial = spec.partial_path();
     let mut command = std::process::Command::new("ffmpeg");
     command.args(spec.ffmpeg_args());
-    let out = crate::run::output(&mut command, ctx).map_err(|e| {
+    let out = crate::run::output_with_progress(&mut command, phase.ctx(), |us| {
+        phase.report(us, total_us);
+    })
+    .map_err(|e| {
         let _ = std::fs::remove_file(&partial);
         if e.kind() == std::io::ErrorKind::NotFound {
             AnalysisError::ToolMissing {
@@ -246,9 +261,7 @@ pub fn generate(
     std::fs::rename(&partial, &spec.path).map_err(|e| AnalysisError::CacheUnwritable {
         reason: e.to_string(),
     })?;
-    if let Some(ctx) = ctx {
-        ctx.progress(1, 1);
-    }
+    phase.report(1, 1);
     Ok(())
 }
 
@@ -404,6 +417,26 @@ mod tests {
         assert!(spec.ffmpeg_args().contains(&"scale=960:540".to_string()));
         assert!(spec.ffmpeg_args().contains(&"30/1".to_string()));
         assert!(spec.ffmpeg_args().contains(&"-profile:v".to_string()));
+    }
+
+    /// Regression: the encode sat at 0% until it finished. It has to ask
+    /// ffmpeg where it is, and know how long the source runs to divide by.
+    #[test]
+    fn an_encode_asks_ffmpeg_for_progress_against_a_known_duration() {
+        let info = info_4k();
+        let c = conform(&info, TimelineProps::default(), ConformOptions::default());
+        let spec = plan_proxy(
+            &info,
+            &c,
+            &ProxyPolicy::default(),
+            Path::new("/p/.davimci/cache"),
+            "abc123",
+        )
+        .unwrap();
+        assert_eq!(spec.duration_us(), 3_000_000, "90 frames at 30 fps is 3 s");
+        let args = spec.ffmpeg_args();
+        assert!(args.contains(&"-progress".to_string()));
+        assert!(args.contains(&"pipe:2".to_string()));
     }
 
     #[test]

@@ -9,7 +9,7 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::error::AnalysisError;
-use crate::jobs::JobContext;
+use crate::jobs::Phase;
 
 /// Decode an audio stream to mono `f32` at `sample_rate`.
 ///
@@ -20,33 +20,41 @@ pub fn decode_mono(
     path: &Path,
     stream: u32,
     sample_rate: u32,
-    ctx: Option<&JobContext>,
+    phase: Phase<'_>,
 ) -> Result<Vec<f32>, AnalysisError> {
     let name = path.display().to_string();
+    let total_us = crate::probe::duration_us(path);
     let mut command = Command::new("ffmpeg");
-    command.args(["-v", "error", "-i"]).arg(path).args([
-        "-map",
-        &format!("0:{stream}"),
-        "-ac",
-        "1",
-        "-ar",
-        &sample_rate.to_string(),
-        "-f",
-        "f32le",
-        "-",
-    ]);
-    let out = crate::run::output(&mut command, ctx)
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                AnalysisError::ToolMissing {
-                    tool: "ffmpeg",
-                    what: "audio analysis",
-                }
-            } else {
-                AnalysisError::io(&name, &e)
+    command
+        .args(["-v", "error"])
+        .args(crate::run::progress_args())
+        .arg("-i")
+        .arg(path)
+        .args([
+            "-map",
+            &format!("0:{stream}"),
+            "-ac",
+            "1",
+            "-ar",
+            &sample_rate.to_string(),
+            "-f",
+            "f32le",
+            "-",
+        ]);
+    let out = crate::run::output_with_progress(&mut command, phase.ctx(), |us| {
+        phase.report(us, total_us.unwrap_or(0));
+    })
+    .map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            AnalysisError::ToolMissing {
+                tool: "ffmpeg",
+                what: "audio analysis",
             }
-        })?
-        .ok_or(AnalysisError::Cancelled)?;
+        } else {
+            AnalysisError::io(&name, &e)
+        }
+    })?
+    .ok_or(AnalysisError::Cancelled)?;
     if !out.status.success() {
         return Err(AnalysisError::AnalysisFailed {
             path: name,
@@ -77,29 +85,37 @@ pub const SCENE_THRESHOLD: f32 = 10.0;
 pub fn scene_changes(
     path: &Path,
     threshold: f32,
-    ctx: Option<&JobContext>,
+    phase: Phase<'_>,
 ) -> Result<Vec<u64>, AnalysisError> {
     let name = path.display().to_string();
+    let total_us = crate::probe::duration_us(path);
     let mut command = Command::new("ffmpeg");
-    command.args(["-v", "info", "-i"]).arg(path).args([
-        "-vf",
-        &format!("scdet=threshold={threshold}"),
-        "-f",
-        "null",
-        "-",
-    ]);
-    let out = crate::run::output(&mut command, ctx)
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                AnalysisError::ToolMissing {
-                    tool: "ffmpeg",
-                    what: "scene detection",
-                }
-            } else {
-                AnalysisError::io(&name, &e)
+    command
+        .args(["-v", "info"])
+        .args(crate::run::progress_args())
+        .arg("-i")
+        .arg(path)
+        .args([
+            "-vf",
+            &format!("scdet=threshold={threshold}"),
+            "-f",
+            "null",
+            "-",
+        ]);
+    let out = crate::run::output_with_progress(&mut command, phase.ctx(), |us| {
+        phase.report(us, total_us.unwrap_or(0));
+    })
+    .map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            AnalysisError::ToolMissing {
+                tool: "ffmpeg",
+                what: "scene detection",
             }
-        })?
-        .ok_or(AnalysisError::Cancelled)?;
+        } else {
+            AnalysisError::io(&name, &e)
+        }
+    })?
+    .ok_or(AnalysisError::Cancelled)?;
     Ok(parse_scdet(&String::from_utf8_lossy(&out.stderr)))
 }
 

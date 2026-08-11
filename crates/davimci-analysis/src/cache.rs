@@ -38,26 +38,25 @@ pub fn entry_key(content_hash: &str, stream: u32, kind: StreamKind) -> String {
 /// Not cryptographic - it identifies media, it does not authenticate it -
 /// but it is stable across machines and cheap on large files.
 pub fn content_hash(path: &Path) -> Result<String, AnalysisError> {
-    hash_file(path, None)
+    hash_file(path, crate::jobs::Phase::none())
 }
 
-/// [`content_hash`], abandoned when the job is cancelled.
+/// [`content_hash`], abandoned when the job is cancelled and reporting how
+/// far through the file it is.
 ///
-/// Hashing gigabytes takes seconds, and closing a project waits for the
-/// thread doing it, so the read is checked between chunks.
-pub fn hash_file(
-    path: &Path,
-    ctx: Option<&crate::jobs::JobContext>,
-) -> Result<String, AnalysisError> {
+/// Hashing gigabytes takes seconds - long enough to be the whole of what the
+/// user sees of a short job - so the read is checked and reported between
+/// chunks.
+pub fn hash_file(path: &Path, phase: crate::jobs::Phase<'_>) -> Result<String, AnalysisError> {
     let name = path.display().to_string();
     let mut file = fs::File::open(path).map_err(|e| AnalysisError::io(&name, &e))?;
+    let size = file.metadata().map_or(0, |m| m.len());
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     let mut buf = vec![0u8; 64 * 1024];
     let mut len: u64 = 0;
     loop {
-        if let Some(ctx) = ctx {
-            ctx.check()?;
-        }
+        phase.check()?;
+        phase.report(len, size);
         let n = file
             .read(&mut buf)
             .map_err(|e| AnalysisError::io(&name, &e))?;
@@ -237,6 +236,38 @@ mod tests {
         fs::write(&c, b"hello worlD").unwrap();
         assert_eq!(content_hash(&a).unwrap(), content_hash(&b).unwrap());
         assert_ne!(content_hash(&a).unwrap(), content_hash(&c).unwrap());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Regression: a job sat at 0% for the whole content hash, which on a
+    /// large file is most of its runtime. Hashing reports as it reads.
+    #[test]
+    fn hashing_reports_progress_as_it_reads() {
+        use crate::jobs::{JobEvent, JobRunner, Phase};
+        let dir = tmpdir("hash-progress");
+        let file = dir.join("big.bin");
+        fs::write(&file, vec![7u8; 512 * 1024]).unwrap();
+        let mut runner = JobRunner::new();
+        let path = file.clone();
+        runner.spawn("hashing", move |ctx| {
+            hash_file(&path, Phase::whole(Some(ctx)))?;
+            Ok(())
+        });
+        let mut reports = 0;
+        let mut finished = false;
+        while !finished {
+            for event in runner.poll() {
+                match event {
+                    JobEvent::Progress { .. } => reports += 1,
+                    e if e.is_terminal() => finished = true,
+                    _ => {}
+                }
+            }
+        }
+        assert!(
+            reports > 1,
+            "hashing reported {reports} time(s); the bar would sit at 0%"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 

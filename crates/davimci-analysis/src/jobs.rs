@@ -106,6 +106,74 @@ impl JobContext {
     }
 }
 
+/// A slice of one job's progress bar.
+///
+/// A job is usually several tools in a row - hash the file, then decode it -
+/// and each of them knows only how far through itself it is. Handing each one
+/// a slice of the bar is what keeps the status line monotonic instead of
+/// restarting at 0% per tool, and is why nothing below reports to a
+/// [`JobContext`] directly.
+#[derive(Debug, Clone, Copy)]
+pub struct Phase<'a> {
+    ctx: Option<&'a JobContext>,
+    /// Where this slice starts and ends, in permille of the whole job.
+    base: u16,
+    span: u16,
+}
+
+impl<'a> Phase<'a> {
+    /// The whole bar, for a job that is one piece of work.
+    #[must_use]
+    pub fn whole(ctx: Option<&'a JobContext>) -> Self {
+        Self {
+            ctx,
+            base: 0,
+            span: 1000,
+        }
+    }
+
+    /// No bar and no cancellation: for callers outside a job, such as tests.
+    #[must_use]
+    pub fn none() -> Self {
+        Self::whole(None)
+    }
+
+    /// The part of this slice between `from` and `to`, in permille of it.
+    #[must_use]
+    pub fn slice(&self, from: u16, to: u16) -> Self {
+        let scale = |p: u16| {
+            let within = u32::from(self.span) * u32::from(p.min(1000)) / 1000;
+            self.base + u16::try_from(within).unwrap_or(u16::MAX)
+        };
+        let base = scale(from);
+        Self {
+            ctx: self.ctx,
+            base,
+            span: scale(to).saturating_sub(base),
+        }
+    }
+
+    /// Report `done` of `total` within this slice. A zero `total` is silence
+    /// rather than a division by zero.
+    pub fn report(&self, done: u64, total: u64) {
+        let (Some(ctx), true) = (self.ctx, total > 0) else {
+            return;
+        };
+        let within = done.min(total) * u64::from(self.span) / total;
+        ctx.progress(u64::from(self.base) + within, 1000);
+    }
+
+    /// The context underneath, for work that also has to be cancellable.
+    #[must_use]
+    pub fn ctx(&self) -> Option<&'a JobContext> {
+        self.ctx
+    }
+
+    pub fn check(&self) -> Result<(), AnalysisError> {
+        self.ctx.map_or(Ok(()), JobContext::check)
+    }
+}
+
 /// Spawns jobs and collects their events.
 #[derive(Debug)]
 pub struct JobRunner {
@@ -237,6 +305,47 @@ mod tests {
     use super::*;
     use std::sync::atomic::AtomicU64;
     use std::time::Duration;
+
+    /// Regression: a job that hashed a file and then decoded it sat at 0%
+    /// for the whole hash and jumped to done. Each tool owns a slice of the
+    /// one bar, and the slices are reported in permille of the whole job.
+    #[test]
+    fn each_phase_reports_within_its_own_slice_of_the_bar() {
+        let mut runner = JobRunner::new();
+        runner.spawn("two tools", |ctx| {
+            let whole = Phase::whole(Some(ctx));
+            let hash = whole.slice(0, 300);
+            hash.report(1, 2);
+            let decode = whole.slice(300, 1000);
+            decode.report(0, 4);
+            decode.report(2, 4);
+            decode.report(9, 4);
+            Ok(())
+        });
+        let mut seen = Vec::new();
+        while seen.len() < 4 {
+            for event in runner.poll() {
+                if let JobEvent::Progress { done, total, .. } = event {
+                    assert_eq!(total, 1000);
+                    seen.push(done);
+                }
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(
+            seen,
+            vec![150, 300, 650, 1000],
+            "phases did not tile the bar"
+        );
+    }
+
+    #[test]
+    fn a_phase_without_a_job_reports_nowhere_and_never_divides_by_zero() {
+        let phase = Phase::none();
+        phase.report(1, 0);
+        phase.report(1, 1);
+        assert!(phase.check().is_ok());
+    }
 
     #[test]
     fn a_job_reports_start_progress_and_completion_in_order() {

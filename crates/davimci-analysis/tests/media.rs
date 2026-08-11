@@ -14,6 +14,7 @@
 
 use std::path::{Path, PathBuf};
 
+use davimci_analysis::Phase;
 use davimci_analysis::analysis::{AnalysisParams, analyze_samples};
 use davimci_analysis::cache::AnalysisCache;
 use davimci_analysis::conform::{ConformOptions, conform};
@@ -103,7 +104,8 @@ fn the_conform_matrix_agrees_with_the_real_files() {
 #[test]
 fn silence_analysis_of_the_tone_fixture_matches_ground_truth() {
     // tone_gaps.wav: tone at 1-2s and 3-4s, silence elsewhere.
-    let samples = decode::decode_mono(&fixtures().join("tone_gaps.wav"), 0, 48_000).unwrap();
+    let samples =
+        decode::decode_mono(&fixtures().join("tone_gaps.wav"), 0, 48_000, Phase::none()).unwrap();
     let a = analyze_samples(&samples, 48_000, AnalysisParams::default());
     let want = [(0, 1000), (2000, 3000), (4000, 5000)];
     assert_eq!(a.silence.len(), want.len(), "got {:?}", a.silence);
@@ -117,7 +119,8 @@ fn silence_analysis_of_the_tone_fixture_matches_ground_truth() {
 
 #[test]
 fn pure_silence_analyses_as_silent_end_to_end() {
-    let samples = decode::decode_mono(&fixtures().join("silence_5s.wav"), 0, 48_000).unwrap();
+    let samples =
+        decode::decode_mono(&fixtures().join("silence_5s.wav"), 0, 48_000, Phase::none()).unwrap();
     let a = analyze_samples(&samples, 48_000, AnalysisParams::default());
     assert_eq!(a.silence.len(), 1);
     assert!(a.silence[0].duration_ms() >= 4_900);
@@ -126,8 +129,12 @@ fn pure_silence_analyses_as_silent_end_to_end() {
 #[test]
 fn the_scene_cut_fixture_is_detected_at_the_known_frame() {
     // scene_cut.mkv cuts red to blue at exactly 2.0s.
-    let cuts =
-        decode::scene_changes(&fixtures().join("scene_cut.mkv"), decode::SCENE_THRESHOLD).unwrap();
+    let cuts = decode::scene_changes(
+        &fixtures().join("scene_cut.mkv"),
+        decode::SCENE_THRESHOLD,
+        Phase::none(),
+    )
+    .unwrap();
     assert!(
         cuts.iter().any(|ms| ms.abs_diff(2000) <= 50),
         "expected a cut near 2000ms, got {cuts:?}"
@@ -143,7 +150,7 @@ fn a_proxy_has_exactly_the_same_frame_count_as_its_source() {
     let spec = plan_proxy(&info, &c, &ProxyPolicy::default(), cache.root(), "fixture")
         .expect("4K must trigger the proxy threshold");
 
-    davimci_analysis::proxy::generate(&spec, None).unwrap();
+    davimci_analysis::proxy::generate(&spec, Phase::none()).unwrap();
     let proxy = FfprobeProber.probe(&spec.path).unwrap();
     let video = proxy.video().unwrap();
     assert_eq!(video.resolution.unwrap().height, 540);
@@ -180,7 +187,7 @@ fn an_interrupted_encode_leaves_no_file_a_later_session_would_trust() {
     );
 
     // And one that finishes is both present and decodable.
-    davimci_analysis::proxy::generate(&spec, None).unwrap();
+    davimci_analysis::proxy::generate(&spec, Phase::none()).unwrap();
     assert!(spec.path.is_file());
     assert!(
         !spec.partial_path().exists(),
@@ -205,7 +212,7 @@ fn a_cached_analysis_survives_a_round_trip_through_disk() {
     let source = fixtures().join("tone_gaps.wav");
     let hash = davimci_analysis::content_hash(&source).unwrap();
 
-    let samples = decode::decode_mono(&source, 0, 48_000).unwrap();
+    let samples = decode::decode_mono(&source, 0, 48_000, Phase::none()).unwrap();
     let a = analyze_samples(&samples, 48_000, AnalysisParams::default());
     cache.store(&hash, &a).unwrap();
     let back = cache.load(&hash).unwrap();
