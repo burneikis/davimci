@@ -18,6 +18,9 @@ thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+rustix.workspace = true
+
 [dev-dependencies]
 criterion.workspace = true
 davimci-core = { workspace = true, features = ["testing"] }

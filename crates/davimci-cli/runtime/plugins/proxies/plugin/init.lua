@@ -14,6 +14,11 @@ require("davimci.proxy").setup({
   -- ffmpeg spells ProRes Proxy as `prores_ks` at profile 0; there is no
   -- `prores_proxy` encoder to ask for.
   codec = "prores_ks",
+  -- Where the encode decodes and scales: "auto" tries this machine's
+  -- devices once and keeps software if it has none. "none", "cuda" and
+  -- "vaapi" say so outright. A device that refuses a file falls back to
+  -- software for that file rather than losing the proxy.
+  accel = "auto",
   max_native_height = 1080,
   expensive_codecs = { "hevc", "h265", "vp9", "av1" },
   max_native_bit_depth = 8,

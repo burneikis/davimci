@@ -307,6 +307,10 @@ impl Proxies {
         let swaps: Vec<(davimci_core::ClipId, String)> = tl
             .tracks()
             .iter()
+            // Video tracks only. A proxy is encoded without audio, so an
+            // audio clip pointed at one plays silence: the substitution that
+            // makes the picture cheap must not take the sound away.
+            .filter(|t| t.kind == davimci_core::TrackKind::Video)
             .flat_map(davimci_core::Track::clips)
             .filter_map(|c| {
                 let media = c.media.as_ref()?;
@@ -529,6 +533,57 @@ mod tests {
         );
         // The guard sees the timeline an export ships, which is that one.
         proxies.check_export(&tl).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Regression: the preview went silent once a proxy landed. Audio clips
+    /// off the same file were relinked to it too, and a proxy is encoded
+    /// with `-an`: there was nothing there to play.
+    #[test]
+    fn an_audio_clip_keeps_its_original_when_the_video_takes_a_proxy() {
+        let root = dir("audio");
+        let proxy = root.join("abc.proxy.mov");
+        std::fs::write(&proxy, b"stand-in").unwrap();
+        let proxy = proxy.display().to_string();
+
+        let mut proxies = Proxies::new(&root);
+        let mut tl = davimci_core::testing::multi_audio_fixture(1, Some(1));
+        // One file, playing on both a video and an audio track, as any
+        // imported clip with sound does.
+        let ids: Vec<(
+            davimci_core::TrackId,
+            davimci_core::ClipId,
+            davimci_core::TrackKind,
+        )> = tl
+            .tracks()
+            .iter()
+            .filter_map(|t| t.clips().first().map(|c| (t.id, c.id, t.kind)))
+            .collect();
+        for (_, clip, _) in &ids {
+            tl.set_media_source(*clip, "/media/uhd.mkv", false).unwrap();
+        }
+        proxies.adopt(&Ready {
+            source: "/media/uhd.mkv".into(),
+            proxy: proxy.clone(),
+        });
+
+        let previewed = proxies.with_proxies(&tl);
+        for (track, _, kind) in ids {
+            let path = previewed.track(track).unwrap().clips()[0]
+                .media
+                .as_ref()
+                .map(|m| m.path.clone())
+                .unwrap();
+            match kind {
+                davimci_core::TrackKind::Video => {
+                    assert_eq!(path, proxy, "the picture did not take the proxy");
+                }
+                _ => assert_eq!(
+                    path, "/media/uhd.mkv",
+                    "the sound was taken from a video-only proxy"
+                ),
+            }
+        }
         let _ = std::fs::remove_dir_all(&root);
     }
 }

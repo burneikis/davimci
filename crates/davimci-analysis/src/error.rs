@@ -37,6 +37,9 @@ pub enum AnalysisError {
         what: &'static str,
     },
 
+    #[error("'{name}' is not a decoder davimci knows; use auto, none, cuda or vaapi")]
+    UnknownAccel { name: String },
+
     #[error("clip {clip} would render from the proxy {path}; export needs the original")]
     ProxyInExport { clip: String, path: String },
 
@@ -55,6 +58,7 @@ impl Classify for AnalysisError {
             Self::MediaOffline { .. } => ErrorClass::OfflineMedia,
             Self::NoImportableStreams { .. }
             | Self::Unsupported { .. }
+            | Self::UnknownAccel { .. }
             | Self::ProxyInExport { .. } => ErrorClass::User,
             Self::ProbeFailed { .. }
             | Self::AnalysisFailed { .. }

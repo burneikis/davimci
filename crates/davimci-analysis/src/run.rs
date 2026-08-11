@@ -42,6 +42,7 @@ pub fn output_with_progress(
     let Some(ctx) = ctx else {
         return command.output().map(Some);
     };
+    tie_to_this_process(command);
     let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -78,6 +79,28 @@ pub fn output_with_progress(
         std::thread::sleep(POLL);
     }
 }
+
+/// Make the child die with davimci, however davimci dies.
+///
+/// Cancelling a job kills its child, but that only runs if davimci is alive
+/// to run it: a `SIGTERM`, a `SIGKILL` or a crash left a four-hour transcode
+/// running with nobody to stop it, still writing into a partial proxy that
+/// the next session would race. The kernel does the cleanup instead.
+#[cfg(unix)]
+fn tie_to_this_process(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    // SAFETY: `pre_exec` runs between fork and exec, where only
+    // async-signal-safe calls are allowed. This is a single `prctl`.
+    unsafe {
+        command.pre_exec(|| {
+            rustix::process::set_parent_process_death_signal(Some(rustix::process::Signal::KILL))?;
+            Ok(())
+        });
+    }
+}
+
+#[cfg(not(unix))]
+fn tie_to_this_process(_command: &mut Command) {}
 
 /// Fold one stderr line into either progress or the error text.
 fn absorb(line: &str, errors: &mut String, on_progress: &mut impl FnMut(u64)) {
@@ -165,7 +188,7 @@ fn collect(rx: Option<Receiver<Vec<u8>>>) -> Vec<u8> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, reason = "test-only")]
+#[allow(clippy::unwrap_used, clippy::expect_used, reason = "test-only")]
 mod tests {
     use super::*;
     use crate::jobs::JobRunner;
@@ -219,6 +242,56 @@ mod tests {
         }
         assert_eq!(seen, vec![250_000]);
         assert_eq!(errors, "boom: bad file\n");
+    }
+
+    /// Regression: killing davimci left its ffmpeg running, burning the
+    /// machine and writing into a partial file the next session would race.
+    ///
+    /// Asserted end to end, because the tie is only meaningful across a real
+    /// death: this test binary re-runs itself as the parent that dies, and
+    /// the child it left behind must be gone with it.
+    #[cfg(unix)]
+    #[test]
+    fn a_child_does_not_outlive_the_process_that_spawned_it() {
+        if std::env::var("DAVIMCI_DOOMED_PARENT").is_ok() {
+            let mut sleep = Command::new("sleep");
+            sleep.arg("60");
+            tie_to_this_process(&mut sleep);
+            // Null pipes, or the orphan holds this test's `output()` open
+            // and its own lifetime would be mistaken for the tie working.
+            let child = sleep
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap();
+            println!("CHILD {}", child.id());
+            // No cancellation, no drop, no unwinding: the abrupt exit is
+            // the whole point.
+            std::process::exit(0);
+        }
+
+        let exe = std::env::current_exe().unwrap();
+        let out = Command::new(exe)
+            .args([
+                "--exact",
+                "run::tests::a_child_does_not_outlive_the_process_that_spawned_it",
+                "--nocapture",
+            ])
+            .env("DAVIMCI_DOOMED_PARENT", "1")
+            .output()
+            .unwrap();
+        let pid = String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .find_map(|l| l.strip_prefix("CHILD ")?.trim().parse::<u32>().ok())
+            .expect("the doomed parent never reported a child");
+
+        let alive = || std::path::Path::new(&format!("/proc/{pid}")).exists();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while alive() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(!alive(), "the child outlived the process that spawned it");
     }
 
     #[test]

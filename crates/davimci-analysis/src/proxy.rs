@@ -19,12 +19,97 @@ use crate::conform::Conformed;
 use crate::error::AnalysisError;
 use crate::probe::{MediaInfo, StreamInfo};
 
+/// Where a proxy encode decodes and scales its frames.
+///
+/// Decoding the source is most of the work of making a proxy, and the machine
+/// that can encode on its GPU can usually decode there too. Which device is
+/// available is a fact about the machine rather than a workflow opinion, so
+/// [`Accel::Auto`] asks ffmpeg once and keeps the answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Accel {
+    /// Whatever this machine turns out to have, software if nothing.
+    Auto,
+    /// Everything in software. The only mode that is always available.
+    None,
+    /// NVDEC decode and `scale_cuda`, frames never leaving the card.
+    Cuda,
+    /// VA-API decode and `scale_vaapi`, for Intel and AMD.
+    Vaapi,
+}
+
+impl Accel {
+    /// What to call this in a config or an error.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::None => "none",
+            Self::Cuda => "cuda",
+            Self::Vaapi => "vaapi",
+        }
+    }
+
+    /// Parse what a config wrote. Unknown names are refused rather than
+    /// silently meaning software: a typo that halves the machine's speed
+    /// should be visible.
+    pub fn parse(name: &str) -> Result<Self, AnalysisError> {
+        match name {
+            "auto" => Ok(Self::Auto),
+            "none" | "off" | "software" => Ok(Self::None),
+            "cuda" | "nvdec" => Ok(Self::Cuda),
+            "vaapi" => Ok(Self::Vaapi),
+            other => Err(AnalysisError::UnknownAccel {
+                name: other.to_string(),
+            }),
+        }
+    }
+
+    /// The ffmpeg options that put decoding on this device, before `-i`.
+    fn input_args(self) -> Vec<String> {
+        match self {
+            Self::Auto | Self::None => Vec::new(),
+            Self::Cuda => vec![
+                "-hwaccel".into(),
+                "cuda".into(),
+                "-hwaccel_output_format".into(),
+                "cuda".into(),
+            ],
+            Self::Vaapi => vec![
+                "-hwaccel".into(),
+                "vaapi".into(),
+                "-hwaccel_output_format".into(),
+                "vaapi".into(),
+            ],
+        }
+    }
+
+    /// The scaler that matches where the frames are. A hardware decode hands
+    /// the filter graph frames on the device, which the software `scale`
+    /// cannot read at all - the pair is not a preference, it is a
+    /// requirement.
+    fn scale_filter(self, width: u32, height: u32) -> String {
+        match self {
+            Self::Auto | Self::None => format!("scale={width}:{height}"),
+            Self::Cuda => format!("scale_cuda={width}:{height}"),
+            Self::Vaapi => format!("scale_vaapi={width}:{height}:format=nv12"),
+        }
+    }
+}
+
+fn default_accel() -> Accel {
+    Accel::Auto
+}
+
 /// Proxy settings, mirroring `davimci.media.configure`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProxyPolicy {
     pub auto: bool,
     pub height: u32,
     pub codec: String,
+    /// Where the encode decodes and scales.
+    #[serde(default = "default_accel")]
+    pub accel: Accel,
     /// Sources taller than this get a proxy.
     pub max_native_height: u32,
     /// Codecs that are expensive to seek regardless of resolution.
@@ -41,6 +126,7 @@ impl Default for ProxyPolicy {
             // ffmpeg spells ProRes Proxy as the `prores_ks` encoder at
             // profile 0; there is no `prores_proxy` encoder to ask for.
             codec: "prores_ks".into(),
+            accel: default_accel(),
             max_native_height: 1080,
             expensive_codecs: vec!["hevc".into(), "h265".into(), "vp9".into(), "av1".into()],
             max_native_bit_depth: 8,
@@ -89,6 +175,8 @@ pub struct ProxySpec {
     pub fps: Fps,
     pub frames: u64,
     pub codec: String,
+    /// What the policy asked for. The encode may still fall back.
+    pub accel: Accel,
 }
 
 /// Plan the proxy for a probed file, or `None` if it does not need one.
@@ -118,6 +206,7 @@ pub fn plan_proxy(
         fps,
         frames: info.source_frames(fps),
         codec: policy.codec.clone(),
+        accel: policy.accel,
     })
 }
 
@@ -142,6 +231,16 @@ impl ProxySpec {
     /// argument list is testable without encoding anything.
     #[must_use]
     pub fn ffmpeg_args(&self) -> Vec<String> {
+        self.ffmpeg_args_on(self.accel)
+    }
+
+    /// The invocation that decodes and scales on `accel`.
+    ///
+    /// Split from [`ProxySpec::ffmpeg_args`] so a failed hardware run can be
+    /// retried in software with the same spec, and so both forms are
+    /// testable without a GPU.
+    #[must_use]
+    pub fn ffmpeg_args_on(&self, accel: Accel) -> Vec<String> {
         let mut args = vec![
             "-v".into(),
             "error".into(),
@@ -149,17 +248,20 @@ impl ProxySpec {
             "-progress".into(),
             "pipe:2".into(),
             "-y".into(),
+        ];
+        args.extend(accel.input_args());
+        args.extend([
             "-i".into(),
             self.source.clone(),
             "-map".into(),
             "0:v:0".into(),
             "-vf".into(),
-            format!("scale={}:{}", self.width, self.height),
+            accel.scale_filter(self.width, self.height),
             "-r".into(),
             format!("{}/{}", self.fps.num, self.fps.den),
             "-c:v".into(),
             self.codec.clone(),
-        ];
+        ]);
         if self.codec.starts_with("prores") {
             // Profile 0 is Proxy - the point of the exercise.
             args.push("-profile:v".into());
@@ -216,6 +318,27 @@ pub fn is_usable(path: &Path) -> bool {
 /// Encode a proxy with ffmpeg. Cancellable, since a 4K transcode is the
 /// longest job davimci runs.
 pub fn generate(spec: &ProxySpec, phase: crate::jobs::Phase<'_>) -> Result<(), AnalysisError> {
+    let wanted = match spec.accel {
+        Accel::Auto => detect_accel(),
+        chosen => chosen,
+    };
+    match encode(spec, wanted, phase) {
+        // Hardware that is present can still refuse this particular file -
+        // an unsupported codec, a busy device, a driver that went away. The
+        // proxy is worth more than the speed, so it is encoded again in
+        // software rather than lost.
+        Err(AnalysisError::AnalysisFailed { .. }) if wanted != Accel::None => {
+            encode(spec, Accel::None, phase)
+        }
+        other => other,
+    }
+}
+
+fn encode(
+    spec: &ProxySpec,
+    accel: Accel,
+    phase: crate::jobs::Phase<'_>,
+) -> Result<(), AnalysisError> {
     let total_us = spec.duration_us();
     phase.check()?;
     phase.report(0, total_us.max(1));
@@ -226,7 +349,7 @@ pub fn generate(spec: &ProxySpec, phase: crate::jobs::Phase<'_>) -> Result<(), A
     }
     let partial = spec.partial_path();
     let mut command = std::process::Command::new("ffmpeg");
-    command.args(spec.ffmpeg_args());
+    command.args(spec.ffmpeg_args_on(accel));
     let out = crate::run::output_with_progress(&mut command, phase.ctx(), |us| {
         phase.report(us, total_us);
     })
@@ -263,6 +386,61 @@ pub fn generate(spec: &ProxySpec, phase: crate::jobs::Phase<'_>) -> Result<(), A
     })?;
     phase.report(1, 1);
     Ok(())
+}
+
+/// The best decoder this machine actually has, asked once.
+///
+/// Listed support is not working support - a build can name `cuda` on a
+/// machine with no card - so each candidate is tried on a frame of generated
+/// video before it is believed. The trial costs a fraction of a second, once
+/// per process, and only when a proxy is first encoded.
+pub fn detect_accel() -> Accel {
+    static FOUND: std::sync::OnceLock<Accel> = std::sync::OnceLock::new();
+    *FOUND.get_or_init(|| {
+        [Accel::Cuda, Accel::Vaapi]
+            .into_iter()
+            .find(|accel| accel_works(*accel))
+            .unwrap_or(Accel::None)
+    })
+}
+
+/// Whether ffmpeg can open this device and scale on it.
+///
+/// A generated frame is uploaded and scaled rather than decoded: `-hwaccel`
+/// applies to a decoded stream, so trying it on `lavfi` proves nothing and
+/// fails even where the device is perfectly good. Whether the device's
+/// *decoder* also takes a particular codec is not knowable without that
+/// file, which is what the fallback in [`generate`] is for.
+fn accel_works(accel: Accel) -> bool {
+    let device = match accel {
+        Accel::Cuda => "cuda=dev",
+        Accel::Vaapi => "vaapi=dev",
+        Accel::Auto | Accel::None => return true,
+    };
+    std::process::Command::new("ffmpeg")
+        .args([
+            "-v",
+            "error",
+            "-nostdin",
+            "-init_hw_device",
+            device,
+            "-filter_hw_device",
+            "dev",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=size=64x64:rate=1:duration=1",
+            "-vf",
+            &format!("format=nv12,hwupload,{}", accel.scale_filter(32, 32)),
+            "-frames:v",
+            "1",
+            "-f",
+            "null",
+            "-",
+        ])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .is_ok_and(|out| out.status.success())
 }
 
 /// Which proxy stands in for which original, for the duration of a session.
@@ -417,6 +595,54 @@ mod tests {
         assert!(spec.ffmpeg_args().contains(&"scale=960:540".to_string()));
         assert!(spec.ffmpeg_args().contains(&"30/1".to_string()));
         assert!(spec.ffmpeg_args().contains(&"-profile:v".to_string()));
+    }
+
+    /// The decoder and the scaler are a pair: frames decoded on the card
+    /// cannot be read by the software `scale`, so asking for one without the
+    /// other produces a command that always fails.
+    #[test]
+    fn a_hardware_decode_brings_its_own_scaler() {
+        let info = info_4k();
+        let c = conform(&info, TimelineProps::default(), ConformOptions::default());
+        let spec = plan_proxy(
+            &info,
+            &c,
+            &ProxyPolicy::default(),
+            Path::new("/p/.davimci/cache"),
+            "abc123",
+        )
+        .unwrap();
+
+        let cuda = spec.ffmpeg_args_on(Accel::Cuda);
+        assert!(cuda.contains(&"scale_cuda=960:540".to_string()));
+        assert!(cuda.contains(&"-hwaccel_output_format".to_string()));
+        let at = |args: &[String], flag: &str| args.iter().position(|a| a == flag);
+        assert!(
+            at(&cuda, "-hwaccel") < at(&cuda, "-i"),
+            "-hwaccel is an input option and must precede -i"
+        );
+
+        let vaapi = spec.ffmpeg_args_on(Accel::Vaapi);
+        assert!(vaapi.contains(&"scale_vaapi=960:540:format=nv12".to_string()));
+
+        let soft = spec.ffmpeg_args_on(Accel::None);
+        assert!(soft.contains(&"scale=960:540".to_string()));
+        assert!(
+            !soft.iter().any(|a| a == "-hwaccel"),
+            "software asked for a device"
+        );
+    }
+
+    #[test]
+    fn an_unknown_decoder_is_refused_rather_than_meaning_software() {
+        assert_eq!(Accel::parse("cuda").unwrap(), Accel::Cuda);
+        assert_eq!(Accel::parse("off").unwrap(), Accel::None);
+        let err = Accel::parse("cude").unwrap_err();
+        assert_eq!(
+            davimci_core::Classify::class(&err),
+            davimci_core::ErrorClass::User
+        );
+        assert!(err.to_string().contains("cuda"), "{err}");
     }
 
     /// Regression: the encode sat at 0% until it finished. It has to ask

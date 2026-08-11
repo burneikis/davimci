@@ -73,7 +73,8 @@ pub enum ExCommand {
     /// `:checkhealth` - what is wrong with this session's plugins.
     CheckHealth,
     /// `:jobs` - what is running behind the editor, and how far along.
-    Jobs,
+    /// `:jobs!` includes the ones that have already finished.
+    Jobs { all: bool },
     /// `:cancel` - stop the running export.
     CancelRender,
     /// `:gain <db>` - absolute gain on the clip under the playhead.
@@ -213,7 +214,8 @@ pub fn parse(line: &str) -> Result<ExCommand, CliError> {
         "analyze" | "analyse" => Ok(ExCommand::Analyze),
         "presets" => Ok(ExCommand::Presets),
         "checkhealth" | "health" => Ok(ExCommand::CheckHealth),
-        "jobs" => Ok(ExCommand::Jobs),
+        "jobs" => Ok(ExCommand::Jobs { all: false }),
+        "jobs!" => Ok(ExCommand::Jobs { all: true }),
         "cancel" => Ok(ExCommand::CancelRender),
         "new" => Ok(ExCommand::New),
         "ls" | "buffers" => Ok(ExCommand::List),
@@ -431,6 +433,7 @@ fn command_names() -> Vec<String> {
         "render",
         "presets",
         "jobs",
+        "jobs!",
         "cancel",
         "gain",
         "fade",
@@ -516,7 +519,7 @@ impl Workspace {
             | ExCommand::Render { .. }
             | ExCommand::Presets
             | ExCommand::CheckHealth
-            | ExCommand::Jobs
+            | ExCommand::Jobs { .. }
             | ExCommand::CancelRender => Err(CliError::ExportFailed {
                 reason: "exporting needs a running editor, and this session has no render backend"
                     .into(),

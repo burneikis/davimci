@@ -1130,6 +1130,10 @@ fn jobs_lists_background_work_the_status_line_has_no_room_for() {
     app.event(Event::Command(":jobs".into()), &mut editor);
     let said = app.view().message.expect("a status line").text;
     assert_eq!(said, "nothing is running");
+    // The log is still there for whoever asks for it by name.
+    app.event(Event::Command(":jobs!".into()), &mut editor);
+    let said = app.view().message.expect("a status line").text;
+    assert_eq!(said, "this session has run no jobs");
 }
 
 /// Regression: only the last `davimci.proxy.setup` of a session survived, so

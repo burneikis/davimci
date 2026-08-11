@@ -747,6 +747,7 @@ dependencies = [
  "davimci-cmd",
  "davimci-core",
  "davimci-motion",
+ "rustix 1.1.4",
  "serde",
  "serde_json",
  "thiserror 2.0.19",

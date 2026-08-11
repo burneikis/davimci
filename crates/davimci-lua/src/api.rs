@@ -362,6 +362,7 @@ fn proxy_module(lua: &Lua, state: &Shared) -> mlua::Result<Table> {
                 auto: opts.get("auto")?,
                 height: opts.get("height")?,
                 codec: opts.get("codec")?,
+                accel: opts.get("accel")?,
                 max_native_height: opts.get("max_native_height")?,
                 expensive_codecs: codecs,
                 max_native_bit_depth: opts.get("max_native_bit_depth")?,

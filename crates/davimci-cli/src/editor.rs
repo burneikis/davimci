@@ -421,14 +421,26 @@ impl Editor {
         }
     }
 
-    /// `:jobs` - every background job and how far along it is.
+    /// `:jobs` - what is running behind the editor, `:jobs!` the whole log.
+    ///
+    /// Finished work is left out by default: the question the command
+    /// answers is "what is the machine still busy with", and a session that
+    /// imported twenty files would bury that under twenty `done` lines.
     fn jobs_command(&self, cmd: &ExCommand) -> Option<Result<String, CliError>> {
-        if !matches!(cmd, ExCommand::Jobs) {
+        let &ExCommand::Jobs { all: want_all } = cmd else {
             return None;
-        }
-        let all = self.job_list.all();
+        };
+        let all: Vec<&davimci_app::Job> = if want_all {
+            self.job_list.all().iter().collect()
+        } else {
+            self.job_list.running().collect()
+        };
         if all.is_empty() {
-            return Some(Ok("nothing is running".into()));
+            return Some(Ok(if want_all {
+                "this session has run no jobs".into()
+            } else {
+                "nothing is running".to_string()
+            }));
         }
         let line = |j: &davimci_app::Job| {
             let state = match j.state {
@@ -439,7 +451,11 @@ impl Editor {
             };
             format!("{} {state}", j.label)
         };
-        Some(Ok(all.iter().map(line).collect::<Vec<_>>().join("  |  ")))
+        Some(Ok(all
+            .into_iter()
+            .map(line)
+            .collect::<Vec<_>>()
+            .join("  |  ")))
     }
 
     /// Run an export command. Split out from [`Editor::command`] because
@@ -640,6 +656,14 @@ impl Editor {
         }
         if let Some(codec) = setup.codec {
             policy.codec = codec;
+        }
+        if let Some(accel) = setup.accel {
+            match davimci_analysis::Accel::parse(&accel) {
+                Ok(accel) => policy.accel = accel,
+                // A misspelled device is the config's mistake to see; the
+                // policy it came with still applies.
+                Err(e) => self.notices.push(Message::warning(e.to_string())),
+            }
         }
         if let Some(max) = setup.max_native_height {
             policy.max_native_height = max;

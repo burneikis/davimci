@@ -127,6 +127,8 @@ pub struct ProxySetup {
     pub auto: Option<bool>,
     pub height: Option<u32>,
     pub codec: Option<String>,
+    /// Where the encode decodes and scales: `auto`, `none`, `cuda`, `vaapi`.
+    pub accel: Option<String>,
     pub max_native_height: Option<u32>,
     pub expensive_codecs: Option<Vec<String>>,
     pub max_native_bit_depth: Option<u32>,
