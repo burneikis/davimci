@@ -13,7 +13,7 @@ use davimci_app::{App, Event};
 use davimci_backend::MockBackend;
 use davimci_cli::{Editor, Plugins, Workspace};
 use davimci_cmd::Session;
-use davimci_core::testing::fixture;
+use davimci_core::testing::{fixture, media_fixture};
 use davimci_core::{Fps, Frame, Resolution, Timeline};
 use davimci_keys::Key;
 use davimci_lua::{ConfigPaths, DenyAll};
@@ -59,6 +59,14 @@ fn timeline() -> Timeline {
 
 /// An editor with this config tree loaded, assembled the way `main` does it.
 fn editor_with(config: &Scratch) -> (App, Editor, Vec<davimci_app::Message>) {
+    editor_with_timeline(config, timeline())
+}
+
+/// As [`editor_with`], for a test that cares what media the project holds.
+fn editor_with_timeline(
+    config: &Scratch,
+    tl: Timeline,
+) -> (App, Editor, Vec<davimci_app::Message>) {
     let mut plugins = Plugins::load(
         Some(&ConfigPaths::new(config.path())),
         config.path(),
@@ -67,7 +75,7 @@ fn editor_with(config: &Scratch) -> (App, Editor, Vec<davimci_app::Message>) {
     let notices = plugins.take_notices();
     let keymap = plugins.keymap();
 
-    let session = Session::new(timeline());
+    let session = Session::new(tl);
     let mut ws = Workspace::new(config.path().to_path_buf()).without_autosave();
     ws.set_current_session(session.clone());
     let presenter = Presenter::new(
@@ -1110,6 +1118,79 @@ fn proxies_are_a_plugins_opinion_not_a_default() {
         editor.proxies_enabled(),
         "the plugin did not state a policy"
     );
+}
+
+/// `:jobs` answers from the running editor for the same reason `:checkhealth`
+/// does: the workspace never sees the background work. The status line shows
+/// one job, so this is the only way to see the rest.
+#[test]
+fn jobs_lists_background_work_the_status_line_has_no_room_for() {
+    let cfg = Scratch::with_config("jobs", &[]);
+    let (mut app, mut editor, _) = editor_with(&cfg);
+    app.event(Event::Command(":jobs".into()), &mut editor);
+    let said = app.view().message.expect("a status line").text;
+    assert_eq!(said, "nothing is running");
+}
+
+/// Regression: only the last `davimci.proxy.setup` of a session survived, so
+/// an `init.lua` naming nothing but an encoder threw away the thresholds -
+/// and the `auto` - the bundled plugin had just stated, and proxying was
+/// silently off. Each call amends what came before.
+#[test]
+fn a_config_naming_only_an_encoder_keeps_the_plugins_thresholds() {
+    let cfg = Scratch::with_config(
+        "merge",
+        &[
+            (
+                "plugins.lua",
+                r#"require("davimci.plugins").enable("proxies")"#,
+            ),
+            (
+                "init.lua",
+                r#"require("davimci.proxy").setup({ codec = "h264_nvenc" })"#,
+            ),
+        ],
+    );
+    let (_, editor, _) = editor_with(&cfg);
+    assert!(
+        editor.proxies_enabled(),
+        "naming an encoder turned proxying off"
+    );
+    assert_eq!(
+        editor.proxy_codec(),
+        "h264_nvenc",
+        "the encoder was ignored"
+    );
+}
+
+/// Regression: a proxy was queued on import and nowhere else, so a project
+/// opened a second time - which imports nothing, its media already on the
+/// timeline - never encoded the proxy the policy says it needs, and `:jobs`
+/// showed only the analysis.
+#[test]
+fn opening_a_project_queues_proxies_for_the_media_it_already_holds() {
+    let cfg = Scratch::with_config(
+        "sweep",
+        &[(
+            "plugins.lua",
+            r#"require("davimci.plugins").enable("proxies")"#,
+        )],
+    );
+    // Media clips, which the bundled policy judges on the worker.
+    let (mut app, mut editor, _) = editor_with_timeline(&cfg, media_fixture(&[(0, 100, 0, 600)]));
+    assert!(
+        editor.proxies_enabled(),
+        "the plugin did not state a policy"
+    );
+    // Nothing was imported: this is the timeline the editor opened with.
+    app.event(Event::Tick, &mut editor);
+    app.event(Event::Command(":jobs".into()), &mut editor);
+    let said = app.view().message.expect("a status line").text;
+    assert!(
+        said.contains("encoding a proxy for"),
+        "the open project's media was never offered to the policy: {said}"
+    );
+    editor.shutdown();
 }
 
 /// `:checkhealth` answers from the running editor, because what is loaded is

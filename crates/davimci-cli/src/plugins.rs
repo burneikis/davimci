@@ -430,13 +430,18 @@ impl Plugins {
         demands
     }
 
-    /// Take the proxy policy a config stated while loading, for the same
-    /// reason: an import on the first tick has to see it.
-    pub fn take_proxy_policy(&mut self) -> Option<davimci_lua::ProxySetup> {
-        let mut found = None;
+    /// Take the proxy policies stated while loading, oldest first, for the
+    /// same reason: an import on the first tick has to see them.
+    ///
+    /// Every one of them, in order: a plugin states thresholds and the user's
+    /// `init.lua` names an encoder, and each `setup` amends what came before
+    /// rather than replacing it. Keeping only the last silently dropped the
+    /// plugin's policy the moment a config mentioned proxies at all.
+    pub fn take_proxy_policies(&mut self) -> Vec<davimci_lua::ProxySetup> {
+        let mut found = Vec::new();
         self.take_startup(|r| match r {
             Request::Proxy(setup) => {
-                found = Some(setup);
+                found.push(setup);
                 None
             }
             other => Some(other),

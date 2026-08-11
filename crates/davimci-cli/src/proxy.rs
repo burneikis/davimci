@@ -15,11 +15,13 @@
 //! `proxies` plugin is the standing opinion.
 
 use std::borrow::Cow;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use davimci_analysis::{AnalysisCache, JobEvent, JobRunner, MediaInfo, ProxyMap, ProxyPolicy};
+use davimci_analysis::{
+    AnalysisCache, JobEvent, JobRunner, MediaInfo, Prober, ProxyMap, ProxyPolicy,
+};
 use davimci_app::{JobState, JobUpdate};
 use davimci_core::{Timeline, TimelineProps};
 
@@ -47,7 +49,13 @@ pub struct Proxies {
     /// it, so a second import of the same media joins the first job instead
     /// of starting one.
     encoding: BTreeMap<u64, String>,
+    /// Encodes waiting for a slot, oldest first.
+    queued: VecDeque<(String, Option<MediaInfo>, TimelineProps)>,
 }
+
+/// How many proxies encode at once. Two keeps a core or two for the editor
+/// itself; the rest wait rather than fighting the preview for the machine.
+const MAX_CONCURRENT_ENCODES: usize = 2;
 
 impl std::fmt::Debug for Proxies {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -71,6 +79,7 @@ impl Proxies {
             map: ProxyMap::default(),
             updates: Vec::new(),
             encoding: BTreeMap::new(),
+            queued: VecDeque::new(),
         }
     }
 
@@ -81,6 +90,7 @@ impl Proxies {
         if !policy.auto {
             self.runner.cancel_all();
             self.encoding.clear();
+            self.queued.clear();
         }
         self.policy = policy;
     }
@@ -101,6 +111,7 @@ impl Proxies {
         } else {
             self.runner.cancel_all();
             self.encoding.clear();
+            self.queued.clear();
             "proxy off".into()
         }
     }
@@ -121,17 +132,75 @@ impl Proxies {
         if !self.policy.needs_proxy(info.video()?) {
             return None;
         }
-        if self.encoding.values().any(|s| *s == info.path) {
+        self.enqueue(info.path.clone(), Some(info.clone()), props)
+    }
+
+    /// Queue the proxy a source the project *already* references needs.
+    ///
+    /// A proxy is queued on import, but a project opened a second time
+    /// imports nothing: its media is already on the timeline. Without this,
+    /// a session whose encode was interrupted - or which was authored before
+    /// the policy said so - never gets the proxy it is entitled to.
+    ///
+    /// The file is probed on the worker, not here: opening a project must
+    /// not stall on one `ffprobe` per clip.
+    pub fn queue_for_source(&mut self, source: &str, props: TimelineProps) -> Option<String> {
+        if !self.policy.auto || self.map.proxy_for(source).is_some() {
             return None;
         }
-        let name = file_name(&info.path);
+        self.enqueue(source.to_string(), None, props)
+    }
+
+    /// Start an encode, or hold it until one of the running ones is done.
+    ///
+    /// `info` is what a probe already found, so an import does not pay for a
+    /// second one; a sweep of an open project passes `None` and the worker
+    /// probes.
+    fn enqueue(
+        &mut self,
+        source: String,
+        info: Option<MediaInfo>,
+        props: TimelineProps,
+    ) -> Option<String> {
+        if self.encoding.values().any(|s| *s == source)
+            || self.queued.iter().any(|(s, _, _)| *s == source)
+        {
+            return None;
+        }
+        let label = format!("encoding a proxy for {}", file_name(&source));
+        // Encodes are the heaviest thing davimci runs. Opening a project of
+        // fifty heavy sources must not start fifty ffmpegs and leave the
+        // machine unable to play back what it is editing.
+        if self.encoding.len() >= MAX_CONCURRENT_ENCODES {
+            self.queued.push_back((source, info, props));
+            return Some(label);
+        }
+        self.spawn(source, info, props, label.clone());
+        Some(label)
+    }
+
+    fn spawn(
+        &mut self,
+        source: String,
+        info: Option<MediaInfo>,
+        props: TimelineProps,
+        label: String,
+    ) {
         let inbox = Arc::clone(&self.inbox);
         let policy = self.policy.clone();
         let root = self.cache.root().to_path_buf();
-        let info = info.clone();
-        let label = format!("encoding a proxy for {name}");
-        let source = info.path.clone();
-        let id = self.runner.spawn(label.clone(), move |ctx| {
+        let path = source.clone();
+        let id = self.runner.spawn(label, move |ctx| {
+            let info = match info {
+                Some(info) => info,
+                None => davimci_analysis::FfprobeProber.probe(Path::new(&path))?,
+            };
+            // The policy is re-read here because a swept source has not been
+            // judged yet: only an import knows its streams up front.
+            let qualifies = info.video().is_some_and(|video| policy.needs_proxy(video));
+            if !qualifies {
+                return Ok(());
+            }
             let conformed = davimci_analysis::conform::conform(
                 &info,
                 props,
@@ -168,7 +237,6 @@ impl Proxies {
             Ok(())
         });
         self.encoding.insert(id.0, source);
-        Some(label)
     }
 
     fn adopt(&mut self, ready: &Ready) {
@@ -186,6 +254,11 @@ impl Proxies {
                 }
                 _ if event.is_terminal() => {
                     self.encoding.remove(&id);
+                    // A slot came free; whatever was waiting for it starts.
+                    if let Some((source, info, props)) = self.queued.pop_front() {
+                        let label = format!("encoding a proxy for {}", file_name(&source));
+                        self.spawn(source, info, props, label);
+                    }
                     self.updates.push(JobUpdate::Finished {
                         id,
                         state: terminal_state(&event),
@@ -264,6 +337,7 @@ impl Proxies {
     pub fn cancel_all(&mut self) {
         self.runner.cancel_all();
         self.encoding.clear();
+        self.queued.clear();
     }
 }
 

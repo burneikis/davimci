@@ -13,8 +13,8 @@
 
 use davimci_analysis::{FfprobeProber, ImportOptions, Placement, Prober};
 use davimci_app::{
-    AppError, Host, JobState, JobUpdate, Message, PluginEffects, Thumbnail, ThumbnailRequest,
-    Waveform,
+    AppError, Host, JobList, JobState, JobUpdate, Message, PluginEffects, Thumbnail,
+    ThumbnailRequest, Waveform,
 };
 use davimci_backend::{DecodePolicy, PreviewScale, RenderBackend};
 use davimci_cmd::{EditCommand, Session};
@@ -68,6 +68,12 @@ pub struct Editor {
     proxies_landed: usize,
     /// Job updates waiting for the app to collect on the next tick.
     job_updates: Vec<JobUpdate>,
+    /// Whether the open media still has to be offered to the proxy policy.
+    proxy_sweep_pending: bool,
+    /// The same updates, kept so `:jobs` can answer. The status line shows
+    /// one job at a time; a session that imported six files is entitled to
+    /// know what the other five are doing.
+    job_list: JobList,
     /// Envelopes finished since the app last collected them.
     pending_waveforms: Vec<(TrackId, Waveform)>,
     /// Thumbnails decoded since the app last collected them.
@@ -179,6 +185,8 @@ impl Editor {
             notices: Vec::new(),
             exporter: Exporter::new(),
             job_updates: Vec::new(),
+            job_list: JobList::default(),
+            proxy_sweep_pending: true,
             pending_waveforms: Vec::new(),
             pending_thumbnails: Vec::new(),
             thumbnail_queue: None,
@@ -228,6 +236,34 @@ impl Editor {
         self
     }
 
+    /// Queue the proxies a project's own media needs.
+    ///
+    /// Importing is not the only way media arrives: a project opened again
+    /// has imported nothing, so without this a source whose encode never
+    /// finished - or which predates the policy - would wait for a re-import
+    /// that never comes.
+    fn queue_proxies_for(&mut self, session: &Session) {
+        if !self.proxies.enabled() {
+            return;
+        }
+        self.proxy_sweep_pending = false;
+        let props = session.timeline().props;
+        let mut seen = std::collections::BTreeSet::new();
+        let sources: Vec<String> = session
+            .timeline()
+            .tracks()
+            .iter()
+            .flat_map(davimci_core::Track::clips)
+            .filter_map(|clip| clip.media.as_ref())
+            .filter(|media| !media.offline)
+            .map(|media| media.path.clone())
+            .filter(|path| seen.insert(path.clone()))
+            .collect();
+        for source in sources {
+            self.proxies.queue_for_source(&source, props);
+        }
+    }
+
     /// Put the project-local config to the user, in the frontend.
     ///
     /// The file is untouched until the answer comes back through
@@ -255,7 +291,7 @@ impl Editor {
                 )));
             }
         }
-        if let Some(setup) = self.plugins.take_proxy_policy() {
+        for setup in self.plugins.take_proxy_policies() {
             self.apply_proxy_policy(setup);
         }
         // A plugin that reads hops must have asked before the first
@@ -383,6 +419,27 @@ impl Editor {
             ExCommand::CheckHealth => Some(Ok(self.plugins.health().join("  |  "))),
             _ => None,
         }
+    }
+
+    /// `:jobs` - every background job and how far along it is.
+    fn jobs_command(&self, cmd: &ExCommand) -> Option<Result<String, CliError>> {
+        if !matches!(cmd, ExCommand::Jobs) {
+            return None;
+        }
+        let all = self.job_list.all();
+        if all.is_empty() {
+            return Some(Ok("nothing is running".into()));
+        }
+        let line = |j: &davimci_app::Job| {
+            let state = match j.state {
+                JobState::Running => format!("{}%", j.percent()),
+                JobState::Done => "done".into(),
+                JobState::Cancelled => "cancelled".into(),
+                JobState::Failed => "failed".into(),
+            };
+            format!("{} {state}", j.label)
+        };
+        Some(Ok(all.iter().map(line).collect::<Vec<_>>().join("  |  ")))
     }
 
     /// Run an export command. Split out from [`Editor::command`] because
@@ -594,6 +651,9 @@ impl Editor {
             policy.max_native_bit_depth = depth;
         }
         self.proxies.set_policy(policy);
+        // A policy that has only now been stated has never been applied to
+        // the media already open.
+        self.proxy_sweep_pending = true;
     }
 
     /// Run a bundled plugin by name, as a project's contents do when they
@@ -614,6 +674,12 @@ impl Editor {
     #[must_use]
     pub fn proxies_enabled(&self) -> bool {
         self.proxies.enabled()
+    }
+
+    /// The encoder proxies are made with, for tests and `:checkhealth`.
+    #[must_use]
+    pub fn proxy_codec(&self) -> String {
+        self.proxies.policy().codec
     }
 
     /// Whether anything has asked this session to measure loudness. Nothing
@@ -1036,7 +1102,11 @@ impl Editor {
     /// A timeline the app should adopt (`:e`, `:bn`, `:b <n>` switched
     /// buffers), if any.
     pub fn take_session_swap(&mut self) -> Option<Session> {
-        self.swap.take()
+        let swapped = self.swap.take()?;
+        // A different buffer is a different set of sources: `:e project` is
+        // as much an arrival of media as an import is.
+        self.proxy_sweep_pending = true;
+        Some(swapped)
     }
 
     /// Stop everything the session started, before the frontend closes.
@@ -1628,7 +1698,11 @@ impl Host for Editor {
     }
 
     fn jobs(&mut self) -> Vec<JobUpdate> {
-        std::mem::take(&mut self.job_updates)
+        let updates = std::mem::take(&mut self.job_updates);
+        for update in &updates {
+            self.job_list.apply(update.clone());
+        }
+        updates
     }
 
     fn take_confirms(&mut self) -> Vec<davimci_app::Confirm> {
@@ -1777,6 +1851,7 @@ impl Host for Editor {
         if let Ok(cmd) = crate::excmd::parse(line)
             && let Some(result) = self
                 .plugin_command(&cmd)
+                .or_else(|| self.jobs_command(&cmd))
                 .or_else(|| self.export_command(&cmd, session))
                 .or_else(|| self.audio_command(&cmd, session, selection))
         {
@@ -1940,6 +2015,13 @@ impl Host for Editor {
             session,
             self.scale,
         );
+        // The sweep waits for the tick because the policy arrives from Lua:
+        // at construction the bundled plugin has not stated it yet, and a
+        // sweep against a disabled policy would find nothing.
+        if self.proxy_sweep_pending {
+            let snapshot = session.clone();
+            self.queue_proxies_for(&snapshot);
+        }
         self.poll_export();
         // Analysis finishes on its own thread; this is where its results
         // cross back onto the editor's.
@@ -1987,6 +2069,8 @@ impl Host for Editor {
         // gain or fade change invalidates what was measured before it
         //.
         self.analyser.sync(session.timeline());
+        // So does proxying: media can arrive by any edit, not just import.
+        self.proxy_sweep_pending = true;
     }
 
     fn playhead_moved(&mut self, session: &Session) {
