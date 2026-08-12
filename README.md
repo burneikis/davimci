@@ -69,37 +69,36 @@ cargo build -p davimci-cli --features tui    # optional terminal frontend
 cargo run -p davimci-cli --features tui -- --tui path/to/video.mkv
 ```
 
-<!-- THIS NEEDS REVISING -->
-<!-- Seeing the timeline is core, so every build ships a frontend that can show -->
-<!-- one; which one is the build's choice. A build with neither `window` nor `tui` -->
-<!-- is refused at compile time unless it asks for `--features driver-only`, the -->
-<!-- scripted driver the tests and batch exports run through. `just weigh` prints -->
-<!-- what each profile links, against its budget. -->
+Every build ships a frontend that can draw the timeline; which one is up to
+the build. `window` (GUI) and `tui` (terminal) are the two choices, and a build
+with neither fails at compile time unless it opts into `--features driver-only`,
+the scripted frontend used by the tests and batch exports.
+
+`just weigh` prints what each profile links, against its budget.
 
 ## Hardware acceleration
 
-<!-- CLEAN THIS UP TOO -->
-<!-- Optional, off by default, and never required: davimci runs fully on the CPU, -->
-<!-- which is the path every test asserts against. Three runtime switches turn the -->
-<!-- fast paths on, and each falls back to software with a sentence saying why -->
-<!-- rather than failing. -->
-<!---->
-<!-- ``` -->
-<!-- :set decode cpu|auto   # VAAPI decode for long-GOP sources that benefit -->
-<!-- :set encode cpu|auto   # a hardware encoder where it meets the export preset -->
-<!-- :set proxy on|off      # proxy media for qualifying imports -->
-<!-- ``` -->
-<!---->
-<!-- A window with a `wgpu` device uploads the decoder's YUV planes and converts -->
-<!-- them in a shader, which is three eighths of the bytes of an RGBA upload and -->
-<!-- no CPU colour conversion; a machine without one composites on the CPU and -->
-<!-- looks identical. An export preset may demand hardware with `hardware = true`, -->
-<!-- in which case an export that cannot deliver it is refused rather than -->
-<!-- silently encoded in software. -->
-<!---->
-<!-- None of this is what makes a build heavy: the shader adds no dependency the -->
-<!-- window did not already pull in, and the decode and encode switches are -->
-<!-- runtime choices inside MLT. See `docs/plugins.md` for the weight budgets. -->
+Optional and off by default. davimci runs fully on the CPU, and that is the
+path every test asserts against. Three runtime switches enable the fast paths,
+and each falls back to software with an explanation rather than failing:
+
+```
+:set decode cpu|auto   # VAAPI decode for long-GOP sources that benefit
+:set encode cpu|auto   # hardware encoder, when it meets the export preset
+:set proxy on|off      # proxy media for qualifying imports
+```
+
+With a `wgpu` device, the window uploads the decoder's YUV planes and converts
+them in a shader: three eighths of the bytes of an RGBA upload, and no CPU
+colour conversion. Without one, compositing happens on the CPU and looks
+identical.
+
+An export preset may require hardware with `hardware = true`; an export that
+cannot deliver it is refused rather than silently encoded in software.
+
+None of this adds build weight: the shader pulls in no dependency the window
+did not already need, and the decode and encode switches are runtime choices
+inside MLT. See [`docs/plugins.md`](docs/plugins.md) for the weight budgets.
 
 ## Testing
 
