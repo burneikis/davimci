@@ -166,7 +166,8 @@ impl Track {
             .max(short(clip.head_handle().unwrap_or(u64::MAX), head));
         if missing > 0 {
             return reject(format!(
-                "not enough handle frames for a {}-frame transition (short by {missing})",
+                "not enough handle frames for a {}-frame transition (short by {missing}) - \
+                 trim the clips back so the overlap has media to borrow",
                 t.duration.get()
             ));
         }

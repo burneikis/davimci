@@ -1718,7 +1718,7 @@ impl Host for Editor {
     ) -> Result<Option<String>, AppError> {
         self.import_picked(path, intent, session)
             .map(Some)
-            .map_err(|e| AppError::UnhandledCommand(e.to_string()))
+            .map_err(|e| AppError::CommandFailed(e.to_string()))
     }
 
     fn jobs(&mut self) -> Vec<JobUpdate> {
@@ -1881,7 +1881,7 @@ impl Host for Editor {
         {
             return match result {
                 Ok(msg) => Ok(Some(msg)),
-                Err(e) => Err(AppError::UnhandledCommand(e.to_string())),
+                Err(e) => Err(AppError::CommandFailed(e.to_string())),
             };
         }
         // The app holds the live session; give it to the workspace so the
@@ -1914,7 +1914,7 @@ impl Host for Editor {
                 self.quit = true;
                 Ok(Some("closed the last timeline".into()))
             }
-            Err(e) => Err(AppError::UnhandledCommand(e.to_string())),
+            Err(e) => Err(AppError::CommandFailed(e.to_string())),
         }
     }
 

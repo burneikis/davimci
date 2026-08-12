@@ -14,4 +14,9 @@ pub enum AppError {
     /// (`davimci-cli`) owns the ex-command vocabulary.
     #[error("Command not handled by the editor core: {0}.")]
     UnhandledCommand(String),
+    /// A command the host understood and rejected. Its message is already a
+    /// finished user-facing sentence, so it is passed through unchanged -
+    /// prefixing it would blame the vocabulary for a refusal.
+    #[error("{0}")]
+    CommandFailed(String),
 }
