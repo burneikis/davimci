@@ -172,7 +172,15 @@ pub fn plan(
             .target
             .filter(|id| !taken.contains(id) && tl.track(*id).is_some_and(|t| t.kind == kind));
         let requested = requested.and_then(|id| tl.track(id).map(|t| (id, t.name.clone())));
-        let existing = requested.or_else(|| reusable(tl, kind, &taken));
+        let existing = requested.or_else(|| {
+            reusable(
+                tl,
+                kind,
+                &taken,
+                opts.at,
+                opts.at.saturating_add(conformed.length),
+            )
+        });
         let (track, track_name, add) = match existing {
             Some((id, name)) => (id, name, None),
             None => new_track(kind, TrackId(next()?), &mut names),
@@ -260,13 +268,23 @@ fn track_kind(kind: StreamKind) -> TrackKind {
     }
 }
 
-/// An empty track of the right kind that this import has not already used.
-/// Importing into a fresh project should fill `V1` and `A1`, not leave them
-/// stranded above the new tracks.
-fn reusable(tl: &Timeline, kind: TrackKind, taken: &[TrackId]) -> Option<(TrackId, String)> {
+/// A track of the right kind with room for this import, which this import
+/// has not already used.
+///
+/// Room, not emptiness: a second file appended after the first belongs on the
+/// tracks the first one is on, so a session of appends stays on `V1`/`A1`
+/// instead of growing a new track per import. A track already occupied where
+/// the media would land is not reusable, and the import gets a fresh one.
+fn reusable(
+    tl: &Timeline,
+    kind: TrackKind,
+    taken: &[TrackId],
+    start: Frame,
+    end: Frame,
+) -> Option<(TrackId, String)> {
     tl.tracks()
         .iter()
-        .find(|t| t.kind == kind && t.is_empty() && !taken.contains(&t.id))
+        .find(|t| t.kind == kind && !taken.contains(&t.id) && t.range_is_free(start, end, None))
         .map(|t| (t.id, t.name.clone()))
 }
 
@@ -417,6 +435,52 @@ mod tests {
             assert_eq!(t.name, m.track_name);
             assert_eq!(t.clips().len(), m.clips, "{} clip count", m.track_name);
         }
+        s.timeline().assert_invariants();
+    }
+
+    /// Appending a second file after the first must land on the same tracks:
+    /// a track occupied earlier still has room at the append point.
+    #[test]
+    fn a_second_import_past_the_first_reuses_its_tracks() {
+        let mut s = session();
+        let first = import(&mut s, &multitrack(), &ImportOptions::default()).unwrap();
+
+        let opts = ImportOptions {
+            at: first.length,
+            ..ImportOptions::default()
+        };
+        let second = import(&mut s, &multitrack(), &opts).unwrap();
+
+        let names: Vec<&str> = second
+            .mapping
+            .iter()
+            .map(|m| m.track_name.as_str())
+            .collect();
+        assert_eq!(names, vec!["V1", "A1", "A2", "A3", "T1", "T2"]);
+        for t in s.timeline().tracks() {
+            if t.kind != davimci_core::TrackKind::Text {
+                assert_eq!(t.clips().len(), 2, "{} clip count", t.name);
+            }
+        }
+        s.timeline().assert_invariants();
+    }
+
+    /// A second import *over* the first has no room, so it gets fresh tracks
+    /// rather than overwriting what is there.
+    #[test]
+    fn an_overlapping_import_still_gets_new_tracks() {
+        let mut s = session();
+        import(&mut s, &multitrack(), &ImportOptions::default()).unwrap();
+        let second = import(&mut s, &multitrack(), &ImportOptions::default()).unwrap();
+
+        let names: Vec<&str> = second
+            .mapping
+            .iter()
+            .map(|m| m.track_name.as_str())
+            .collect();
+        // The subtitle streams carry no cues here, so their tracks stay
+        // empty and are reusable.
+        assert_eq!(names, vec!["V2", "A4", "A5", "A6", "T1", "T2"]);
         s.timeline().assert_invariants();
     }
 
