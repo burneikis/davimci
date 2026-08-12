@@ -1218,3 +1218,26 @@ fn checkhealth_reports_the_api_and_every_plugin_it_knows_of() {
     );
     assert!(said.contains("which-key") && said.contains("off"), "{said}");
 }
+
+/// Regression: a config `editor.set` parked the state the app owns, but only
+/// the `:` line drained it, so `centerfollow` (and `visualstart`) from
+/// `init.lua` were silently ignored while the same `:set` typed by hand worked.
+#[test]
+fn a_config_set_of_an_app_owned_property_reaches_the_app() {
+    let config = Scratch::with_config(
+        "config-set",
+        &[(
+            "init.lua",
+            r#"require("davimci.editor").set("centerfollow", "on")"#,
+        )],
+    );
+    let (mut app, mut editor, notices) = editor_with(&config);
+    assert!(notices.is_empty(), "{notices:?}");
+
+    // The request is queued by the config and collected on the first tick.
+    app.event(Event::Tick, &mut editor);
+    assert!(
+        app.center_follow(),
+        "a config `editor.set(\"centerfollow\", \"on\")` never reached the app"
+    );
+}

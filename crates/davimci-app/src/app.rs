@@ -810,12 +810,7 @@ impl App {
             Ok(None) => {}
             Err(e) => self.fail(e.to_string()),
         }
-        if let Some(start) = host.take_visual_start() {
-            self.engine.set_visual_start(start);
-        }
-        if let Some(on) = host.take_center_follow() {
-            self.set_center_follow(on);
-        }
+        self.drain_host_settings(host);
         // A `:` line can edit (`:relink`) or swap the whole timeline
         // (`:e`, `:bn`), so the graph and the playhead are both
         // assumed stale rather than diffed.
@@ -1056,6 +1051,23 @@ impl App {
             if let Err(e) = self.panels.apply(op) {
                 self.fail(e);
             }
+        }
+        // A plugin `editor.set` is routed as the `:` line it stands for, so it
+        // parks the same state a typed `:set` does and has to be collected on
+        // this path too - config would otherwise be silently ignored.
+        self.drain_host_settings(host);
+    }
+
+    /// Collect the `:set` state the host parsed but the app owns.
+    ///
+    /// Both the `:` line and a plugin request reach the same registry, so both
+    /// have to drain it or a setting applies on one path only.
+    fn drain_host_settings(&mut self, host: &mut dyn Host) {
+        if let Some(start) = host.take_visual_start() {
+            self.engine.set_visual_start(start);
+        }
+        if let Some(on) = host.take_center_follow() {
+            self.set_center_follow(on);
         }
     }
 
