@@ -78,27 +78,28 @@ cargo run -p davimci-cli --features tui -- --tui path/to/video.mkv
 
 ## Hardware acceleration
 
-Optional, off by default, and never required: davimci runs fully on the CPU,
-which is the path every test asserts against. Three runtime switches turn the
-fast paths on, and each falls back to software with a sentence saying why
-rather than failing.
-
-```
-:set decode cpu|auto   # VAAPI decode for long-GOP sources that benefit
-:set encode cpu|auto   # a hardware encoder where it meets the export preset
-:set proxy on|off      # proxy media for qualifying imports
-```
-
-A window with a `wgpu` device uploads the decoder's YUV planes and converts
-them in a shader, which is three eighths of the bytes of an RGBA upload and
-no CPU colour conversion; a machine without one composites on the CPU and
-looks identical. An export preset may demand hardware with `hardware = true`,
-in which case an export that cannot deliver it is refused rather than
-silently encoded in software.
-
-None of this is what makes a build heavy: the shader adds no dependency the
-window did not already pull in, and the decode and encode switches are
-runtime choices inside MLT. See `docs/plugins.md` for the weight budgets.
+<!-- CLEAN THIS UP TOO -->
+<!-- Optional, off by default, and never required: davimci runs fully on the CPU, -->
+<!-- which is the path every test asserts against. Three runtime switches turn the -->
+<!-- fast paths on, and each falls back to software with a sentence saying why -->
+<!-- rather than failing. -->
+<!---->
+<!-- ``` -->
+<!-- :set decode cpu|auto   # VAAPI decode for long-GOP sources that benefit -->
+<!-- :set encode cpu|auto   # a hardware encoder where it meets the export preset -->
+<!-- :set proxy on|off      # proxy media for qualifying imports -->
+<!-- ``` -->
+<!---->
+<!-- A window with a `wgpu` device uploads the decoder's YUV planes and converts -->
+<!-- them in a shader, which is three eighths of the bytes of an RGBA upload and -->
+<!-- no CPU colour conversion; a machine without one composites on the CPU and -->
+<!-- looks identical. An export preset may demand hardware with `hardware = true`, -->
+<!-- in which case an export that cannot deliver it is refused rather than -->
+<!-- silently encoded in software. -->
+<!---->
+<!-- None of this is what makes a build heavy: the shader adds no dependency the -->
+<!-- window did not already pull in, and the decode and encode switches are -->
+<!-- runtime choices inside MLT. See `docs/plugins.md` for the weight budgets. -->
 
 ## Testing
 
