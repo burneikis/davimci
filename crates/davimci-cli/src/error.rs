@@ -49,6 +49,9 @@ pub enum CliError {
     #[error("there is no track named {0} in this timeline")]
     NoSuchTrack(String),
 
+    #[error("track {name} is already at the {edge} of the stack")]
+    TrackAtEdge { name: String, edge: &'static str },
+
     #[error("the focused track is not a text track; :track text makes one")]
     NotATextTrack,
 
@@ -133,6 +136,7 @@ impl Classify for CliError {
             | Self::NothingToReplace
             | Self::NoClipUnderPlayhead(_)
             | Self::NoSuchTrack(_)
+            | Self::TrackAtEdge { .. }
             | Self::NotATextTrack
             | Self::UnknownProperty(_)
             | Self::BadPropertyValue { .. }

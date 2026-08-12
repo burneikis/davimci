@@ -83,6 +83,9 @@ pub enum CoreError {
     #[error("track {0} still has clips on it")]
     TrackNotEmpty(String),
 
+    #[error("there is no track position {index}: the timeline has {count}")]
+    TrackIndexOutOfRange { index: usize, count: usize },
+
     #[error("invalid clip property: {reason}")]
     InvalidProps { reason: String },
 
@@ -133,6 +136,7 @@ impl Classify for CoreError {
             | Self::DuplicateClip(_)
             | Self::DuplicateTrack(_)
             | Self::TrackNotEmpty(_)
+            | Self::TrackIndexOutOfRange { .. }
             | Self::InvalidProps { .. }
             | Self::InvalidRange { .. }
             | Self::ZeroDuration

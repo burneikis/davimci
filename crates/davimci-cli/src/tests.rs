@@ -122,6 +122,19 @@ fn the_ex_grammar_covers_the_spec_12_table() {
             },
         ),
         (":track!", ExCommand::RemoveTrack),
+        (
+            ":track move up",
+            ExCommand::MoveTrack(crate::excmd::TrackMove::Up),
+        ),
+        (
+            ":track move bottom",
+            ExCommand::MoveTrack(crate::excmd::TrackMove::Bottom),
+        ),
+        // Positions the user types are one-based.
+        (
+            ":track move 2",
+            ExCommand::MoveTrack(crate::excmd::TrackMove::To(1)),
+        ),
         // A cue is a sentence, so it is the rest of the line, spaces and all.
         (
             ":text and then he said hello",
@@ -161,6 +174,9 @@ fn unknown_and_misused_commands_are_user_errors_with_a_sentence() {
         ":relink",
         ":track",
         ":track nonsense",
+        ":track move",
+        ":track move sideways",
+        ":track move 0",
         ":text",
     ] {
         let err = parse(line).unwrap_err();
@@ -1078,6 +1094,33 @@ fn only_an_empty_track_can_be_removed() {
         ExOutcome::Message("removed track T1".into())
     );
     assert!(ws.current().timeline().track(t1).is_none());
+}
+
+/// `:track move` reorders the stack without touching a clip, and refuses to
+/// walk off either end rather than quietly doing nothing.
+#[test]
+fn tracks_can_be_reordered_and_the_move_stops_at_the_ends() {
+    let dir = Scratch::new("movetrack");
+    let mut ws = Workspace::new(dir.path()).without_autosave();
+    seeded(
+        &mut ws,
+        fixture(&[("V1", &[(0, 300, "a")]), ("A1", &[(0, 300, "b")])]),
+    );
+    let v1 = davimci_core::testing::track_id(ws.current().timeline(), "V1");
+    ws.with_session(|s| s.set_playhead(davimci_core::Frame::ZERO, v1))
+        .unwrap();
+
+    let err = ws.run("track move up", OnRecovery::Discard).unwrap_err();
+    assert_eq!(err.class(), ErrorClass::User);
+    assert!(!err.user_message().is_empty());
+
+    ws.run("track move down", OnRecovery::Discard).unwrap();
+    let tl = ws.current().timeline();
+    assert_eq!(tl.tracks()[1].id, v1);
+    assert_eq!(
+        tl.track(v1).unwrap().clips()[0].start,
+        davimci_core::Frame::ZERO
+    );
 }
 
 #[test]

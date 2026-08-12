@@ -51,6 +51,8 @@ pub enum ExCommand {
     },
     /// `:track! ` - remove the focused track, which must be empty.
     RemoveTrack,
+    /// `:track move up|down|top|bottom|<n>` - reorder the track stack.
+    MoveTrack(TrackMove),
     /// `:text <text>` - a cue at the playhead on the focused text track,
     /// which is a subtitle when the track is one. A track the media did not
     /// bring has no cues to edit until something makes one, and `i` edits a
@@ -252,9 +254,23 @@ pub fn parse(line: &str) -> Result<ExCommand, CliError> {
 /// `:track <kind> [name]`. The kind is spelled as the lanes are labelled -
 /// `V`, `A`, `T`, `O` - or in full, so it reads the same as what the user
 /// sees on screen.
+/// Where `:track move` puts the focused track. Positions are one-based for
+/// the user and turned into indices at exec time, where the stack is known.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrackMove {
+    Up,
+    Down,
+    Top,
+    Bottom,
+    To(usize),
+}
+
 fn parse_track(line: &Line<'_>) -> Result<ExCommand, CliError> {
     use davimci_core::TrackKind;
-    const USAGE: &str = "<video|audio|text|overlay> [name]";
+    const USAGE: &str = "<video|audio|text|overlay> [name] | move up|down|top|bottom|<n>";
+    if let ["move", rest @ ..] = line.args.as_slice() {
+        return parse_track_move(line, rest);
+    }
     let (kind, name) = match line.args.as_slice() {
         [kind] => (*kind, None),
         [kind, name] => (*kind, Some((*name).to_string())),
@@ -268,6 +284,25 @@ fn parse_track(line: &Line<'_>) -> Result<ExCommand, CliError> {
         _ => return Err(line.usage(USAGE)),
     };
     Ok(ExCommand::AddTrack { kind, name })
+}
+
+fn parse_track_move(line: &Line<'_>, args: &[&str]) -> Result<ExCommand, CliError> {
+    const USAGE: &str = "move up|down|top|bottom|<n>";
+    let [what] = args else {
+        return Err(line.usage(USAGE));
+    };
+    let mv = match what.to_ascii_lowercase().as_str() {
+        "up" | "k" => TrackMove::Up,
+        "down" | "j" => TrackMove::Down,
+        "top" => TrackMove::Top,
+        "bottom" => TrackMove::Bottom,
+        // One-based, like every other position a user types.
+        n => match n.parse::<usize>() {
+            Ok(n) if n >= 1 => TrackMove::To(n - 1),
+            _ => return Err(line.usage(USAGE)),
+        },
+    };
+    Ok(ExCommand::MoveTrack(mv))
 }
 
 /// `--preset <name>` is a trailing flag, so the path before it may contain
@@ -592,6 +627,7 @@ impl Workspace {
             ExCommand::Relink { old, new } => self.relink(old.as_deref(), new),
             ExCommand::AddTrack { kind, name } => self.add_track(*kind, name.clone()),
             ExCommand::RemoveTrack => self.remove_track(),
+            ExCommand::MoveTrack(mv) => self.move_track(*mv),
             ExCommand::Text(text) => self.text_cue(text),
             ExCommand::Group => self.group(),
             ExCommand::Ungroup => self.ungroup(),
@@ -901,6 +937,39 @@ impl Workspace {
         let name = tl.track(track).map_or_else(String::new, |t| t.name.clone());
         self.exec(&EditCommand::RemoveTrack { track })?;
         Ok(ExOutcome::msg(format!("removed track {name}")))
+    }
+
+    /// `:track move ...`: reorder the stack. Refusing a move off either end
+    /// rather than clamping keeps a repeated `up` from silently doing
+    /// nothing when the track has already arrived.
+    fn move_track(&mut self, mv: TrackMove) -> Result<ExOutcome, CliError> {
+        let tl = self.current().timeline();
+        let track = tl.playhead().track;
+        let tracks = tl.tracks();
+        let last = tracks.len().saturating_sub(1);
+        let (from, name) = tracks
+            .iter()
+            .position(|t| t.id == track)
+            .map(|i| (i, tracks[i].name.clone()))
+            .ok_or_else(|| CliError::NoSuchTrack(track.to_string()))?;
+        let to = match mv {
+            TrackMove::Up | TrackMove::Top if from == 0 => {
+                return Err(CliError::TrackAtEdge { name, edge: "top" });
+            }
+            TrackMove::Down | TrackMove::Bottom if from == last => {
+                return Err(CliError::TrackAtEdge {
+                    name,
+                    edge: "bottom",
+                });
+            }
+            TrackMove::Up => from - 1,
+            TrackMove::Down => from + 1,
+            TrackMove::Top => 0,
+            TrackMove::Bottom => last,
+            TrackMove::To(n) => n,
+        };
+        self.exec(&EditCommand::MoveTrack { track, to })?;
+        Ok(ExOutcome::msg(format!("moved track {name} to {}", to + 1)))
     }
 
     /// `:text <text>`: a cue at the playhead, pushing later cues right so

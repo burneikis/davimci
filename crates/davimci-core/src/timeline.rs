@@ -174,6 +174,30 @@ impl Timeline {
         Ok((name, kind))
     }
 
+    /// Move a track to `to` in the stack, returning the index it came from.
+    ///
+    /// Order is stacking order, not content: no clip changes track or frame,
+    /// so the move is always legal on a non-empty track. `to` is the index
+    /// the track ends up at once it has been taken out of the stack, which
+    /// makes the inverse a move back to the old index.
+    pub fn move_track(&mut self, id: TrackId, to: usize) -> Result<usize, CoreError> {
+        let from = self
+            .tracks
+            .iter()
+            .position(|t| t.id == id)
+            .ok_or_else(|| CoreError::NoSuchTrack(id.to_string()))?;
+        if to >= self.tracks.len() {
+            return Err(CoreError::TrackIndexOutOfRange {
+                index: to,
+                count: self.tracks.len(),
+            });
+        }
+        let track = self.tracks.remove(from);
+        self.tracks.insert(to, track);
+        self.settle();
+        Ok(from)
+    }
+
     #[must_use]
     pub fn track(&self, id: TrackId) -> Option<&Track> {
         self.tracks.iter().find(|t| t.id == id)

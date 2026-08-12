@@ -151,6 +151,9 @@ pub enum EditCommand {
     },
     /// Remove an empty track.
     RemoveTrack { track: TrackId },
+    /// Reorder the track stack (`:track move`). `to` is a position in the
+    /// stack, counted from the top; no clip moves in time.
+    MoveTrack { track: TrackId, to: usize },
     /// Change the timeline's framerate/resolution, retiming every clip
     ///. One undoable command, however many clips it moves.
     Reconform { props: TimelineProps },
@@ -220,6 +223,7 @@ pub const VARIANT_NAMES: &[&str] = &[
     "SetGroup",
     "AddTrack",
     "RemoveTrack",
+    "MoveTrack",
     "Reconform",
     "RestoreConform",
     "SetProps",
@@ -251,6 +255,7 @@ impl EditCommand {
             Self::SetGroup { .. } => "SetGroup",
             Self::AddTrack { .. } => "AddTrack",
             Self::RemoveTrack { .. } => "RemoveTrack",
+            Self::MoveTrack { .. } => "MoveTrack",
             Self::Reconform { .. } => "Reconform",
             Self::RestoreConform { .. } => "RestoreConform",
             Self::SetProps { .. } => "SetProps",
@@ -348,6 +353,7 @@ impl Command for EditCommand {
                 None => format!("add a {} track", kind.prefix()),
             },
             Self::RemoveTrack { track } => format!("remove track {track}"),
+            Self::MoveTrack { track, to } => format!("move track {track} to position {}", to + 1),
             Self::Reconform { props } => format!("conform the timeline to {props}"),
             Self::RestoreConform { state } => {
                 format!("conform the timeline back to {}", state.props)
@@ -549,6 +555,17 @@ impl Command for EditCommand {
 
             Self::AddTrack { kind, name, new_id } => {
                 apply_add_track(tl, *kind, name.clone(), *new_id)
+            }
+
+            Self::MoveTrack { track, to } => {
+                let from = tl.move_track(*track, *to)?;
+                Ok(Effect {
+                    applied: self.clone(),
+                    inverse: Self::MoveTrack {
+                        track: *track,
+                        to: from,
+                    },
+                })
             }
 
             Self::RemoveTrack { track } => {
@@ -1638,6 +1655,7 @@ mod tests {
                 clip,
                 text: "hello".into(),
             },
+            EditCommand::MoveTrack { track, to: 0 },
             EditCommand::SetTrackFlags {
                 track,
                 muted: true,
@@ -1674,6 +1692,54 @@ mod tests {
             assert!(seen.contains(name), "no sample command for {name}");
         }
         assert_eq!(seen.len(), VARIANT_NAMES.len());
+    }
+
+    #[test]
+    fn moving_a_track_reorders_the_stack_and_inverts() {
+        let mut tl = fixture(&[
+            ("V1", &[(0, 100, "a")]),
+            ("V2", &[(0, 50, "b")]),
+            ("A1", &[]),
+        ]);
+        let track = tl.track_by_name("V2").unwrap().id;
+        let from = tl.tracks().iter().position(|t| t.id == track).unwrap();
+        let effect = roundtrip(&mut tl, &EditCommand::MoveTrack { track, to: 0 });
+        assert_eq!(tl.tracks()[0].name, "V2");
+        assert_eq!(
+            effect.inverse,
+            EditCommand::MoveTrack { track, to: from },
+            "the inverse must send the track back where it came from"
+        );
+    }
+
+    #[test]
+    fn moving_a_track_past_the_stack_is_rejected() {
+        let mut tl = fixture(&[("V1", &[(0, 100, "a")]), ("A1", &[])]);
+        let before = json(&tl);
+        let track = tl.playhead().track;
+        let past_end = tl.tracks().len();
+        assert!(
+            EditCommand::MoveTrack {
+                track,
+                to: past_end
+            }
+            .apply(&mut tl)
+            .is_err()
+        );
+        assert_eq!(json(&tl), before, "a rejected move must not mutate");
+    }
+
+    #[test]
+    fn moving_a_track_keeps_clips_where_they_are() {
+        let mut tl = fixture(&[("V1", &[(0, 100, "a")]), ("V2", &[(10, 20, "b")])]);
+        let track = tl.track_by_name("V1").unwrap().id;
+        let last = tl.tracks().len() - 1;
+        EditCommand::MoveTrack { track, to: last }
+            .apply(&mut tl)
+            .unwrap();
+        let moved = tl.track(track).unwrap();
+        assert_eq!(moved.clips()[0].start, Frame(0));
+        assert_eq!(tl.tracks()[last].name, "V1");
     }
 
     #[test]
