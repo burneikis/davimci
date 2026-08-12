@@ -135,6 +135,10 @@ fn the_ex_grammar_covers_the_spec_12_table() {
             ":track move 2",
             ExCommand::MoveTrack(crate::excmd::TrackMove::To(1)),
         ),
+        (":track shift -30", ExCommand::ShiftTrack(-30)),
+        (":track shift +30", ExCommand::ShiftTrack(30)),
+        (":shift -30", ExCommand::ShiftClips(-30)),
+        (":move A1", ExCommand::MoveToTrack("A1".into())),
         // A cue is a sentence, so it is the rest of the line, spaces and all.
         (
             ":text and then he said hello",
@@ -177,6 +181,12 @@ fn unknown_and_misused_commands_are_user_errors_with_a_sentence() {
         ":track move",
         ":track move sideways",
         ":track move 0",
+        ":track shift",
+        ":track shift left",
+        ":track shift 0",
+        ":shift",
+        ":shift left",
+        ":move",
         ":text",
     ] {
         let err = parse(line).unwrap_err();
@@ -1121,6 +1131,72 @@ fn tracks_can_be_reordered_and_the_move_stops_at_the_ends() {
         tl.track(v1).unwrap().clips()[0].start,
         davimci_core::Frame::ZERO
     );
+}
+
+/// `:track shift` slides a whole track in time and is refused outright when
+/// it would take any clip before frame zero.
+#[test]
+fn tracks_can_be_shifted_in_time_and_never_past_frame_zero() {
+    let dir = Scratch::new("shifttrack");
+    let mut ws = Workspace::new(dir.path()).without_autosave();
+    seeded(
+        &mut ws,
+        fixture(&[("V1", &[(0, 300, "a")]), ("A1", &[(0, 300, "b")])]),
+    );
+    let v1 = davimci_core::testing::track_id(ws.current().timeline(), "V1");
+    let a1 = davimci_core::testing::track_id(ws.current().timeline(), "A1");
+    ws.with_session(|s| s.set_playhead(davimci_core::Frame::ZERO, v1))
+        .unwrap();
+
+    ws.run("track shift 12", OnRecovery::Discard).unwrap();
+    let tl = ws.current().timeline();
+    assert_eq!(
+        tl.track(v1).unwrap().clips()[0].start,
+        davimci_core::Frame(12)
+    );
+    assert_eq!(
+        tl.track(a1).unwrap().clips()[0].start,
+        davimci_core::Frame::ZERO
+    );
+
+    let err = ws.run("track shift -13", OnRecovery::Discard).unwrap_err();
+    assert_eq!(err.class(), ErrorClass::User);
+    assert_eq!(
+        ws.current().timeline().track(v1).unwrap().clips()[0].start,
+        davimci_core::Frame(12)
+    );
+}
+
+/// `:shift` and `:move` are the clip-level pair: the same slide over a
+/// smaller set, and the vertical move that keeps frames.
+#[test]
+fn clips_can_be_shifted_and_moved_between_tracks() {
+    let dir = Scratch::new("clipmove");
+    let mut ws = Workspace::new(dir.path()).without_autosave();
+    seeded(&mut ws, fixture(&[("V1", &[(0, 300, "a")]), ("V2", &[])]));
+    let v1 = davimci_core::testing::track_id(ws.current().timeline(), "V1");
+    let v2 = davimci_core::testing::track_id(ws.current().timeline(), "V2");
+    ws.with_session(|s| s.set_playhead(davimci_core::Frame(10), v1))
+        .unwrap();
+
+    ws.run("shift 5", OnRecovery::Discard).unwrap();
+    assert_eq!(
+        ws.current().timeline().track(v1).unwrap().clips()[0].start,
+        davimci_core::Frame(5)
+    );
+
+    ws.run("move V2", OnRecovery::Discard).unwrap();
+    let tl = ws.current().timeline();
+    assert!(tl.track(v1).unwrap().is_empty());
+    assert_eq!(
+        tl.track(v2).unwrap().clips()[0].start,
+        davimci_core::Frame(5),
+        "a vertical move must not change the time a clip sits at"
+    );
+
+    // A track that does not exist is a user error, not a panic.
+    let err = ws.run("move Z9", OnRecovery::Discard).unwrap_err();
+    assert_eq!(err.class(), ErrorClass::User);
 }
 
 #[test]

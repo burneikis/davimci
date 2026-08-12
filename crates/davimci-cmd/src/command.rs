@@ -154,6 +154,13 @@ pub enum EditCommand {
     /// Reorder the track stack (`:track move`). `to` is a position in the
     /// stack, counted from the top; no clip moves in time.
     MoveTrack { track: TrackId, to: usize },
+    /// Slide a set of clips along the timeline, spacing intact
+    /// (`:track shift`, and any selection-driven nudge). Clip-level, not
+    /// track-level: a whole track is just the set of every clip on it.
+    ShiftClips { clips: Vec<ClipId>, delta: i64 },
+    /// Move a set of clips to another track, keeping their frame positions.
+    /// The vertical counterpart of [`EditCommand::ShiftClips`].
+    MoveClipsToTrack { clips: Vec<ClipId>, track: TrackId },
     /// Change the timeline's framerate/resolution, retiming every clip
     ///. One undoable command, however many clips it moves.
     Reconform { props: TimelineProps },
@@ -224,6 +231,8 @@ pub const VARIANT_NAMES: &[&str] = &[
     "AddTrack",
     "RemoveTrack",
     "MoveTrack",
+    "ShiftClips",
+    "MoveClipsToTrack",
     "Reconform",
     "RestoreConform",
     "SetProps",
@@ -256,6 +265,8 @@ impl EditCommand {
             Self::AddTrack { .. } => "AddTrack",
             Self::RemoveTrack { .. } => "RemoveTrack",
             Self::MoveTrack { .. } => "MoveTrack",
+            Self::ShiftClips { .. } => "ShiftClips",
+            Self::MoveClipsToTrack { .. } => "MoveClipsToTrack",
             Self::Reconform { .. } => "Reconform",
             Self::RestoreConform { .. } => "RestoreConform",
             Self::SetProps { .. } => "SetProps",
@@ -354,6 +365,12 @@ impl Command for EditCommand {
             },
             Self::RemoveTrack { track } => format!("remove track {track}"),
             Self::MoveTrack { track, to } => format!("move track {track} to position {}", to + 1),
+            Self::ShiftClips { clips, delta } => {
+                format!("shift {} clips by {delta} frames", clips.len())
+            }
+            Self::MoveClipsToTrack { clips, track } => {
+                format!("move {} clips to {track}", clips.len())
+            }
             Self::Reconform { props } => format!("conform the timeline to {props}"),
             Self::RestoreConform { state } => {
                 format!("conform the timeline back to {}", state.props)
@@ -567,6 +584,19 @@ impl Command for EditCommand {
                     },
                 })
             }
+
+            Self::ShiftClips { clips, delta } => {
+                tl.shift_clips(clips, *delta)?;
+                Ok(Effect {
+                    applied: self.clone(),
+                    inverse: Self::ShiftClips {
+                        clips: clips.clone(),
+                        delta: delta.saturating_neg(),
+                    },
+                })
+            }
+
+            Self::MoveClipsToTrack { clips, track } => apply_move_clips_to_track(tl, clips, *track),
 
             Self::RemoveTrack { track } => {
                 let (name, kind) = tl.remove_track(*track)?;
@@ -819,6 +849,43 @@ fn apply_move_clip(
         },
     ])
     .apply(tl)
+}
+
+/// Moving clips is one command, but undoing it may not be: a set gathered
+/// from several tracks has to go back to the track each clip came from, so
+/// the inverse is one move per source track.
+fn apply_move_clips_to_track(
+    tl: &mut Timeline,
+    clips: &[ClipId],
+    track: TrackId,
+) -> Result<Effect, CmdError> {
+    let mut sources: Vec<(TrackId, Vec<ClipId>)> = Vec::new();
+    for &id in clips {
+        let (from, _) = tl
+            .find_clip(id)
+            .ok_or_else(|| CoreError::NoSuchClip(id.to_string()))?;
+        match sources.iter_mut().find(|(t, _)| *t == from) {
+            Some((_, ids)) => ids.push(id),
+            None => sources.push((from, vec![id])),
+        }
+    }
+    tl.move_clips_to_track(clips, track)?;
+    let mut back: Vec<EditCommand> = sources
+        .into_iter()
+        .map(|(from, clips)| EditCommand::MoveClipsToTrack { clips, track: from })
+        .collect();
+    let inverse = if back.len() == 1 {
+        back.remove(0)
+    } else {
+        EditCommand::Sequence(back)
+    };
+    Ok(Effect {
+        applied: EditCommand::MoveClipsToTrack {
+            clips: clips.to_vec(),
+            track,
+        },
+        inverse,
+    })
 }
 
 fn apply_link(
@@ -1656,6 +1723,14 @@ mod tests {
                 text: "hello".into(),
             },
             EditCommand::MoveTrack { track, to: 0 },
+            EditCommand::ShiftClips {
+                clips: vec![clip],
+                delta: -5,
+            },
+            EditCommand::MoveClipsToTrack {
+                clips: vec![clip],
+                track,
+            },
             EditCommand::SetTrackFlags {
                 track,
                 muted: true,
@@ -1740,6 +1815,106 @@ mod tests {
         let moved = tl.track(track).unwrap();
         assert_eq!(moved.clips()[0].start, Frame(0));
         assert_eq!(tl.tracks()[last].name, "V1");
+    }
+
+    fn ids_on(tl: &Timeline, name: &str) -> Vec<ClipId> {
+        tl.track_by_name(name)
+            .unwrap()
+            .clips()
+            .iter()
+            .map(|c| c.id)
+            .collect()
+    }
+
+    #[test]
+    fn shifting_clips_keeps_their_spacing_and_inverts() {
+        let mut tl = fixture(&[("V1", &[(0, 100, "a"), (150, 50, "b")])]);
+        let clips = ids_on(&tl, "V1");
+        let effect = roundtrip(
+            &mut tl,
+            &EditCommand::ShiftClips {
+                clips: clips.clone(),
+                delta: 25,
+            },
+        );
+        let on_v1 = tl.track_by_name("V1").unwrap().clips();
+        assert_eq!(on_v1[0].start, Frame(25));
+        assert_eq!(on_v1[1].start, Frame(175));
+        assert_eq!(
+            effect.inverse,
+            EditCommand::ShiftClips { clips, delta: -25 }
+        );
+    }
+
+    #[test]
+    fn shifting_before_frame_zero_is_rejected_whole() {
+        let mut tl = fixture(&[("V1", &[(0, 100, "a"), (200, 50, "b")])]);
+        let clips = ids_on(&tl, "V1");
+        let before = json(&tl);
+        // The second clip could move, the first cannot: neither does.
+        assert!(
+            EditCommand::ShiftClips { clips, delta: -1 }
+                .apply(&mut tl)
+                .is_err()
+        );
+        assert_eq!(json(&tl), before, "a rejected shift must not mutate");
+    }
+
+    /// Shifting a subset can run into the clips left behind, which a
+    /// whole-track shift never could.
+    #[test]
+    fn shifting_a_subset_onto_a_stationary_clip_is_rejected() {
+        let mut tl = fixture(&[("V1", &[(0, 100, "a"), (100, 100, "b")])]);
+        let first = ids_on(&tl, "V1")[0];
+        let before = json(&tl);
+        assert!(
+            EditCommand::ShiftClips {
+                clips: vec![first],
+                delta: 50,
+            }
+            .apply(&mut tl)
+            .is_err()
+        );
+        assert_eq!(json(&tl), before);
+    }
+
+    #[test]
+    fn moving_clips_to_another_track_keeps_their_frames_and_inverts() {
+        let mut tl = fixture(&[("V1", &[(0, 100, "a")]), ("V2", &[])]);
+        let clips = ids_on(&tl, "V1");
+        let v1 = tl.track_by_name("V1").unwrap().id;
+        let v2 = tl.track_by_name("V2").unwrap().id;
+        let effect = roundtrip(
+            &mut tl,
+            &EditCommand::MoveClipsToTrack {
+                clips: clips.clone(),
+                track: v2,
+            },
+        );
+        assert!(tl.track(v1).unwrap().is_empty());
+        assert_eq!(tl.track(v2).unwrap().clips()[0].start, Frame::ZERO);
+        assert_eq!(
+            effect.inverse,
+            EditCommand::MoveClipsToTrack { clips, track: v1 },
+            "undo must send each clip back to the track it came from"
+        );
+    }
+
+    #[test]
+    fn moving_clips_onto_an_occupied_range_is_rejected_whole() {
+        let mut tl = fixture(&[
+            ("V1", &[(0, 100, "a"), (200, 100, "b")]),
+            ("V2", &[(250, 100, "c")]),
+        ]);
+        let clips = ids_on(&tl, "V1");
+        let v2 = tl.track_by_name("V2").unwrap().id;
+        let before = json(&tl);
+        assert!(
+            EditCommand::MoveClipsToTrack { clips, track: v2 }
+                .apply(&mut tl)
+                .is_err()
+        );
+        assert_eq!(json(&tl), before, "a rejected move must not mutate");
     }
 
     #[test]

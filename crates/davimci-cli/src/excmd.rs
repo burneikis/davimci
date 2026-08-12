@@ -53,6 +53,17 @@ pub enum ExCommand {
     RemoveTrack,
     /// `:track move up|down|top|bottom|<n>` - reorder the track stack.
     MoveTrack(TrackMove),
+    /// `:track shift <frames>` - slide every clip on the focused track along
+    /// the timeline, spacing intact. A leading `+` or `-` is a relative
+    /// nudge; a bare number is read the same way, since there is no absolute
+    /// position a whole track could be shifted to.
+    ShiftTrack(i64),
+    /// `:shift <frames>` - the same slide over the selection, or over the
+    /// clip under the playhead when nothing is selected.
+    ShiftClips(i64),
+    /// `:move <track>` - put the selection, or the clip under the playhead,
+    /// on another track at the same frames.
+    MoveToTrack(String),
     /// `:text <text>` - a cue at the playhead on the focused text track,
     /// which is a subtitle when the track is one. A track the media did not
     /// bring has no cues to edit until something makes one, and `i` edits a
@@ -231,6 +242,15 @@ pub fn parse(line: &str) -> Result<ExCommand, CliError> {
         }
         "relink" => parse_relink(&line),
         "track" => parse_track(&line),
+        "shift" => {
+            let n = line.one("<+/-frames>")?;
+            Ok(ExCommand::ShiftClips(parse_delta(
+                &line,
+                &n,
+                "<+/-frames>",
+            )?))
+        }
+        "move" | "m" => Ok(ExCommand::MoveToTrack(line.one("<track>")?.clone())),
         "track!" => {
             if line.args.is_empty() {
                 Ok(ExCommand::RemoveTrack)
@@ -267,9 +287,12 @@ pub enum TrackMove {
 
 fn parse_track(line: &Line<'_>) -> Result<ExCommand, CliError> {
     use davimci_core::TrackKind;
-    const USAGE: &str = "<video|audio|text|overlay> [name] | move up|down|top|bottom|<n>";
-    if let ["move", rest @ ..] = line.args.as_slice() {
-        return parse_track_move(line, rest);
+    const USAGE: &str =
+        "<video|audio|text|overlay> [name] | move up|down|top|bottom|<n> | shift <+/-frames>";
+    match line.args.as_slice() {
+        ["move", rest @ ..] => return parse_track_move(line, rest),
+        ["shift", rest @ ..] => return parse_track_shift(line, rest),
+        _ => {}
     }
     let (kind, name) = match line.args.as_slice() {
         [kind] => (*kind, None),
@@ -303,6 +326,28 @@ fn parse_track_move(line: &Line<'_>, args: &[&str]) -> Result<ExCommand, CliErro
         },
     };
     Ok(ExCommand::MoveTrack(mv))
+}
+
+fn parse_track_shift(line: &Line<'_>, args: &[&str]) -> Result<ExCommand, CliError> {
+    const USAGE: &str = "shift <+/-frames>";
+    let [n] = args else {
+        return Err(line.usage(USAGE));
+    };
+    Ok(ExCommand::ShiftTrack(parse_delta(line, n, USAGE)?))
+}
+
+/// A signed frame nudge. `0` is refused: it would be an undo entry that
+/// changes nothing, which `u` would then have to step over.
+fn parse_delta(line: &Line<'_>, n: &str, usage: &str) -> Result<i64, CliError> {
+    let delta: i64 = n
+        .strip_prefix('+')
+        .unwrap_or(n)
+        .parse()
+        .map_err(|_| line.usage(usage))?;
+    if delta == 0 {
+        return Err(line.usage(usage));
+    }
+    Ok(delta)
 }
 
 /// `--preset <name>` is a trailing flag, so the path before it may contain
@@ -628,6 +673,9 @@ impl Workspace {
             ExCommand::AddTrack { kind, name } => self.add_track(*kind, name.clone()),
             ExCommand::RemoveTrack => self.remove_track(),
             ExCommand::MoveTrack(mv) => self.move_track(*mv),
+            ExCommand::ShiftTrack(delta) => self.shift_track(*delta),
+            ExCommand::ShiftClips(delta) => self.shift_clips(*delta, selection),
+            ExCommand::MoveToTrack(name) => self.move_to_track(name, selection),
             ExCommand::Text(text) => self.text_cue(text),
             ExCommand::Group => self.group(),
             ExCommand::Ungroup => self.ungroup(),
@@ -970,6 +1018,58 @@ impl Workspace {
         };
         self.exec(&EditCommand::MoveTrack { track, to })?;
         Ok(ExOutcome::msg(format!("moved track {name} to {}", to + 1)))
+    }
+
+    /// `:track shift <frames>`: slide the focused track in time. The model
+    /// refuses a delta that would push any clip before frame zero, so a
+    /// shift never silently truncates the head of a track.
+    fn shift_track(&mut self, delta: i64) -> Result<ExOutcome, CliError> {
+        let tl = self.current().timeline();
+        let track = tl.playhead().track;
+        let name = tl.track(track).map_or_else(String::new, |t| t.name.clone());
+        let clips: Vec<_> = tl
+            .track(track)
+            .map(|t| t.clips().iter().map(|c| c.id).collect())
+            .unwrap_or_default();
+        self.exec(&EditCommand::ShiftClips { clips, delta })?;
+        Ok(ExOutcome::msg(format!(
+            "shifted track {name} by {delta} frames"
+        )))
+    }
+
+    /// `:shift <frames>`: the selection-scoped nudge. Same command as the
+    /// track-wide shift, a smaller set of clips.
+    fn shift_clips(
+        &mut self,
+        delta: i64,
+        selection: Option<&Selection>,
+    ) -> Result<ExOutcome, CliError> {
+        let clips = crate::audio::targets(self.current().timeline(), selection, "shift")?;
+        let n = clips.len();
+        let clips = clips.into_iter().map(|(_, c)| c.id).collect();
+        self.exec(&EditCommand::ShiftClips { clips, delta })?;
+        Ok(ExOutcome::msg(format!(
+            "shifted {n} clips by {delta} frames"
+        )))
+    }
+
+    /// `:move <track>`: the vertical move. Frames are kept, so a clip lands
+    /// on the new track at the time it already had.
+    fn move_to_track(
+        &mut self,
+        name: &str,
+        selection: Option<&Selection>,
+    ) -> Result<ExOutcome, CliError> {
+        let tl = self.current().timeline();
+        let track = tl
+            .track_by_name(name)
+            .map(|t| t.id)
+            .ok_or_else(|| CliError::NoSuchTrack(name.to_string()))?;
+        let clips = crate::audio::targets(tl, selection, "move")?;
+        let n = clips.len();
+        let clips = clips.into_iter().map(|(_, c)| c.id).collect();
+        self.exec(&EditCommand::MoveClipsToTrack { clips, track })?;
+        Ok(ExOutcome::msg(format!("moved {n} clips to {name}")))
     }
 
     /// `:text <text>`: a cue at the playhead, pushing later cues right so

@@ -86,6 +86,9 @@ pub enum CoreError {
     #[error("there is no track position {index}: the timeline has {count}")]
     TrackIndexOutOfRange { index: usize, count: usize },
 
+    #[error("there is already a clip at frame {start}")]
+    RangeOccupied { start: u64 },
+
     #[error("invalid clip property: {reason}")]
     InvalidProps { reason: String },
 
@@ -137,6 +140,7 @@ impl Classify for CoreError {
             | Self::DuplicateTrack(_)
             | Self::TrackNotEmpty(_)
             | Self::TrackIndexOutOfRange { .. }
+            | Self::RangeOccupied { .. }
             | Self::InvalidProps { .. }
             | Self::InvalidRange { .. }
             | Self::ZeroDuration

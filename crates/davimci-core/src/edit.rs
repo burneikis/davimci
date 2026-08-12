@@ -9,6 +9,7 @@ use crate::error::CoreError;
 use crate::id::{ClipId, TrackId};
 use crate::time::Frame;
 use crate::timeline::{Register, Timeline};
+use crate::track::Track;
 
 /// Add a signed frame delta, rejecting anything before frame zero.
 pub(crate) fn shift(frame: Frame, delta: i64) -> Result<Frame, CoreError> {
@@ -296,6 +297,101 @@ impl Timeline {
     ) -> Result<Register, CoreError> {
         let (s, e) = self.clip_extent(track, clip)?;
         self.ripple_delete_range(track, s, e)
+    }
+
+    // -- moving clips ----------------------------------------------------
+
+    /// Slide a set of clips along the timeline by `delta`, spacing intact.
+    ///
+    /// All-or-nothing: if any clip would cross frame zero, overflow, or land
+    /// on a clip that is not moving, nothing moves. Clamping the delta would
+    /// silently destroy the alignment the shift was asked for, and a partial
+    /// shift would break the sync the set was chosen to preserve.
+    pub fn shift_clips(&mut self, clips: &[ClipId], delta: i64) -> Result<(), CoreError> {
+        let moves = self.plan_shift(clips, delta)?;
+        for (track, id, start) in moves {
+            if let Some(c) = self.track_mut(track).and_then(|t| t.clip_mut(id)) {
+                c.start = start;
+            }
+            if let Some(t) = self.track_mut(track) {
+                t.clips_mut().sort_by_key(|c| c.start);
+            }
+        }
+        self.settle();
+        Ok(())
+    }
+
+    /// Where every clip in a shift would land, or the first reason it cannot.
+    fn plan_shift(
+        &self,
+        clips: &[ClipId],
+        delta: i64,
+    ) -> Result<Vec<(TrackId, ClipId, Frame)>, CoreError> {
+        let mut moves = Vec::with_capacity(clips.len());
+        for &id in clips {
+            let (track, clip) = self
+                .find_clip(id)
+                .ok_or_else(|| CoreError::NoSuchClip(id.to_string()))?;
+            let start = shift(clip.start, delta)?;
+            let span = i64::try_from(clip.duration.get()).map_err(|_| CoreError::TimeOverflow)?;
+            let end = shift(start, span)?;
+            // Clips in the set keep their spacing, so they cannot collide
+            // with each other; the clips left behind are the hazard.
+            let blocked = self
+                .track(track)
+                .into_iter()
+                .flat_map(Track::clips)
+                .filter(|c| !clips.contains(&c.id))
+                .any(|c| c.start < end && start < c.end());
+            if blocked {
+                return Err(CoreError::RangeOccupied { start: start.get() });
+            }
+            moves.push((track, id, start));
+        }
+        Ok(moves)
+    }
+
+    /// Move a set of clips to another track, keeping every frame position.
+    ///
+    /// The vertical counterpart of [`Timeline::shift_clips`], and refused for
+    /// the same reason: if the destination is not free for all of them, none
+    /// of them move.
+    pub fn move_clips_to_track(&mut self, clips: &[ClipId], to: TrackId) -> Result<(), CoreError> {
+        self.require_track(to)?;
+        let mut moving = Vec::with_capacity(clips.len());
+        for &id in clips {
+            let (from, clip) = self
+                .find_clip(id)
+                .ok_or_else(|| CoreError::NoSuchClip(id.to_string()))?;
+            if from != to {
+                let (start, end) = (clip.start, clip.end());
+                let free = self
+                    .track(to)
+                    .is_some_and(|t| t.range_is_free(start, end, None));
+                // Clips arriving from different tracks can also land on each
+                // other, which no destination check would catch.
+                let collides = moving
+                    .iter()
+                    .any(|(_, c): &(TrackId, Clip)| c.start < end && start < c.end());
+                if !free || collides {
+                    return Err(CoreError::RangeOccupied { start: start.get() });
+                }
+            }
+            moving.push((from, clip.clone()));
+        }
+        for (from, clip) in moving {
+            if from == to {
+                continue;
+            }
+            if let Some(t) = self.track_mut(from) {
+                t.clips_mut().retain(|c| c.id != clip.id);
+            }
+            if let Some(t) = self.track_mut(to) {
+                t.insert_sorted(clip);
+            }
+        }
+        self.settle();
+        Ok(())
     }
 
     // -- insert / overwrite / paste --------------------------------------
