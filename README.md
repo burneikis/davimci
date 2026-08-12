@@ -69,19 +69,12 @@ cargo build -p davimci-cli --features tui    # optional terminal frontend
 cargo run -p davimci-cli --features tui -- --tui path/to/video.mkv
 ```
 
-Seeing the timeline is core, so every build ships a frontend that can show
-one; which one is the build's choice. A build with neither `window` nor `tui`
-is refused at compile time unless it asks for `--features driver-only`, the
-scripted driver the tests and batch exports run through. `just weigh` prints
-what each profile links, against its budget.
-
-In both frontends the ruler can number its jump points, the way vim numbers
-lines: `--numbers relative` (the count `3l` needs), `--numbers absolute` (the
-frame), `--numbers both` (absolute at the playhead, relative elsewhere; also
-spelled `current`) or `--numbers none`, the default. Changeable live with
-`:set numbers relative`.
-
-`:1234` puts the playhead on frame 1234, clamped to the end of the timeline.
+<!-- THIS NEEDS REVISING -->
+<!-- Seeing the timeline is core, so every build ships a frontend that can show -->
+<!-- one; which one is the build's choice. A build with neither `window` nor `tui` -->
+<!-- is refused at compile time unless it asks for `--features driver-only`, the -->
+<!-- scripted driver the tests and batch exports run through. `just weigh` prints -->
+<!-- what each profile links, against its budget. -->
 
 ## Hardware acceleration
 

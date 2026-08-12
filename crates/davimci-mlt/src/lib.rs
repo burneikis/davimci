@@ -12,7 +12,7 @@
 //! - [`ffi`] is the RAII layer over the C API, and [`backend`] is the
 //!   `RenderBackend` implementation on top of it.
 //!
-//! [`cache`] sits beside them: decoded preview frames, kept so that stepping
+//! `cache` sits beside them: decoded preview frames, kept so that stepping
 //! backwards does not re-seek and re-decode a GOP per frame.
 //!
 //! `libmlt` is linked dynamically and `melt`/`melted` are never vendored:

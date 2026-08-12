@@ -8,7 +8,7 @@
 //!
 //! Two properties matter more than the exact thresholds. It must not
 //! oscillate - taking a step back up costs a consumer restart, so it needs
-//! [`CLEAN_WINDOWS`] spotless windows in a row, not one - and it must never
+//! `CLEAN_WINDOWS` spotless windows in a row, not one - and it must never
 //! reduce a scale the *user* chose, only one it chose itself.
 
 use davimci_backend::PreviewScale;

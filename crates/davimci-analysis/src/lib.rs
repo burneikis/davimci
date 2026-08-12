@@ -7,7 +7,7 @@
 //! silence detector and the predicate index all be tested with no media, no
 //! ffmpeg, and no timing.
 //!
-//! The pipeline reads: [`probe`] -> [`conform`] -> [`import`] (one undoable
+//! The pipeline reads: [`probe`] -> [`conform`] -> [`import`](mod@import) (one undoable
 //! command) -> [`pipeline::queue_analysis`] in the background -> [`index`],
 //! which answers predicate motions and says [`davimci_motion::predicate::Answer::Pending`]
 //! until it can do so correctly.

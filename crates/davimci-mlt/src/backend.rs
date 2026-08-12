@@ -2,14 +2,14 @@
 //!
 //! Preview is frame pull: audio goes to a realtime MLT audio consumer,
 //! which owns the master clock, while video frames are lifted out of the
-//! consumer as RGBA and handed to `davimci-present`. MLT never opens a window
-//!, which is what lets the GUI draw overlays on the video
+//! consumer as RGBA and handed to `davimci-present`. MLT never opens a window,
+//! which is what lets the GUI draw overlays on the video
 //! and lets the TUI reuse the same path.
 //!
 //! Playing backwards is the exception. MLT decodes a backwards pass one seek
 //! per frame and drops none of it, so the picture falls further behind the
 //! sound the longer it runs. Instead the consumer plays sound only and
-//! [`Scrub`] decodes the picture from a graph of its own, chasing the clock
+//! `Scrub` decodes the picture from a graph of its own, chasing the clock
 //! and skipping what it cannot keep up with, so the speed stays honest.
 
 use std::collections::{BTreeMap, VecDeque};

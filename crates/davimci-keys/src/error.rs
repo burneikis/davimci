@@ -4,7 +4,7 @@ use davimci_cmd::CmdError;
 use davimci_core::{Classify, ErrorClass};
 use davimci_motion::MotionError;
 
-/// Anything [`crate::engine::Engine::execute`] can fail with. Every variant
+/// Anything `Engine::execute` can fail with. Every variant
 /// is a user-facing sentence; nothing here is `Debug` output.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum KeysError {
