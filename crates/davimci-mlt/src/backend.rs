@@ -1014,8 +1014,20 @@ impl MltBackend {
         &self,
         entry: &crate::projection::TransitionEntry,
     ) -> Result<(Producer, Nested)> {
-        let from = self.build_producer(&entry.from)?;
-        let to = self.build_producer(&entry.to)?;
+        // A track of a tractor is played whole, with no in/out of its own to
+        // pass: unlike a playlist entry, there is nowhere else to say which
+        // part of the source this is. Without this both tracks start at
+        // source frame 0 and the overlap composites the wrong pictures.
+        let mut from = self.build_producer(&entry.from)?;
+        from.set_in_and_out(
+            mlt_int(entry.from.in_point.get()),
+            mlt_int(entry.from.out_point.get()),
+        );
+        let mut to = self.build_producer(&entry.to)?;
+        to.set_in_and_out(
+            mlt_int(entry.to.in_point.get()),
+            mlt_int(entry.to.out_point.get()),
+        );
         let mut tractor = Tractor::new().map_err(BackendError::from)?;
         tractor.set_track(0, &from).map_err(BackendError::from)?;
         tractor.set_track(1, &to).map_err(BackendError::from)?;
@@ -1023,6 +1035,15 @@ impl MltBackend {
             Transition::new(&self.profile, &entry.service).map_err(BackendError::from)?;
         {
             let mut p = transition.properties();
+            // The nested tractor *is* the overlap, so the transition spans
+            // all of it, from its first frame to its last. This is also what
+            // MLT computes the blend's progress from: left at the default
+            // 0/0 it falls back to the b-track producer's own in/out, which
+            // are source positions and have nothing to do with where the
+            // overlap has got to.
+            p.set_int("in", 0).map_err(BackendError::from)?;
+            p.set_int("out", mlt_int(entry.length().saturating_sub(1)))
+                .map_err(BackendError::from)?;
             for (k, v) in &entry.props {
                 p.set(k, v).map_err(BackendError::from)?;
             }

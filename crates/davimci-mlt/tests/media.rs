@@ -766,3 +766,102 @@ fn the_hardware_encode_probe_is_decided_by_encoding_and_is_stable() {
         "a device that does not exist cannot encode"
     );
 }
+
+/// Two clips cut from `scene_cut.mkv` - a red one and a blue one - joined by
+/// a dissolve, with handles on both sides for the overlap to borrow.
+fn dissolve_timeline(res: Resolution, overlap: u64) -> Timeline {
+    let mut tl = Timeline::new(TimelineProps {
+        fps: Fps::FPS_60,
+        resolution: res,
+        sample_rate: 48_000,
+    });
+    let v1 = tl.track_by_name("V1").map(|t| t.id).unwrap();
+    let media = || {
+        MediaRef::new(
+            fixtures()
+                .join("scene_cut.mkv")
+                .to_string_lossy()
+                .to_string(),
+            Fps::FPS_60,
+            Frame(240),
+        )
+    };
+    // Red is source 0-119, blue is 120-239, so each clip keeps 60 frames of
+    // handle on the side the transition eats into.
+    let red = Clip::from_media(
+        ClipId(1),
+        "red",
+        media(),
+        Frame::ZERO,
+        Frame::ZERO,
+        Frame(60),
+    );
+    let blue = Clip::from_media(ClipId(2), "blue", media(), Frame(60), Frame(180), Frame(60));
+    tl.restore(v1, Frame::ZERO, &[red, blue], Frame(120), false)
+        .unwrap();
+    tl.set_transition(
+        v1,
+        ClipId(2),
+        Some(davimci_core::Transition::new("dissolve", Frame(overlap))),
+    )
+    .unwrap();
+    tl
+}
+
+/// The preview bug report: a dissolve that exists in the model has to reach
+/// the stills the preview pulls, and reach them as an actual ramp.
+///
+/// Two ways of getting this wrong both look like "no transition": tracks of
+/// the nested tractor with no in/out play source frame 0, and a transition
+/// with no in/out takes its progress from the b-track producer's source
+/// positions. Both are caught here, because both leave the ramp wrong rather
+/// than absent.
+#[test]
+fn a_dissolve_blends_the_stills_the_preview_pulls() {
+    let _mlt = davimci_mlt::test_support::media_lock();
+    let res = Resolution {
+        width: 640,
+        height: 480,
+    };
+    let tl = dissolve_timeline(res, 20);
+    let mut b = MltBackend::new(tl.props).unwrap();
+    b.set_timeline(&tl).unwrap();
+
+    // Red until the overlap, blue after it: the cut is at 60 and the 20-frame
+    // overlap is centred on it, so 50-69 is the ramp.
+    assert_eq!(
+        dominant(&b.frame_at(Frame(40), PreviewScale::Full).unwrap()),
+        0
+    );
+    assert_eq!(
+        dominant(&b.frame_at(Frame(80), PreviewScale::Full).unwrap()),
+        2
+    );
+
+    let ramp: Vec<[u8; 4]> = (50..70)
+        .map(|f| {
+            b.frame_at(Frame(f), PreviewScale::Full)
+                .unwrap()
+                .signature()
+        })
+        .collect();
+    for (i, w) in ramp.windows(2).enumerate() {
+        assert!(
+            w[1][0] <= w[0][0] && w[1][2] >= w[0][2],
+            "the dissolve is not monotonic at overlap frame {i}: {:?} then {:?}",
+            w[0],
+            w[1]
+        );
+    }
+    // Halfway through, both sources are visibly present - the assertion the
+    // bug failed: a transition that never composites keeps one of them at 0.
+    let mid = ramp[ramp.len() / 2];
+    assert!(
+        mid[0] > 40 && mid[2] > 40,
+        "the middle of the dissolve is not a blend: {mid:?}"
+    );
+    assert!(
+        ramp[0][0] > 200 && ramp[ramp.len() - 1][2] > 200,
+        "the ramp does not run from the outgoing clip to the incoming one"
+    );
+}
