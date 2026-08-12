@@ -260,6 +260,28 @@ fn set_visualstart_reaches_the_key_engine() {
     assert_eq!(app.visual_start(), davimci_keys::VisualStart::Jump);
 }
 
+/// `centerfollow` is parsed by the `:set` registry but acted on by the
+/// viewport, so a config can state the centring `zZ` toggles.
+#[test]
+fn set_centerfollow_reaches_the_viewport() {
+    let (mut app, mut editor) = editor();
+    assert!(!app.center_follow());
+    let undos = app.session().undolist().len();
+    app.event(Event::Command("set centerfollow on".into()), &mut editor);
+    assert!(app.center_follow());
+    assert_eq!(app.session().undolist().len(), undos);
+
+    app.event(Event::Command("set centerfollow off".into()), &mut editor);
+    assert!(!app.center_follow());
+
+    app.event(Event::Command("set centerfollow maybe".into()), &mut editor);
+    assert_eq!(
+        app.messages().current().map(|m| m.severity),
+        Some(davimci_app::Severity::Error)
+    );
+    assert!(!app.center_follow());
+}
+
 #[test]
 fn an_unknown_command_reports_a_sentence_and_keeps_editing() {
     let (mut app, mut editor) = editor();

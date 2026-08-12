@@ -146,7 +146,11 @@ pub struct Editor {
     /// Set by `:set visualstart`, taken by the app on the next poll: the
     /// setting is parsed here and enforced by the key engine.
     visual_start: davimci_keys::VisualStart,
+    /// Mirrors the app's centring so `:set centerfollow?` and completion can
+    /// read it back; the app remains the one that acts on it.
+    center_follow: bool,
     pending_visual_start: Option<davimci_keys::VisualStart>,
+    pending_center_follow: Option<bool>,
     /// Whether `i` on a text track edits the cue under the playhead, taken by
     /// the app. Only the plugin that owns text tracks grants this, so the
     /// grammar never has to know a text workflow exists.
@@ -211,7 +215,9 @@ impl Editor {
             trust_asked: false,
             pending_keymap: None,
             visual_start: davimci_keys::VisualStart::default(),
+            center_follow: false,
             pending_visual_start: None,
+            pending_center_follow: None,
             pending_text_editing: None,
             quit: false,
         }
@@ -558,6 +564,17 @@ impl Editor {
                 self.pending_visual_start = Some(*start);
                 Some(Ok(start.describe().to_string()))
             }
+            // Where the view sits is the app's, not the editor's, so this is
+            // only parked here for the app to take.
+            ExCommand::Set(crate::setting::Setting::CenterFollow(on)) => {
+                self.center_follow = *on;
+                self.pending_center_follow = Some(*on);
+                Some(Ok(if *on {
+                    "the view keeps the playhead centred".to_string()
+                } else {
+                    "the view scrolls only at the edges".to_string()
+                }))
+            }
             ExCommand::Presets => Some(Ok(self.exporter.list_presets().join("  |  "))),
             ExCommand::CancelRender => Some(self.exporter.cancel(self.backend.as_mut())),
             _ => None,
@@ -779,6 +796,7 @@ impl Editor {
             preview_protocol: Some(self.preview_protocol),
             numbers: Some(self.numbers),
             visual_start: Some(self.visual_start),
+            center_follow: Some(self.center_follow),
             fps: Some(tl.props.fps),
             resolution: Some(tl.props.resolution),
             clip: clip.map(|c| c.props),
@@ -1858,6 +1876,10 @@ impl Host for Editor {
 
     fn take_visual_start(&mut self) -> Option<davimci_keys::VisualStart> {
         self.pending_visual_start.take()
+    }
+
+    fn take_center_follow(&mut self) -> Option<bool> {
+        self.pending_center_follow.take()
     }
 
     fn take_text_editing(&mut self) -> Option<bool> {

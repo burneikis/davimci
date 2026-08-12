@@ -92,6 +92,15 @@ pub trait Host {
         None
     }
 
+    /// `:set centerfollow`, taken once.
+    ///
+    /// Scrolling belongs to the viewport, which no host owns, so the host
+    /// parks what it parsed and the app is what applies it - the same state
+    /// `zZ` toggles.
+    fn take_center_follow(&mut self) -> Option<bool> {
+        None
+    }
+
     /// Whether `i` on a text track edits a subtitle, taken once.
     ///
     /// The plugin that owns text tracks is what switches this on, and the
@@ -803,6 +812,9 @@ impl App {
         }
         if let Some(start) = host.take_visual_start() {
             self.engine.set_visual_start(start);
+        }
+        if let Some(on) = host.take_center_follow() {
+            self.set_center_follow(on);
         }
         // A `:` line can edit (`:relink`) or swap the whole timeline
         // (`:e`, `:bn`), so the graph and the playhead are both

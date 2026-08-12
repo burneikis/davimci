@@ -794,6 +794,7 @@ impl Workspace {
             Setting::PreviewProtocol(_) => Err(CliError::UnknownProperty("previewprotocol".into())),
             Setting::Numbers(_) => Err(CliError::UnknownProperty("numbers".into())),
             Setting::VisualStart(_) => Err(CliError::UnknownProperty("visualstart".into())),
+            Setting::CenterFollow(_) => Err(CliError::UnknownProperty("centerfollow".into())),
         }
     }
 
@@ -1033,6 +1034,13 @@ fn describe_setting(setting: &crate::setting::Setting) -> String {
         Setting::PreviewProtocol(p) => format!("preview protocol {}", p.name()),
         Setting::Numbers(n) => n.describe().to_string(),
         Setting::VisualStart(v) => v.describe().to_string(),
+        Setting::CenterFollow(on) => {
+            if *on {
+                "the view keeps the playhead centred".into()
+            } else {
+                "the view scrolls only at the edges".into()
+            }
+        }
     }
 }
 

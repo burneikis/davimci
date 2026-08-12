@@ -83,6 +83,11 @@ pub enum Setting {
     /// the selection. `V` is always the clip. A view setting: it shapes the
     /// next selection and never edits.
     VisualStart(VisualStart),
+    /// `centerfollow on|off` - whether the view re-centres on the playhead
+    /// after every move, rather than scrolling only at the edges. The same
+    /// state `zZ` toggles, so a config can state it without typing the key.
+    /// Scrolling is view state, so it never enters the undo log.
+    CenterFollow(bool),
 }
 
 /// What `:set previewheight` accepts.
@@ -164,6 +169,7 @@ impl Setting {
                 | Self::PreviewProtocol(_)
                 | Self::Numbers(_)
                 | Self::VisualStart(_)
+                | Self::CenterFollow(_)
         )
     }
 }
@@ -191,6 +197,7 @@ pub const PROPERTIES: &[&str] = &[
     "previewprotocol",
     "numbers",
     "visualstart",
+    "centerfollow",
 ];
 
 /// The values a property enumerates, for completion. Empty for a property
@@ -199,7 +206,7 @@ pub const PROPERTIES: &[&str] = &[
 #[must_use]
 pub fn values(prop: &str) -> Vec<String> {
     let words: &[&str] = match prop {
-        "preview" | "proxy" | "waveform" => &["on", "off"],
+        "preview" | "proxy" | "waveform" | "centerfollow" => &["on", "off"],
         "decode" => DecodePolicy::NAMES,
         "encode" => EncodePolicy::NAMES,
         "previewheight" => &["auto"],
@@ -232,6 +239,8 @@ pub struct CurrentSettings {
     pub preview_protocol: Option<PreviewProtocol>,
     pub numbers: Option<Numbers>,
     pub visual_start: Option<VisualStart>,
+    /// Whether the view re-centres on the playhead after every move.
+    pub center_follow: Option<bool>,
     pub fps: Option<Fps>,
     pub resolution: Option<Resolution>,
     /// The clip the next `:set clip.*` would act on.
@@ -285,6 +294,9 @@ impl CurrentSettings {
             "previewprotocol" => self.preview_protocol.map(|p| p.name().to_string()),
             "numbers" => self.numbers.map(|n| n.name().to_string()),
             "visualstart" => self.visual_start.map(|v| v.name().to_string()),
+            "centerfollow" => self
+                .center_follow
+                .map(|on| if on { "on" } else { "off" }.to_string()),
             _ => None,
         }
     }
@@ -418,6 +430,11 @@ pub fn parse(prop: &str, value: &str) -> Result<Setting, CliError> {
         "visualstart" => VisualStart::parse(value)
             .map(Setting::VisualStart)
             .ok_or_else(|| bad(prop, "frame or jump")),
+        "centerfollow" => match value {
+            "on" | "true" | "1" => Ok(Setting::CenterFollow(true)),
+            "off" | "false" | "0" => Ok(Setting::CenterFollow(false)),
+            _ => Err(bad(prop, "on or off")),
+        },
         other => Err(CliError::UnknownProperty(other.to_string())),
     }
 }
@@ -652,6 +669,20 @@ mod tests {
     }
 
     #[test]
+    fn centerfollow_parses_on_and_off_and_stays_out_of_the_undo_log() {
+        assert_eq!(
+            parse("centerfollow", "on").ok(),
+            Some(Setting::CenterFollow(true))
+        );
+        assert_eq!(
+            parse("centerfollow", "off").ok(),
+            Some(Setting::CenterFollow(false))
+        );
+        assert!(parse("centerfollow", "on").unwrap().is_view_only());
+        assert!(values("centerfollow").contains(&"off".to_string()));
+    }
+
+    #[test]
     fn out_of_range_and_unknown_properties_are_user_errors_naming_the_property() {
         for (prop, value) in [
             ("clip.opacity", "2"),
@@ -673,6 +704,7 @@ mod tests {
             ("previewprotocol", "iterm"),
             ("numbers", "sideways"),
             ("visualstart", "clip"),
+            ("centerfollow", "sometimes"),
             ("clip.wobble", "1"),
         ] {
             let e = parse(prop, value).expect_err("must reject");

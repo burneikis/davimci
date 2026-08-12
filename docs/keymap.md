@@ -112,7 +112,7 @@ holds there is grandfathered and listed below; nothing joins it.
 | `zi` | zoom in one level |
 | `zo` | zoom out one level |
 | `zz` | centre the view on the playhead |
-| `zZ` | keep the playhead centred |
+| `zZ` | keep the playhead centred (`:set centerfollow on`) |
 | `<Esc>` | leave the current mode |
 
 ## Visual mode
