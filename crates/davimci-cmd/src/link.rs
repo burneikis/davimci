@@ -69,14 +69,14 @@ pub(crate) fn expand(tl: &mut Timeline, cmd: &EditCommand) -> EditCommand {
             })
         }
         EditCommand::Lift { track, start, end } => {
-            range(tl, *track, *start, *end, cmd, |t| EditCommand::Lift {
+            range(tl, *track, *start, *end, cmd, &|t| EditCommand::Lift {
                 track: t,
                 start: *start,
                 end: *end,
             })
         }
         EditCommand::RippleDelete { track, start, end } => {
-            range(tl, *track, *start, *end, cmd, |t| {
+            range(tl, *track, *start, *end, cmd, &|t| {
                 EditCommand::RippleDelete {
                     track: t,
                     start: *start,
@@ -196,12 +196,12 @@ fn join(tl: &Timeline, track: TrackId, frame: Frame) -> EditCommand {
 /// A range edit repeats on every track a group in that range reaches, so
 /// deleting a shot takes its audio with it.
 fn range(
-    tl: &Timeline,
+    tl: &mut Timeline,
     track: TrackId,
     start: Frame,
     end: Frame,
     cmd: &EditCommand,
-    build: impl Fn(TrackId) -> EditCommand,
+    build: &dyn Fn(TrackId) -> EditCommand,
 ) -> EditCommand {
     let Some(t) = tl.track(track) else {
         return cmd.clone();
@@ -223,7 +223,48 @@ fn range(
     if tracks.len() == 1 {
         return cmd.clone();
     }
-    EditCommand::Sequence(tracks.into_iter().map(build).collect())
+    let mut cmds: Vec<EditCommand> = [start, end]
+        .into_iter()
+        .filter_map(|f| boundary_split(tl, &tracks, f))
+        .collect();
+    cmds.extend(tracks.into_iter().map(build));
+    EditCommand::Sequence(cmds)
+}
+
+/// The cut a range edit needs at one of its boundaries, made on every track
+/// the edit reaches at once so the halves left behind stay linked to each
+/// other. Left to the per-track edit, each track would cut alone and the
+/// survivors would come out ungrouped.
+fn boundary_split(tl: &mut Timeline, tracks: &[TrackId], frame: Frame) -> Option<EditCommand> {
+    let cut: Vec<TrackId> = tracks
+        .iter()
+        .copied()
+        .filter(|t| tl.cuts_a_clip(*t, frame))
+        .collect();
+    if cut.is_empty() {
+        return None;
+    }
+    let mut halves = Vec::with_capacity(cut.len());
+    let mut cmds: Vec<EditCommand> = cut
+        .into_iter()
+        .map(|track| {
+            let id = tl.new_clip_id();
+            halves.push(id);
+            EditCommand::Split {
+                track,
+                frame,
+                new_id: Some(id),
+            }
+        })
+        .collect();
+    if halves.len() > 1 {
+        let group = tl.new_group_id();
+        cmds.push(EditCommand::Link {
+            clips: halves,
+            group: Some(group),
+        });
+    }
+    Some(EditCommand::Sequence(cmds))
 }
 
 #[cfg(test)]
@@ -289,6 +330,32 @@ mod tests {
         assert_eq!(groups[0], groups[1], "video and audio share both groups");
         assert!(groups[0].iter().all(Option::is_some));
         assert_ne!(groups[0][0], groups[0][1], "the halves are not one group");
+    }
+
+    /// Regression: a backwards delete (`db`) cut inside the clip and left the
+    /// surviving halves unlinked, while `dw` - which needed no cut - did not.
+    #[test]
+    fn a_partial_ripple_delete_keeps_the_survivors_linked() {
+        let mut s = linked();
+        let track = v1(&s);
+        s.exec(&EditCommand::RippleDelete {
+            track,
+            start: Frame::ZERO,
+            end: Frame(1),
+        })
+        .unwrap();
+        let groups: Vec<_> = s
+            .timeline()
+            .tracks()
+            .iter()
+            .map(|t| t.clips().iter().map(|c| c.group).collect::<Vec<_>>())
+            .collect();
+        assert_eq!(groups[0], groups[1], "video and audio stay linked");
+        assert!(
+            groups[0].iter().all(Option::is_some),
+            "survivors keep a group"
+        );
+        s.timeline().assert_invariants();
     }
 
     #[test]
