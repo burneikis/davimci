@@ -176,6 +176,33 @@ impl Default for Engine {
     }
 }
 
+/// Which of a track's two independent flags a toggle acts on.
+#[derive(Debug, Clone, Copy)]
+enum TrackFlag {
+    Mute,
+    Solo,
+}
+
+impl TrackFlag {
+    /// The flags the track ends up with once this one is flipped.
+    fn toggled(self, muted: bool, solo: bool) -> (bool, bool) {
+        match self {
+            Self::Mute => (!muted, solo),
+            Self::Solo => (muted, !solo),
+        }
+    }
+
+    /// How the state this toggle lands in reads in the status line.
+    fn describe(self, muted: bool, solo: bool) -> &'static str {
+        match self {
+            Self::Mute if muted => "unmuted",
+            Self::Mute => "muted",
+            Self::Solo if solo => "unsoloed",
+            Self::Solo => "soloed",
+        }
+    }
+}
+
 impl Engine {
     #[must_use]
     pub fn new() -> Self {
@@ -444,8 +471,8 @@ impl Engine {
                 or_error(self.do_trim_edge_step(forward, count, session))
             }
             Action::GainAdjust(step) => self.do_gain(step, session),
-            Action::ToggleMute => Self::do_track_flags(session, true),
-            Action::ToggleSolo => Self::do_track_flags(session, false),
+            Action::ToggleMute => Self::do_toggle_track_flag(session, TrackFlag::Mute),
+            Action::ToggleSolo => Self::do_toggle_track_flag(session, TrackFlag::Solo),
             Action::CreateTransition { kind } => Self::do_transition(session, Some(&kind)),
             Action::DeleteTransition => Self::do_transition(session, None),
             Action::PlayPause => Outcome::Transport(TransportCmd::PlayPause),
@@ -919,36 +946,24 @@ impl Engine {
         run(session.exec(&EditCommand::Sequence(cmds)))
     }
 
-    /// Toggle mute or solo on the track the playhead is on.
+    /// Toggle one of the playhead track's flags.
     ///
     /// Mute and solo are independent flags: soloing a muted track leaves it
     /// muted, because silencing something is a stronger statement than
     /// featuring it and undoing the solo must not unmute by accident.
-    fn do_track_flags(session: &mut Session, mute: bool) -> Outcome {
+    fn do_toggle_track_flag(session: &mut Session, flag: TrackFlag) -> Outcome {
         let track = session.timeline().playhead().track;
         let Some(t) = session.timeline().track(track) else {
             return Outcome::Error("the playhead is not on a track".to_string());
         };
         let (name, muted, solo) = (t.name.clone(), t.muted, t.solo);
-        let cmd = if mute {
-            EditCommand::SetTrackFlags {
-                track,
-                muted: !muted,
-                solo,
-            }
-        } else {
-            EditCommand::SetTrackFlags {
-                track,
-                muted,
-                solo: !solo,
-            }
+        let (next_muted, next_solo) = flag.toggled(muted, solo);
+        let cmd = EditCommand::SetTrackFlags {
+            track,
+            muted: next_muted,
+            solo: next_solo,
         };
-        let state = match (mute, muted, solo) {
-            (true, false, _) => "muted",
-            (true, true, _) => "unmuted",
-            (false, _, false) => "soloed",
-            (false, _, true) => "unsoloed",
-        };
+        let state = flag.describe(muted, solo);
         match run(session.exec(&cmd)) {
             Outcome::Applied(_) => Outcome::Applied(format!("{name} {state}")),
             other => other,

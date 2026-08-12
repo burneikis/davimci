@@ -1088,18 +1088,18 @@ impl Editor {
             ExportEvent::Finished { id, message } => {
                 let (preset, output) = self.last_export.clone().unwrap_or_default();
                 self.fire(&davimci_lua::Event::AfterExport { preset, output });
-                self.finish_job(id, JobState::Done, message, false);
+                self.finish_job(id, JobState::Done, message);
             }
             ExportEvent::Cancelled { id, message } => {
-                self.finish_job(id, JobState::Cancelled, message, false);
+                self.finish_job(id, JobState::Cancelled, message);
             }
             ExportEvent::Failed { id, message } => {
-                self.finish_job(id, JobState::Failed, message, true);
+                self.finish_job(id, JobState::Failed, message);
             }
         }
     }
 
-    fn finish_job(&mut self, id: u64, state: JobState, message: String, is_error: bool) {
+    fn finish_job(&mut self, id: u64, state: JobState, message: String) {
         if !self.started_jobs.contains(&id) {
             self.started_jobs.push(id);
             self.job_updates.push(JobUpdate::Started {
@@ -1108,11 +1108,7 @@ impl Editor {
             });
         }
         self.job_updates.push(JobUpdate::Finished { id, state });
-        self.notices.push(if is_error {
-            Message::error(message)
-        } else {
-            Message::info(message)
-        });
+        self.notices.push(finish_notice(state, message));
     }
 
     /// The range `<Space>l` is looping, if any.
@@ -2161,4 +2157,37 @@ fn loop_range(session: &Session, selection: Option<&Selection>) -> Option<(Frame
 #[must_use]
 pub fn first_frame() -> Frame {
     Frame::ZERO
+}
+
+/// How a finished job's closing message reads. A failure is the one outcome
+/// the user must not miss, so it alone is raised to an error.
+fn finish_notice(state: JobState, message: String) -> Message {
+    match state {
+        JobState::Failed => Message::error(message),
+        _ => Message::info(message),
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use davimci_app::Severity;
+
+    /// Regression: the severity of an export's closing notice is derived from
+    /// its `JobState`, not passed alongside it, so the two cannot disagree.
+    #[test]
+    fn only_a_failed_job_closes_with_an_error_notice() {
+        let cases = [
+            (JobState::Done, Severity::Info),
+            (JobState::Cancelled, Severity::Info),
+            (JobState::Running, Severity::Info),
+            (JobState::Failed, Severity::Error),
+        ];
+        for (state, want) in cases {
+            let notice = finish_notice(state, "export".to_string());
+            assert_eq!(notice.severity, want, "{state:?} closed with {notice:?}");
+            assert_eq!(notice.text, "export");
+        }
+    }
 }

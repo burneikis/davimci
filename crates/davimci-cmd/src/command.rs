@@ -457,14 +457,14 @@ impl Command for EditCommand {
                 at,
                 clip,
                 new_id,
-            } => place(tl, *track, *at, clip, *new_id, true),
+            } => insert(tl, *track, *at, clip, *new_id),
 
             Self::Overwrite {
                 track,
                 at,
                 clip,
                 new_id,
-            } => place(tl, *track, *at, clip, *new_id, false),
+            } => overwrite(tl, *track, *at, clip, *new_id),
 
             Self::Paste {
                 track,
@@ -934,14 +934,43 @@ fn expand_cuts(
     Some(EditCommand::Sequence(out))
 }
 
-/// Shared body of `Insert` (ripple) and `Overwrite`.
+/// Lay `clip` down at `at`, pushing what follows aside to make room.
+fn insert(
+    tl: &mut Timeline,
+    track: TrackId,
+    at: Frame,
+    clip: &Clip,
+    new_id: Option<ClipId>,
+) -> Result<Effect, CmdError> {
+    place(tl, track, at, clip, new_id, Ripple::Push)
+}
+
+/// Lay `clip` down at `at`, covering whatever already occupies that span.
+fn overwrite(
+    tl: &mut Timeline,
+    track: TrackId,
+    at: Frame,
+    clip: &Clip,
+    new_id: Option<ClipId>,
+) -> Result<Effect, CmdError> {
+    place(tl, track, at, clip, new_id, Ripple::Cover)
+}
+
+/// Whether placing a clip pushes its neighbours along or paves over them.
+#[derive(Debug, Clone, Copy)]
+enum Ripple {
+    Push,
+    Cover,
+}
+
+/// Shared body of [`insert`] and [`overwrite`].
 fn place(
     tl: &mut Timeline,
     track: TrackId,
     at: Frame,
     clip: &Clip,
     new_id: Option<ClipId>,
-    ripple: bool,
+    ripple: Ripple,
 ) -> Result<Effect, CmdError> {
     let n = usize::from(new_id.is_none());
     with_ids(tl, n, |tl, ids| {
@@ -957,7 +986,7 @@ fn place(
             at,
             clips: vec![c],
             span,
-            ripple,
+            ripple: matches!(ripple, Ripple::Push),
         }
         .apply(tl)
     })
