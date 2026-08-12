@@ -254,6 +254,26 @@ pub fn default_bindings() -> Vec<(Vec<Key>, LeafAction)> {
                 count: 1,
             }),
         ),
+        // -- moving clips --
+        // `g`-prefixed, because the unprefixed `h`/`j`/`k`/`l` are motions
+        // and a nudge is an edit. Track structure (`:track move`) stays ex
+        // only, like `:track` and `:track!`.
+        (
+            k("gh"),
+            standalone(Action::ShiftClips {
+                forward: false,
+                count: 1,
+            }),
+        ),
+        (
+            k("gl"),
+            standalone(Action::ShiftClips {
+                forward: true,
+                count: 1,
+            }),
+        ),
+        (k("gk"), standalone(Action::MoveClipsTrack { up: true })),
+        (k("gj"), standalone(Action::MoveClipsTrack { up: false })),
         // -- visual mode --
         (k("v"), standalone(Action::EnterVisual(Mode::Visual))),
         (k("V"), standalone(Action::EnterVisual(Mode::VisualLine))),

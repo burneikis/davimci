@@ -700,3 +700,28 @@ fn a_pending_sequence_reports_what_was_typed_and_what_could_follow() {
     engine.feed(Key::Char('g'), &mut session);
     assert!(engine.pending().is_idle(), "the sequence stayed pending");
 }
+
+/// `gl`/`gh` nudge the clip under the playhead, and a count is frames.
+#[test]
+fn shifting_a_clip_with_keys_takes_a_count_in_frames() {
+    let (mut e, mut s) = scene();
+    let out = feed(&mut e, &mut s, "10gl");
+    assert!(matches!(out.last(), Some(Outcome::Applied(_))), "{out:?}");
+    assert_eq!(s.timeline().dump(), "V1:<gap 10>[a 10-310]\nA1: -\n");
+
+    feed(&mut e, &mut s, "gh");
+    assert_eq!(s.timeline().dump(), "V1:<gap 9>[a 9-309]\nA1: -\n");
+}
+
+/// `gj`/`gk` move along the stack as shown, and refuse at its ends rather
+/// than wrapping onto a track the user cannot see they are leaving.
+#[test]
+fn moving_a_clip_between_tracks_with_keys_stops_at_the_stack_ends() {
+    let (mut e, mut s) = scene();
+    let out = feed(&mut e, &mut s, "gk");
+    assert!(matches!(out.last(), Some(Outcome::Error(_))), "{out:?}");
+
+    let out = feed(&mut e, &mut s, "gj");
+    assert!(matches!(out.last(), Some(Outcome::Applied(_))), "{out:?}");
+    assert_eq!(s.timeline().dump(), "V1: -\nA1:[a 0-300]\n");
+}

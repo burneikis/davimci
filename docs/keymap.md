@@ -34,6 +34,10 @@ holds there is grandfathered and listed below; nothing joins it.
 | `.` | repeat the last edit |
 | `>` | trim the nearest edge one jump point later |
 | `a` | append media after the current clip |
+| `gh` | slide the selected clips one frame earlier |
+| `gj` | move the selected clips to the track below |
+| `gk` | move the selected clips to the track above |
+| `gl` | slide the selected clips one frame later |
 | `gp` | paste after the playhead, overwriting |
 | `gP` | paste before the playhead, overwriting |
 | `gs` | split at the playhead on every track |

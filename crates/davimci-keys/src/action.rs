@@ -207,6 +207,17 @@ pub enum Action {
     },
     /// `+` / `-`: adjust gain in dB.
     GainAdjust(i32),
+    /// `gh` / `gl`: slide the selection, or the clip under the playhead,
+    /// along the timeline by `count` frames, spacing intact.
+    ShiftClips {
+        forward: bool,
+        count: u32,
+    },
+    /// `gj` / `gk`: put the same clips on the track below or above, at the
+    /// frames they already sit at.
+    MoveClipsTrack {
+        up: bool,
+    },
     /// `<Space>m`: toggle mute on the current track.
     ToggleMute,
     /// `<Space>s`: toggle solo on the current track.
@@ -281,6 +292,8 @@ impl Action {
             | Self::NarrowSelection { .. }
             | Self::TrimEdgeStep { .. }
             | Self::GainAdjust(_)
+            | Self::ShiftClips { .. }
+            | Self::MoveClipsTrack { .. }
             | Self::ToggleMute
             | Self::ToggleSolo
             | Self::CreateTransition { .. }

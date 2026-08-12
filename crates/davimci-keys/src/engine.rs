@@ -471,6 +471,8 @@ impl Engine {
                 or_error(self.do_trim_edge_step(forward, count, session))
             }
             Action::GainAdjust(step) => self.do_gain(step, session),
+            Action::ShiftClips { forward, count } => self.do_shift_clips(forward, count, session),
+            Action::MoveClipsTrack { up } => self.do_move_clips_track(up, session),
             Action::ToggleMute => Self::do_toggle_track_flag(session, TrackFlag::Mute),
             Action::ToggleSolo => Self::do_toggle_track_flag(session, TrackFlag::Solo),
             Action::CreateTransition { kind } => Self::do_transition(session, Some(&kind)),
@@ -944,6 +946,71 @@ impl Engine {
             return Outcome::Error("no clip in the selection".to_string());
         }
         run(session.exec(&EditCommand::Sequence(cmds)))
+    }
+
+    /// The clips a clip-level edit acts on: the selection, or the clip under
+    /// the playhead when nothing is selected.
+    fn target_clips(&self, session: &Session) -> Vec<ClipId> {
+        if let Some(sel) = self.selection() {
+            return sel
+                .clips(session.timeline())
+                .into_iter()
+                .map(|(_, c)| c.id)
+                .collect();
+        }
+        let p = session.timeline().playhead();
+        clip_under(session.timeline(), p.track, p.frame)
+            .into_iter()
+            .collect()
+    }
+
+    /// `gh` / `gl`: slide the target clips along the timeline.
+    ///
+    /// With no selection the playhead rides along, so a second nudge acts on
+    /// the same clip instead of on whatever the clip just uncovered.
+    fn do_shift_clips(&mut self, forward: bool, count: u32, session: &mut Session) -> Outcome {
+        let riding = self.selection().is_none();
+        let clips = self.target_clips(session);
+        if clips.is_empty() {
+            return Outcome::Error("no clip to shift".to_string());
+        }
+        let frames = i64::from(count);
+        let delta = if forward { frames } else { -frames };
+        let outcome = run(session.exec(&EditCommand::ShiftClips { clips, delta }));
+        if riding && matches!(outcome, Outcome::Applied(_)) {
+            let p = session.timeline().playhead();
+            let frame = Frame(p.frame.get().saturating_add_signed(delta));
+            let _ = session.set_playhead(frame, p.track);
+        }
+        outcome
+    }
+
+    /// `gj` / `gk`: move the target clips one track down or up.
+    ///
+    /// The neighbouring track, not the nearest track of the same kind: what
+    /// the stack shows is what the key moves along.
+    fn do_move_clips_track(&mut self, up: bool, session: &mut Session) -> Outcome {
+        let clips = self.target_clips(session);
+        if clips.is_empty() {
+            return Outcome::Error("no clip to move".to_string());
+        }
+        let tl = session.timeline();
+        let here = tl.playhead().track;
+        let Some(index) = tl.tracks().iter().position(|t| t.id == here) else {
+            return Outcome::Error("the playhead is not on a track".to_string());
+        };
+        let next = if up {
+            index.checked_sub(1)
+        } else {
+            index.checked_add(1).filter(|i| *i < tl.tracks().len())
+        };
+        let Some(track) = next.map(|i| tl.tracks()[i].id) else {
+            return Outcome::Error(format!(
+                "there is no track {} this one",
+                if up { "above" } else { "below" }
+            ));
+        };
+        run(session.exec(&EditCommand::MoveClipsToTrack { clips, track }))
     }
 
     /// Toggle one of the playhead track's flags.

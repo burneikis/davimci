@@ -654,6 +654,10 @@ fn instantiate(action: Action, count1: Option<u32>, register: Option<char>) -> A
             forward,
             count: count1.unwrap_or(1),
         },
+        Action::ShiftClips { forward, .. } => Action::ShiftClips {
+            forward,
+            count: count1.unwrap_or(1),
+        },
         Action::GainAdjust(step) => {
             Action::GainAdjust(step.saturating_mul(count_as_i32(count1.unwrap_or(1))))
         }

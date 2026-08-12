@@ -180,6 +180,20 @@ fn standalone(a: &Action) -> (&'static str, String) {
                 if *forward { "later" } else { "earlier" }
             ),
         ),
+        Action::ShiftClips { forward, .. } => (
+            edit,
+            format!(
+                "slide the selected clips one frame {}",
+                if *forward { "later" } else { "earlier" }
+            ),
+        ),
+        Action::MoveClipsTrack { up } => (
+            edit,
+            format!(
+                "move the selected clips to the track {}",
+                if *up { "above" } else { "below" }
+            ),
+        ),
         Action::CreateTransition { kind } => (edit, format!("create a {kind} at the nearest cut")),
         Action::DeleteTransition => (edit, "delete the transition at the nearest cut".into()),
         Action::EnterVisual(mode) => (
