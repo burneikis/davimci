@@ -145,7 +145,7 @@ pub trait Frontend {
     /// Current drawable size.
     fn surface(&self) -> Surface;
 
-    /// Draw one frame. Errors here are recoverable by Phase 0 policy: the app
+    /// Draw one frame. Errors here are recoverable: the app
     /// reports them and keeps running.
     fn render(&mut self, view: &ViewState) -> Result<(), AppError>;
 

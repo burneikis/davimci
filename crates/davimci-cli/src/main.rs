@@ -309,7 +309,7 @@ fn build(ws: Workspace, host: PresentHost, mut plugins: Plugins) -> (App, Editor
 /// MLT is only touched here, in the binary: no frontend may reference it
 ///. A missing or broken `libmlt` degrades to the mock backend
 /// rather than refusing to start, so editing still works without a working
-/// decoder (Phase 0: recoverable errors degrade locally).
+/// decoder (recoverable errors degrade locally).
 fn engine_for(
     session: &davimci_cmd::Session,
     host: PresentHost,
@@ -419,7 +419,7 @@ fn report(result: Result<ExOutcome, davimci_cli::CliError>) {
             }
         }
         Ok(ExOutcome::Quit) => println!("closed the last timeline"),
-        // Phase 0: the user sees a sentence, never Debug output.
+        // The user sees a sentence, never Debug output.
         Err(e) => eprintln!("{}", e.user_message()),
     }
 }

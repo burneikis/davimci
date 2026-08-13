@@ -527,7 +527,7 @@ impl Timeline {
         c.transition_in.as_ref().map(|tr| (c.id, tr))
     }
 
-    /// Flag a clip's media offline, or bring it back (Phase 0 policy).
+    /// Flag a clip's media offline, or bring it back (offline-media policy).
     ///
     /// The project stays editable either way; the flag is what makes the
     /// backend render a placeholder and what blocks export.

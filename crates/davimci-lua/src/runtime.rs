@@ -303,7 +303,7 @@ impl Runtime {
     ///
     /// A handler refuses a cancellable event either by returning `false`
     /// (optionally with a message) or by raising an error. Raising also
-    /// disables it, per the Phase 0 recoverable policy; returning `false` is
+    /// disables it, per the recoverable-error policy; returning `false` is
     /// a deliberate veto and leaves the handler in place.
     pub fn dispatch(&self, event: &Event) -> Dispatch {
         let mut out = Dispatch::default();

@@ -635,7 +635,10 @@ fn relinking_to_a_missing_file_keeps_the_clip_offline_and_says_so() {
         .unwrap();
     assert!(matches!(out, ExOutcome::Message(ref m) if m.contains("still missing")));
     let (_, c) = ws.current().timeline().find_clip(clip).unwrap();
-    assert!(c.is_offline(), "export must stay blocked (Phase 0 policy)");
+    assert!(
+        c.is_offline(),
+        "export must stay blocked (offline-media policy)"
+    );
 }
 
 #[test]

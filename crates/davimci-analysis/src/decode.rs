@@ -1,7 +1,7 @@
 //! The only place analysis touches real media.
 //!
 //! Decoding is done by piping raw samples out of ffmpeg rather than linking a
-//! second demux stack: MLT (Phase 6) owns playback, and analysis just needs
+//! second demux stack: MLT owns playback, and analysis just needs
 //! numbers. Everything above this module works on `&[f32]`, which is why the
 //! measurement code is testable with no media at all.
 

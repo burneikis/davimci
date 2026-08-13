@@ -69,7 +69,7 @@ pub struct Autocmd {
     pub event: String,
     pub func: Function,
     /// Cleared when the handler throws; a broken handler is disabled for the
-    /// session rather than being allowed to break the editor (Phase 0).
+    /// session rather than being allowed to break the editor.
     pub enabled: bool,
 }
 

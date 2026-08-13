@@ -4,7 +4,7 @@
 //! reports where the playhead should go or which range and tracks a verb
 //! should act on. Nothing in this crate mutates, and nothing in it touches
 //! media or a render backend - predicate motions reach analysis through the
-//! [`predicate::PredicateIndex`] trait, which Phase 5 implements.
+//! [`predicate::PredicateIndex`] trait, which `davimci-analysis` implements.
 
 pub mod error;
 pub mod jump;

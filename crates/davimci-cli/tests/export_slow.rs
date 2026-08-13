@@ -402,7 +402,7 @@ fn cancelling_a_real_export_stops_it_and_keeps_the_partial_file() {
     assert!(!editor.exporter().is_running(), "cancel did not stop it");
 
     // The editor is still usable afterwards - a cancelled export is not a
-    // crash (Phase 0: recoverable errors degrade locally).
+    // crash (recoverable errors degrade locally).
     app.event(Event::Key(davimci_keys::Key::Char('l')), &mut editor);
     let _ = std::fs::remove_file(&out);
 }

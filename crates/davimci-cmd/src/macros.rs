@@ -3,7 +3,7 @@
 //! A macro is a list of opaque input tokens, not a list of commands: vim
 //! replays keystrokes, so `@a` re-runs motions and counts against wherever
 //! the playhead is now. `davimci-keys` decides what a token means; this crate
-//! only stores them, which keeps Phase 2 free of any key grammar.
+//! only stores them, which keeps this crate free of any key grammar.
 
 use std::collections::BTreeMap;
 

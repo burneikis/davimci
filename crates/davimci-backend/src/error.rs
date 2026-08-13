@@ -5,7 +5,7 @@ use davimci_core::{Classify, ErrorClass};
 /// Errors raised by a [`RenderBackend`](crate::RenderBackend).
 ///
 /// Every variant carries a complete user-facing sentence, and every variant
-/// maps onto exactly one Phase 0 recovery policy.
+/// maps onto exactly one recovery policy.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum BackendError {
     #[error("could not read media at {path}: {reason}")]

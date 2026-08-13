@@ -456,7 +456,7 @@ fn gx_and_dax_add_and_remove_a_transition_at_the_nearest_cut() {
 }
 
 /// A cut whose clips have no handles is refused with a sentence, and nothing
-/// enters the undo log (Phase 0 policy).
+/// enters the undo log.
 #[test]
 fn gx_without_handles_reports_why_and_changes_nothing() {
     let mut s = Session::new(davimci_core::testing::media_fixture(&[

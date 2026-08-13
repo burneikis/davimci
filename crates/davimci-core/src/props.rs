@@ -122,7 +122,7 @@ proptest! {
         }
     }
 
-    /// A rejected operation leaves the timeline byte-identical (Phase 0.1).
+    /// A rejected operation leaves the timeline byte-identical.
     #[test]
     fn rejected_operations_do_not_mutate(ops in prop::collection::vec(op(), 1..40)) {
         let mut tl = base();

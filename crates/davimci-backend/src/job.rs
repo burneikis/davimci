@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use davimci_core::{Fps, Frame, Resolution};
 
-/// Encoder settings for one export. Presets (Phase 8b) build these.
+/// Encoder settings for one export. Presets build these.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderSettings {
     pub resolution: Resolution,
@@ -72,7 +72,7 @@ pub enum RenderState {
     Running,
     Done,
     Cancelled,
-    /// Carries a user-facing sentence, per Phase 0.
+    /// Carries a user-facing sentence.
     Failed(String),
 }
 

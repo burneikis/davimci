@@ -159,7 +159,7 @@ fn exec(session: &mut Session, v1: TrackId, shape: &Shape) -> Result<bool, TestC
 }
 
 proptest! {
-    /// The Phase 2 headline property: undoing everything gets the project
+    /// The headline undo property: undoing everything gets the project
     /// back exactly, ids and all, however the edits interleaved.
     #[test]
     fn undoing_everything_restores_byte_identical_state(

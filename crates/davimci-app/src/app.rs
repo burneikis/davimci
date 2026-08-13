@@ -1301,7 +1301,7 @@ impl App {
     }
 
     /// Drive a frontend until it quits. Rendering errors are reported and the
-    /// loop continues (Phase 0: recoverable errors degrade locally).
+    /// loop continues (recoverable errors degrade locally).
     pub fn run<F: Frontend>(
         &mut self,
         frontend: &mut F,

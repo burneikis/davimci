@@ -187,7 +187,7 @@ pub struct VideoFrame {
 }
 
 impl VideoFrame {
-    /// A black frame, used for the Phase 0 "degrade locally" decode policy.
+    /// A black frame, used for the "degrade locally" decode policy.
     #[must_use]
     pub fn black(position: Frame, res: Resolution) -> Self {
         let mut rgba = vec![0u8; (res.width as usize) * (res.height as usize) * 4];

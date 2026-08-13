@@ -1,7 +1,7 @@
 //! Errors at the project-lifecycle layer.
 //!
 //! Every variant carries a complete user-facing sentence, and every variant
-//! is classified, because the CLI is where Phase 0's policies are actually
+//! is classified, because the CLI is where the error policies are actually
 //! enforced: a user error refuses before touching anything, corruption stops
 //! the session after flushing autosave.
 

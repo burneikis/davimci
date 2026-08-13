@@ -1,4 +1,4 @@
-//! Rendering tests driven by the Phase 9a golden view states, so a
+//! Rendering tests driven by the golden view states, so a
 //! view-state regression fails in `davimci-app` *and* here.
 
 #![allow(

@@ -443,7 +443,7 @@ impl UndoTree {
     ///
     /// The nodes are validated before anything is rebuilt: a parent that
     /// points forwards, or a `current` that names no node, is corruption
-    /// rather than something to guess around (Phase 0).
+    /// rather than something to guess around.
     pub fn restore(saved: SavedHistory) -> Result<(Self, Timeline), CmdError> {
         let mut tree = Self::new(saved.root);
         tree.next_seq = saved.next_seq;

@@ -321,7 +321,7 @@ fn tempdir() -> std::path::PathBuf {
     base
 }
 
-// export (Phase 8b)
+// export
 
 /// `:` commands the workspace cannot answer, because only the editor holds a
 /// render backend.

@@ -175,7 +175,7 @@ impl Workspace {
     pub fn with_session<T>(&mut self, f: impl FnOnce(&mut Session) -> T) -> T {
         let out = f(&mut self.current_mut().session);
         // A failed autosave must not lose the caller's result; it degrades
-        // to a disabled writer (Phase 0 recoverable policy).
+        // to a disabled writer (recoverable-error policy).
         if self.sync_autosave().is_err() {
             self.current_mut().autosave = Autosave::disabled();
         }

@@ -22,7 +22,7 @@ pub struct MediaRef {
     pub source_fps: Fps,
     /// Source length in timeline frames after conform.
     pub length: Frame,
-    /// Phase 0 offline-media policy: still editable, blocks export.
+    /// offline-media policy: still editable, blocks export.
     pub offline: bool,
     /// Which stream of the container this clip plays, as the demuxer numbers
     /// them. `None` means "the file's default", which is all a single-stream

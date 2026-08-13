@@ -1,9 +1,9 @@
 //! Export presets defined from Lua.
 //!
 //! Validation happens where the preset is *defined*, not where it is used:
-//! a misspelled container is a user error (Phase 0), and the user should
+//! a misspelled container is a user error, and the user should
 //! hear about it when the config loads rather than after a long render.
-//! Phase 8b owns the registry that actually runs these; this is the part
+//! `davimci-backend` owns the registry that actually runs these; this is the part
 //! that can exist without an encoder.
 
 use davimci_backend::RenderSettings;

@@ -283,7 +283,7 @@ impl PredicateIndex for AnalysisIndex {
                 }
             },
             // Clip tags are not part of the model yet (they arrive with the
-            // Lua API in Phase 7), so there is genuinely nothing to match.
+            // Lua API), so there is genuinely nothing to match.
             Predicate::Tagged { .. } => None,
         };
         match hit_ms {

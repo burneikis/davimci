@@ -349,7 +349,7 @@ fn editing_the_timeline_invalidates_cached_stills() {
 /// to a CPU-path comparison.
 const HARDWARE_DECODE_TOLERANCE: i32 = 4;
 
-/// A 1080p h264 fixture is exactly what phase 1 targets: long-GOP, above the
+/// A 1080p h264 fixture is the hardware-decode target: long-GOP, above the
 /// readback threshold. Without a render device the test asserts the other
 /// half of the contract - that the session silently keeps decoding in
 /// software.
@@ -449,7 +449,7 @@ fn a_planar_pull_is_the_same_picture_in_fewer_bytes() {
     }
 }
 
-/// Phase 1's before/after number, printed rather than asserted: a wall clock
+/// A before/after number, printed rather than asserted: a wall clock
 /// is not a correctness claim, and a machine without a device has nothing to
 /// compare.
 #[test]
@@ -481,7 +481,7 @@ fn decode_cost_per_frame_is_reported_for_both_paths() {
     }
     assert_eq!(timings.len(), 2);
 
-    // Phase 3's number: the same pull without the RGBA conversion, and the
+    // The planar number: the same pull without the RGBA conversion, and the
     // bytes a host would upload for each.
     let mut b = MltBackend::new(tl.props).unwrap();
     b.set_timeline(&tl).unwrap();

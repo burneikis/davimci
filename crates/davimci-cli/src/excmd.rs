@@ -126,7 +126,7 @@ pub const DEFAULT_CUE_MS: u64 = 2000;
 pub const DEFAULT_NORMALIZE_DB: f32 = -12.0;
 
 /// What running a command produced. Messages are user-facing sentences, never
-/// `Debug` output (Phase 0 rule 4).
+/// `Debug` output.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExOutcome {
     /// One line for the status line.
@@ -900,7 +900,7 @@ impl Workspace {
         }
     }
 
-    /// `:relink` (Phase 0 offline-media policy): point clips at a file that
+    /// `:relink` (offline-media policy): point clips at a file that
     /// moved. One undoable command, so a mistaken relink is `u` away.
     /// `:transition [name] [frames]` on the cut nearest the playhead.
     ///

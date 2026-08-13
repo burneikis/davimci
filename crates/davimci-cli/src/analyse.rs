@@ -217,7 +217,7 @@ impl Analyser {
                     id,
                     state: JobState::Cancelled,
                 }),
-                // Phase 0: a failed analysis degrades locally. Editing
+                // A failed analysis degrades locally. Editing
                 // continues; that track simply has no envelope.
                 JobEvent::Failed { .. } => self.updates.push(JobUpdate::Finished {
                     id,

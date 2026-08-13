@@ -222,7 +222,7 @@ mod tests {
         assert!(e.class().is_continuable());
     }
 
-    /// Phase 0 rule 4: every error carries user-facing text.
+    /// Every error carries user-facing text.
     #[test]
     fn every_error_has_a_nonempty_message() {
         let all = [

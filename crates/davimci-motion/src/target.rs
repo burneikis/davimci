@@ -97,7 +97,7 @@ pub struct Position {
 
 /// The result of resolving a motion or text object.
 ///
-/// `Pending` exists because predicate motions are backed by the Phase 5
+/// `Pending` exists because predicate motions are backed by the
 /// analysis index: when analysis has not finished, the honest answer is "not
 /// yet", never a stale or guessed frame.
 #[derive(Debug, Clone, PartialEq, Eq)]

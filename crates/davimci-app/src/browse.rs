@@ -38,8 +38,8 @@ pub fn is_media(path: &Path) -> bool {
 /// files, each group sorted by name.
 ///
 /// Unreadable directories produce an empty listing rather than an error: the
-/// picker stays open and the user can navigate elsewhere (Phase 0,
-/// recoverable errors degrade locally).
+/// picker stays open and the user can navigate elsewhere (recoverable
+/// errors degrade locally).
 #[must_use]
 pub fn list_dir(dir: &Path) -> Vec<BrowseEntry> {
     let mut dirs = Vec::new();

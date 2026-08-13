@@ -1,4 +1,4 @@
-//! App-level errors (Phase 0 policy: every one is a finished sentence).
+//! App-level errors (every one is a finished sentence).
 
 use davimci_cmd::CmdError;
 

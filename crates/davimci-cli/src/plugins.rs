@@ -147,7 +147,7 @@ impl Plugins {
                 active: std::collections::BTreeSet::new(),
             },
             // A runtime that cannot even be created costs the user their
-            // plugins, not their editor (Phase 0: degrade locally).
+            // plugins, not their editor (degrade locally).
             Err(e) => Self {
                 runtime: no_runtime(),
                 notices: vec![Notice::from_error(&e)],

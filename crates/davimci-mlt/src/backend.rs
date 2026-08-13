@@ -1071,7 +1071,7 @@ impl MltBackend {
             &entry.resource.resource(),
         ) {
             Ok(p) => p,
-            // Phase 0 "degrade locally": a source that will not open becomes a
+            // "Degrade locally": a source that will not open becomes a
             // placeholder rather than an unopenable project.
             Err(_) => {
                 Producer::new(&self.profile, "color", "#ff202080").map_err(BackendError::from)?
@@ -1335,7 +1335,7 @@ fn decode_run(
                     height,
                     rgba,
                 },
-                // Phase 0: one bad frame degrades to black, it does not end
+                // One bad frame degrades to black, it does not end
                 // the session.
                 Err(_) => VideoFrame::black(at, res),
             },
@@ -1373,7 +1373,7 @@ fn keep_run(
 /// `consumer-frame-show` listener: copies the shown frame's image out.
 ///
 /// Runs on the consumer's own thread, so it catches unwinds: a panic must
-/// never cross back into C (Phase 0 rule 3).
+/// never cross back into C (a hard rule of the FFI layer).
 unsafe extern "C" fn on_frame_show(
     _owner: sys::mlt_properties,
     data: *mut c_void,

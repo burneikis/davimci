@@ -414,7 +414,7 @@ impl PresetRegistry {
 }
 
 /// Everything that can be wrong with a preset. Each message is a complete
-/// user-facing sentence (Phase 0).
+/// user-facing sentence.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PresetError {
     #[error("there is no export preset called '{name}'; the ones that exist are: {known}")]

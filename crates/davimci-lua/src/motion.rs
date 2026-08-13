@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-/// One analysis sample, at the Phase 5 hop.
+/// One analysis sample, at the analysis hop.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Sample {
     pub frame: u64,

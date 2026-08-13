@@ -1137,7 +1137,7 @@ mod tests {
     }
 
     /// Apply, undo, and redo `cmd`, asserting the two properties the whole
-    /// phase rests on: undo restores byte-identical state, and redo of the
+    /// undo system rests on: undo restores byte-identical state, and redo of the
     /// materialised command reproduces the post-apply state exactly.
     ///
     /// The id cursor is restored around each step exactly as [`UndoTree`]
@@ -1427,7 +1427,7 @@ mod tests {
     }
 
     /// A user error leaves the timeline byte-identical and never enters the
-    /// undo log (Phase 0 policy).
+    /// undo log.
     #[test]
     fn a_transition_without_handles_is_refused_before_it_mutates() {
         let mut tl = fixture(&[("V1", &[(0, 100, "a"), (100, 100, "b")])]);

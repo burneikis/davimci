@@ -113,7 +113,7 @@ pub fn run(mut app: App, mut editor: Editor) -> Result<()> {
         if after != before {
             app.resize(after);
         }
-        // A failed draw loses a frame, not the session (Phase 0: recoverable
+        // A failed draw loses a frame, not the session (recoverable
         // errors degrade locally).
         if let Err(e) = term.draw(tui.last_lines(), tui.preview_escape(), tui.cursor()) {
             app.notify(davimci_app::Message::error(format!(

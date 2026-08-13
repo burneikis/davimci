@@ -56,9 +56,9 @@ pub struct Editor {
     /// Deferred status text produced by transport and preview, which have no
     /// other way to reach the status line.
     notices: Vec<Message>,
-    /// The preset registry and whatever export is running (Phase 8b).
+    /// The preset registry and whatever export is running.
     exporter: Exporter,
-    /// Background analysis of the audio tracks (Phase 9e).
+    /// Background analysis of the audio tracks.
     analyser: Analyser,
     /// `:set proxy`: the policy, the encodes it started, and which proxy
     /// stands in for which original.
@@ -945,7 +945,7 @@ impl Editor {
         let ids = session.reserve_ids(needed);
         let mut ids = ids.into_iter();
         // Built before anything is applied, so a duck that cannot land
-        // leaves the timeline untouched (Phase 0 user-error policy).
+        // leaves the timeline untouched (user-error policy).
         let mut plans = Vec::with_capacity(targets.len());
         for track in &targets {
             plans.push(crate::audio::duck_plan(
@@ -1200,7 +1200,7 @@ impl Editor {
 
     /// Push the graph to the backend, reporting failure as a status message
     /// rather than killing the session - an unprojectable timeline is still
-    /// an editable one (Phase 0: degrade locally).
+    /// an editable one (degrade locally).
     fn project(&mut self, session: &Session) {
         // The one place a proxy stands in for its original: everything above
         // this line is the timeline the user edited.

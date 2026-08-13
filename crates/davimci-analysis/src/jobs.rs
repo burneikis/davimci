@@ -223,7 +223,7 @@ impl JobRunner {
                 Ok(()) if ctx.is_cancelled() => JobEvent::Cancelled { job: id },
                 Ok(()) => JobEvent::Finished { job: id },
                 Err(AnalysisError::Cancelled) => JobEvent::Cancelled { job: id },
-                // Phase 0: a failed analysis job degrades locally. It reports
+                // A failed analysis job degrades locally. It reports
                 // and dies; the editor keeps running with that track pending.
                 Err(error) => JobEvent::Failed { job: id, error },
             };

@@ -2,7 +2,7 @@
 //!
 //! These are the motions that ask a question about the *media* rather than
 //! the timeline structure: "next audio peak above -2 dB", "next silence
-//! longer than 500 ms". The answers come from the Phase 5 analysis index,
+//! longer than 500 ms". The answers come from the analysis index,
 //! which runs in the background, so the interface has three outcomes rather
 //! than two: found, definitely-not-found, and not-yet-known.
 
@@ -53,7 +53,7 @@ pub enum Answer {
 
 /// The analysis-backed index a predicate motion queries.
 ///
-/// Implemented by `davimci-analysis` in Phase 5. `davimci-motion` depends only on
+/// Implemented by `davimci-analysis`. `davimci-motion` depends only on
 /// this trait so the model layer stays free of media and I/O.
 pub trait PredicateIndex: std::fmt::Debug {
     /// First match strictly beyond `from` in `dir`.

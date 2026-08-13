@@ -1,6 +1,6 @@
 //! Background job progress shown in the status line.
 //!
-//! The app does not run jobs; analysis (Phase 5) and export (Phase 8b) do.
+//! The app does not run jobs; analysis and export do.
 //! This is the view of them, so every frontend reports progress the same way.
 
 /// What a running job is doing. The label is user-facing text.

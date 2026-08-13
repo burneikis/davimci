@@ -1,4 +1,4 @@
-//! Presenter errors (Phase 0: complete user-facing sentences).
+//! Presenter errors (every one is a complete user-facing sentence).
 
 #[derive(Debug, thiserror::Error)]
 pub enum PresentError {

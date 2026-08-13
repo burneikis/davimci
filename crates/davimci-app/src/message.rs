@@ -1,6 +1,6 @@
 //! Status-line messages and notifications.
 //!
-//! Phase 0's rule that every error carries a complete user-facing sentence is
+//! The rule that every error carries a complete user-facing sentence is
 //! enforced here by construction: a [`Message`] holds a `String` that came
 //! from a typed error's `Display`, never its `Debug`.
 

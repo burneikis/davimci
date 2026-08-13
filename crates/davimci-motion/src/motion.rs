@@ -92,7 +92,7 @@ impl<'a> MotionCtx<'a> {
 
 /// Anything that can resolve to a motion target.
 ///
-/// Lua-defined motions (Phase 7) implement this too, which is why it is a
+/// Lua-defined motions implement this too, which is why it is a
 /// trait and not just the enum below.
 pub trait Motion {
     /// Resolve against the current playhead. `count` of 0 means 1, as in vim.

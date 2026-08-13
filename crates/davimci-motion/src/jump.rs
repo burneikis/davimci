@@ -74,9 +74,9 @@ pub fn frames_per_column(zoom: Zoom) -> u64 {
 pub struct JumpSources {
     pub clip_bounds: bool,
     pub markers: bool,
-    /// Silence boundaries, supplied by the Phase 5 analysis index.
+    /// Silence boundaries, supplied by the analysis index.
     pub silence: bool,
-    /// Audio peaks, supplied by the Phase 5 analysis index.
+    /// Audio peaks, supplied by the analysis index.
     pub peaks: bool,
 }
 

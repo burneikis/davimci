@@ -22,7 +22,7 @@ pub struct Cue {
 }
 
 /// Parse SRT. Malformed blocks are skipped rather than failing the import:
-/// a broken cue must not cost the user the other 400 (Phase 0, recoverable).
+/// a broken cue must not cost the user the other 400 (recoverable).
 #[must_use]
 pub fn parse_srt(text: &str) -> Vec<Cue> {
     let mut cues = Vec::new();

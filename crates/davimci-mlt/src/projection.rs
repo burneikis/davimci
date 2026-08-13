@@ -17,7 +17,7 @@ pub enum Resource {
     /// A generated text/subtitle clip.
     Text(String),
     /// Offline media: renders as a placeholder so the project stays editable
-    /// while export stays blocked (Phase 0).
+    /// while export stays blocked.
     Offline { path: String },
     /// A generated clip with no media and no text - a colour card.
     Colour,
