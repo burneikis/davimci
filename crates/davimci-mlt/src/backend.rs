@@ -171,6 +171,17 @@ fn push_range(
     lowest
 }
 
+/// Blend a fresh cost measure into the running one.
+///
+/// A cold decode - the first of a shuttle, or one on a loaded machine - costs
+/// hundreds of frames of clock. Aiming that far below the clock lands on frame
+/// zero, where a backwards pass has nothing left to show, so the measure is
+/// capped at `reach` and averaged with the last one.
+fn blend_cost(cost: u64, travel: u64, decoded: u64, reach: u64) -> u64 {
+    let measured = travel.div_ceil(decoded.max(1)).clamp(1, reach.max(1));
+    cost.midpoint(measured).max(1)
+}
+
 impl Scrub {
     fn spawn(graph: Graph, shared: &Arc<PreviewShared>, res: Resolution, run: u64) -> Self {
         let target = Arc::new(AtomicI64::new(-1));
@@ -191,8 +202,12 @@ impl Scrub {
             let keep = usize::try_from(run.saturating_mul(4)).unwrap_or(usize::MAX);
             // Clock frames that go by per frame decoded, which is the one
             // measure that says whether a run can keep up at this speed and
-            // how far ahead to aim when it cannot.
+            // how far ahead to aim when it cannot. It is capped: a cold first
+            // decode costs hundreds of frames of clock, and aiming that far
+            // down lands on frame zero, where a backwards pass has nothing
+            // left to show and the preview freezes.
             let mut cost = 1_u64;
+            let reach = run.saturating_mul(4);
             // The lowest picture handed over so far: a backwards pass only
             // ever goes down.
             let mut published: Option<u64> = None;
@@ -279,7 +294,9 @@ impl Scrub {
                     .saturating_sub(want.load(Ordering::Relaxed))
                     .unsigned_abs();
                 let decoded = end.get().saturating_sub(start.get()).saturating_add(1);
-                cost = travel.div_ceil(decoded.max(1)).max(1);
+                // Averaged with the last measure so one slow decode moves the
+                // aim rather than deciding it.
+                cost = blend_cost(cost, travel, decoded, reach);
                 let adjacent = bottom.is_some_and(|lo| end.get().saturating_add(1) == lo);
                 if !adjacent {
                     window.clear();
@@ -2007,7 +2024,22 @@ impl RenderBackend for MltBackend {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::panic, clippy::expect_used)]
 mod tests {
-    use super::{MltBackend, qt_is_safe_here};
+    use super::{MltBackend, blend_cost, qt_is_safe_here};
+
+    /// Regression: one cold decode measured a cost of the whole timeline, so
+    /// the backwards shuttle aimed at frame zero, published it, and had
+    /// nothing left below it - the preview showed a single picture and froze.
+    #[test]
+    fn a_cold_decode_cannot_aim_a_backwards_shuttle_at_frame_zero() {
+        let reach = 48;
+        assert!(
+            blend_cost(1, 200, 1, reach) < 200,
+            "a single slow decode set the aim to the whole clock travel"
+        );
+        assert!(blend_cost(1, 10_000, 1, reach) <= reach);
+        assert_eq!(blend_cost(1, 0, 1, reach), 1, "a stalled clock costs one");
+        assert_eq!(blend_cost(8, 8, 1, reach), 8, "a steady cost should hold");
+    }
 
     fn off_main<T: Send + 'static>(f: fn() -> T) -> T {
         std::thread::spawn(f)
