@@ -113,6 +113,23 @@ fn clips(app: &App) -> usize {
     app.session().timeline().tracks()[0].clips().len()
 }
 
+/// Tick until `:jobs` mentions `want`, returning whatever it said last.
+/// Work the policy hands to a worker lands a tick or more after the event
+/// that queued it, and how many depends on the machine.
+fn tick_until_jobs_say(app: &mut App, editor: &mut Editor, want: &str) -> String {
+    let mut said = String::new();
+    for _ in 0..2_000 {
+        app.event(Event::Tick, editor);
+        app.event(Event::Command(":jobs".into()), editor);
+        said = app.view().message.expect("a status line").text;
+        if said.contains(want) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    said
+}
+
 #[test]
 fn a_mapped_key_edits_and_one_undo_takes_it_back() {
     // The whole point of item 1: a binding the user wrote reaches the
@@ -1187,9 +1204,9 @@ fn opening_a_project_queues_proxies_for_the_media_it_already_holds() {
         "the plugin did not state a policy"
     );
     // Nothing was imported: this is the timeline the editor opened with.
-    app.event(Event::Tick, &mut editor);
-    app.event(Event::Command(":jobs".into()), &mut editor);
-    let said = app.view().message.expect("a status line").text;
+    // The policy judges on the worker, so the job appears a tick or more
+    // later - poll rather than assume one tick was enough.
+    let said = tick_until_jobs_say(&mut app, &mut editor, "encoding a proxy for");
     assert!(
         said.contains("encoding a proxy for"),
         "the open project's media was never offered to the policy: {said}"

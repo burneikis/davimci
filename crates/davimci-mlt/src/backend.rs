@@ -1067,12 +1067,23 @@ impl MltBackend {
     /// The text producer to use, best first: builds without MLT's Qt module
     /// have no `qtext`, and a title card that silently degraded to a
     /// transparent card would export a picture with no text on it.
-    const TEXT_SERVICES: [&'static str; 2] = ["qtext", "pango"];
+    ///
+    /// `qtext` is only offered on the main thread. It constructs the process
+    /// `QApplication`, and a Qt built off the main thread corrupts the heap
+    /// when the process tears it down - which aborted the test binary after
+    /// every test in it had passed.
+    fn text_services() -> &'static [&'static str] {
+        if std::thread::current().name() == Some("main") {
+            &["qtext", "pango"]
+        } else {
+            &["pango", "qtext"]
+        }
+    }
 
     fn build_resource_producer(&self, entry: &ClipEntry) -> Option<Producer> {
         let resource = entry.resource.resource();
         if matches!(entry.resource, Resource::Text(_)) {
-            return Self::TEXT_SERVICES
+            return Self::text_services()
                 .iter()
                 .find_map(|s| Producer::new(&self.profile, s, &resource).ok());
         }
@@ -1976,5 +1987,26 @@ impl RenderBackend for MltBackend {
             });
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::panic, clippy::expect_used)]
+mod tests {
+    use super::MltBackend;
+
+    /// Regression: preferring `qtext` everywhere built the `QApplication` on
+    /// a libtest worker, and tearing that down off the main thread aborted
+    /// the process with a corrupt heap once the tests had all passed.
+    #[test]
+    fn a_worker_thread_is_offered_pango_before_qtext() {
+        let off_main = std::thread::spawn(|| MltBackend::text_services().to_vec())
+            .join()
+            .expect("the probe thread should not panic");
+        assert_eq!(
+            off_main.first(),
+            Some(&"pango"),
+            "a worker thread was offered the Qt text producer first"
+        );
     }
 }
