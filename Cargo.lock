@@ -741,7 +741,7 @@ dependencies = [
 
 [[package]]
 name = "davimci-analysis"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "criterion",
  "davimci-cmd",
@@ -755,7 +755,7 @@ dependencies = [
 
 [[package]]
 name = "davimci-app"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "davimci-cmd",
  "davimci-core",
@@ -767,7 +767,7 @@ dependencies = [
 
 [[package]]
 name = "davimci-backend"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "davimci-core",
  "thiserror 2.0.19",
@@ -775,7 +775,7 @@ dependencies = [
 
 [[package]]
 name = "davimci-cli"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "davimci-analysis",
@@ -800,7 +800,7 @@ dependencies = [
 
 [[package]]
 name = "davimci-cmd"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "criterion",
  "davimci-core",
@@ -813,7 +813,7 @@ dependencies = [
 
 [[package]]
 name = "davimci-core"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "insta",
  "proptest",
@@ -824,7 +824,7 @@ dependencies = [
 
 [[package]]
 name = "davimci-gui"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "davimci-app",
  "davimci-cmd",
@@ -837,7 +837,7 @@ dependencies = [
 
 [[package]]
 name = "davimci-headless"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "davimci-app",
  "davimci-cmd",
@@ -848,7 +848,7 @@ dependencies = [
 
 [[package]]
 name = "davimci-keys"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "davimci-cmd",
  "davimci-core",
@@ -858,7 +858,7 @@ dependencies = [
 
 [[package]]
 name = "davimci-lua"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "davimci-backend",
  "davimci-cmd",
@@ -871,7 +871,7 @@ dependencies = [
 
 [[package]]
 name = "davimci-mlt"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "davimci-backend",
  "davimci-core",
@@ -883,14 +883,14 @@ dependencies = [
 
 [[package]]
 name = "davimci-mlt-sys"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "pkg-config",
 ]
 
 [[package]]
 name = "davimci-motion"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "criterion",
  "davimci-core",
@@ -900,7 +900,7 @@ dependencies = [
 
 [[package]]
 name = "davimci-pack"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "davimci-lua",
@@ -910,7 +910,7 @@ dependencies = [
 
 [[package]]
 name = "davimci-present"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "davimci-backend",
  "davimci-core",
@@ -921,7 +921,7 @@ dependencies = [
 
 [[package]]
 name = "davimci-tui"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "crossterm",
  "davimci-app",

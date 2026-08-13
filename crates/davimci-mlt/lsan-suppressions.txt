@@ -1,4 +1,4 @@
-# LeakSanitizer suppressions for `just sanitize` (plan.md Phase 6).
+# LeakSanitizer suppressions for `just sanitize`.
 #
 # Everything here is allocation MLT itself makes and never frees before
 # process exit, not a leak in davimci's RAII wrapper. Each entry is scoped to

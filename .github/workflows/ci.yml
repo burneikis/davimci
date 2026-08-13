@@ -10,7 +10,7 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  # Fast gate: must stay quick, runs on every push (plan.md standing rule 3).
+  # Fast gate: must stay quick, runs on every push.
   test:
     name: test + lint
     runs-on: ubuntu-latest
@@ -64,7 +64,7 @@ jobs:
           cargo test -p davimci-present -p davimci-gui
           cargo test -p davimci-present --features gpu --test gpu
 
-  # Aimed at the MLT refcount wrapper (spec §10.1 accepted risk).
+  # Aimed at the MLT refcount wrapper, the one place davimci owns raw C state.
   sanitize:
     name: address sanitizer
     runs-on: ubuntu-latest
@@ -82,7 +82,7 @@ jobs:
           RUSTFLAGS: -Zsanitizer=address
         run: cargo test -p davimci-mlt --target x86_64-unknown-linux-gnu
 
-  # Every example config in the docs must load (plan.md Phase 7).
+  # Every example config in the docs must load.
   lua-configs:
     name: lua config compatibility
     runs-on: ubuntu-latest
@@ -102,7 +102,7 @@ jobs:
       - name: Forbid static MLT / vendored melt
         run: |
           if grep -rn "static.*mlt\|melt" --include=build.rs crates/ ; then
-            echo "::error::MLT must be dynamically linked and melt never vendored (spec §13)"
+            echo "::error::MLT must be dynamically linked and melt never vendored: davimci is GPL-3.0 over LGPL-2.1 MLT"
             exit 1
           fi
           echo "ok"

@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.0.0"
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.90"
 license = "GPL-3.0-only"
@@ -60,8 +60,8 @@ missing_errors_doc = "allow"
 # Modifier and flag sets are bools by nature; bundling them into an enum would
 # only re-encode a set as a name.
 struct_excessive_bools = "allow"
-# Phase 0: no panics in library code. Invariant assertions are the documented
-# exception and must use the assert_invariant! macro.
+# No panics in library code. Invariant assertions are the documented exception
+# and must use the assert_invariant! macro.
 unwrap_used = "deny"
 expect_used = "deny"
 panic = "deny"
