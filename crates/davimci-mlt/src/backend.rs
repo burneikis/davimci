@@ -1064,6 +1064,21 @@ impl MltBackend {
         ))
     }
 
+    /// The text producer to use, best first: builds without MLT's Qt module
+    /// have no `qtext`, and a title card that silently degraded to a
+    /// transparent card would export a picture with no text on it.
+    const TEXT_SERVICES: [&'static str; 2] = ["qtext", "pango"];
+
+    fn build_resource_producer(&self, entry: &ClipEntry) -> Option<Producer> {
+        let resource = entry.resource.resource();
+        if matches!(entry.resource, Resource::Text(_)) {
+            return Self::TEXT_SERVICES
+                .iter()
+                .find_map(|s| Producer::new(&self.profile, s, &resource).ok());
+        }
+        Producer::new(&self.profile, entry.resource.service(), &resource).ok()
+    }
+
     fn build_producer(&self, entry: &ClipEntry) -> Result<Producer> {
         // "Degrade locally": a source that will not open becomes a
         // placeholder rather than an unopenable project. A title card that
@@ -1074,14 +1089,9 @@ impl MltBackend {
         } else {
             "#ff202080"
         };
-        let mut producer = if let Ok(p) = Producer::new(
-            &self.profile,
-            entry.resource.service(),
-            &entry.resource.resource(),
-        ) {
-            p
-        } else {
-            Producer::new(&self.profile, "color", fallback).map_err(BackendError::from)?
+        let mut producer = match self.build_resource_producer(entry) {
+            Some(p) => p,
+            None => Producer::new(&self.profile, "color", fallback).map_err(BackendError::from)?,
         };
         {
             let mut props = producer.properties();

@@ -23,7 +23,7 @@ jobs:
       - name: Install libmlt
         run: |
           sudo apt-get update
-          sudo apt-get install -y libmlt-dev libmlt++-dev ffmpeg
+          sudo apt-get install -y libmlt-dev libmlt++-dev libmlt-data ffmpeg fonts-dejavu-core
       - run: cargo fmt --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
@@ -39,7 +39,7 @@ jobs:
       - name: Install libmlt + ffmpeg
         run: |
           sudo apt-get update
-          sudo apt-get install -y libmlt-dev libmlt++-dev ffmpeg
+          sudo apt-get install -y libmlt-dev libmlt++-dev libmlt-data ffmpeg fonts-dejavu-core
       - name: Generate fixtures
         run: ./scripts/gen-fixtures.sh
       - run: cargo test --workspace --features slow-tests -- --include-ignored

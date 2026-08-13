@@ -865,3 +865,37 @@ fn a_dissolve_blends_the_stills_the_preview_pulls() {
         "the ramp does not run from the outgoing clip to the incoming one"
     );
 }
+
+/// Regression: a title card whose text service is missing degraded to a
+/// transparent card, so exports came out with no text on them at all
+/// (the burned-subtitle export test caught it as "0 subpixels changed").
+#[test]
+fn a_text_clip_draws_glyphs_rather_than_a_transparent_card() {
+    let _mlt = davimci_mlt::test_support::media_lock();
+    let res = Resolution {
+        width: 640,
+        height: 480,
+    };
+    let mut tl = Timeline::new(TimelineProps {
+        fps: Fps::FPS_60,
+        resolution: res,
+        sample_rate: 48_000,
+    });
+    let text = tl.add_track(davimci_core::TrackKind::Text);
+    let id = tl.new_clip_id();
+    let mut clip = Clip::generated(id, "cue", Frame::ZERO, Frame(30));
+    clip.text = Some("hello".into());
+    tl.restore(text, Frame::ZERO, &[clip], Frame(30), false)
+        .unwrap();
+
+    let mut b = MltBackend::new(tl.props).unwrap();
+    b.set_timeline(&tl).unwrap();
+    let frame = b.frame_at(Frame(0), PreviewScale::Full).unwrap();
+    // Over a black background, every lit subpixel is a glyph.
+    let lit = frame
+        .rgba
+        .chunks_exact(4)
+        .filter(|px| px[0] > 40 || px[1] > 40 || px[2] > 40)
+        .count();
+    assert!(lit > 20, "the text producer drew nothing: {lit} lit pixels");
+}
