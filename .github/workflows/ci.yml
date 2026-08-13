@@ -39,10 +39,13 @@ jobs:
       - name: Install libmlt + ffmpeg
         run: |
           sudo apt-get update
-          sudo apt-get install -y libmlt-dev libmlt++-dev libmlt-data ffmpeg fonts-dejavu-core
+          sudo apt-get install -y libmlt-dev libmlt++-dev libmlt-data ffmpeg fonts-dejavu-core xvfb
       - name: Generate fixtures
         run: ./scripts/gen-fixtures.sh
-      - run: cargo test --workspace --features slow-tests -- --include-ignored
+      # MLT versions before the QT_QPA_PLATFORM check refuse to build `qtext`
+      # with no DISPLAY set, which silently drops burned-in subtitles and
+      # title cards, so the render tests get a fake display.
+      - run: xvfb-run -a cargo test --workspace --features slow-tests -- --include-ignored
 
   # Presenter and GUI snapshot tests need a GPU; lavapipe provides a software one.
   graphics:
