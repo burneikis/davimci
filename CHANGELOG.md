@@ -15,3 +15,46 @@ Guidelines:
   empty `Unreleased`.
 
 ## Unreleased
+
+## 0.1.0 - 2026-08-13
+
+First public release.
+
+### Added
+
+- Modal editing over a timeline: normal, insert, visual, and command-line
+  modes, with counts, operators, and `.`-repeat behaving as they do in vim.
+- Motions for the playhead and the clip under it - frames, seconds, clip
+  edges, marks, and jump points - usable on their own or as the target of an
+  operator. `docs/keymap.md` lists the full default map.
+- Operators for cutting, trimming, deleting, yanking, and pasting clips, with
+  ripple and non-ripple forms.
+- Visual mode over frame ranges and clip selections, including clip grouping
+  with per-group colouring. See `docs/visual-mode.md`.
+- Marks, registers, and recordable macros.
+- Unlimited undo and redo. Every mutation is a command that returns its own
+  inverse, so undo covers the Lua API, macros, and `.`-repeat alike.
+- Multi-track video and audio timelines, with clips movable between tracks.
+- Playback with real frames pulled through MLT, variable-speed shuttle in both
+  directions, backward audio, and an optional centred playhead.
+- Three frontends over one shared view model: a GUI window, a TUI, and a
+  headless frontend. `-k` scripts keystrokes through the whole stack and
+  `--no-window` keeps any invocation on the command line.
+- Panels for the preview, timeline, and inspectors, with configurable sizes and
+  focus. See `docs/panels.md`.
+- Project lifecycle from the command line: open, `:w`, and `:export` with
+  progress, plus autosave.
+- Lua configuration from `~/.config/davimci/init.lua` - remappable keys,
+  hookable events, and a scripting API onto the same command layer the keymap
+  uses.
+- Bundled plugins, all off by default: `audio`, `presets`, `proxies`,
+  `scenes`, `silence`, `text`, `transitions`, and `which-key`. See
+  `docs/plugins.md`.
+- Plugin manager and fetcher, plugin manifests, deterministic load order, and
+  `:checkhealth`.
+- Proxy media with hardware-accelerated decode and encode where available.
+- Transitions with live preview, and a text/overlay compositor.
+- `.dvs` session scripts: keystrokes plus assertions, run with `--script`.
+- `scripts/install.sh` for a checksum-verified release build, falling back to
+  building from source when the platform has no release asset. `just install`
+  does the source path from a clone.
