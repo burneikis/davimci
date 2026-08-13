@@ -10,6 +10,26 @@ remappable keys, and hookable events.
 - [`docs/plugins.md`](docs/plugins.md) - what is core, what is a plugin, and how to
   turn a bundled plugin on
 
+## Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/burneikis/davimci/main/scripts/install.sh | bash
+```
+
+Installs a release build to `~/.local/bin/davimci`, checksum-verified, and
+falls back to building from source when the platform has no release asset.
+`--prefix`, `--version`, and `--from-source` change that; `--help` lists them.
+
+From a clone, `just install` does the source path directly.
+
+Either way `libmlt` and `ffmpeg` come from the system package manager - MLT is
+LGPL-2.1 and dynamically linked, so no build bundles it:
+
+```sh
+sudo pacman -S --needed mlt ffmpeg     # Arch
+sudo apt install libmlt-dev ffmpeg     # Debian / Ubuntu
+```
+
 ## Usage
 
 ```sh

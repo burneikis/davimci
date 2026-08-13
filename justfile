@@ -7,6 +7,13 @@ default:
 check-env:
     ./scripts/check-env.sh
 
+# Build in release and install the binary under PREFIX (default ~/.local).
+install PREFIX=(env_var_or_default("HOME", "") / ".local"):
+    ./scripts/install.sh --from-source --prefix {{PREFIX}}
+
+uninstall PREFIX=(env_var_or_default("HOME", "") / ".local"):
+    rm -f {{PREFIX}}/bin/davimci
+
 # Generate test media with ffmpeg (never committed).
 fixtures:
     ./scripts/gen-fixtures.sh
