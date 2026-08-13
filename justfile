@@ -18,18 +18,22 @@ uninstall PREFIX=(env_var_or_default("HOME", "") / ".local"):
 fixtures:
     ./scripts/gen-fixtures.sh
 
+# Every suite runs under a deadline: a deadlocked test binary otherwise sits
+# there printing nothing, and a run that never finished must never be read as
+# a run that passed. See scripts/timed.sh.
+
 # Fast suite: no decode/encode. Must stay quick.
 test:
-    cargo test --workspace
+    ./scripts/timed.sh 600 "fast suite" cargo test --workspace
 
 # Real render/export tests.
 test-slow: fixtures
-    cargo test --workspace --features slow-tests -- --include-ignored
+    ./scripts/timed.sh 1800 "slow suite" cargo test --workspace --features slow-tests -- --include-ignored
 
 # The planar upload path, which needs a GPU. Lavapipe counts; no adapter at
 # all skips rather than fails.
 test-gpu:
-    cargo test -p davimci-present --features gpu,slow-tests --test gpu
+    ./scripts/timed.sh 300 "gpu suite" cargo test -p davimci-present --features gpu,slow-tests --test gpu
 
 # Everything, including sanitizers.
 test-all: test test-slow test-gpu sanitize
@@ -39,8 +43,8 @@ test-all: test test-slow test-gpu sanitize
 # see crates/davimci-mlt/lsan-suppressions.txt for what and why.
 sanitize:
     LSAN_OPTIONS="suppressions=$(pwd)/crates/davimci-mlt/lsan-suppressions.txt" \
-    RUSTFLAGS="-Zsanitizer=address" cargo +nightly test -p davimci-mlt \
-        --target x86_64-unknown-linux-gnu
+    RUSTFLAGS="-Zsanitizer=address" ./scripts/timed.sh 1800 "sanitizer suite" \
+        cargo +nightly test -p davimci-mlt --target x86_64-unknown-linux-gnu
 
 # Regenerate the generated documentation (docs/keymap.md).
 docs:

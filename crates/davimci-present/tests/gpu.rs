@@ -54,14 +54,26 @@ struct Gpu {
     queue: wgpu::Queue,
 }
 
-fn gpu() -> Option<Gpu> {
-    let instance = wgpu::Instance::default();
-    let adapter =
-        pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
-            .ok()?;
-    let (device, queue) =
-        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()?;
-    Some(Gpu { device, queue })
+/// One device for the whole binary.
+///
+/// libtest runs these tests on their own threads, and asking the driver for
+/// a second device while the first is still being built deadlocks: on an
+/// NVIDIA adapter every test thread parks in the driver's own locks and the
+/// binary hangs forever rather than failing. Building it once behind a
+/// `OnceLock` is also what the tests want - the device is shared state they
+/// only read.
+fn gpu() -> Option<&'static Gpu> {
+    static GPU: std::sync::OnceLock<Option<Gpu>> = std::sync::OnceLock::new();
+    GPU.get_or_init(|| {
+        let instance = wgpu::Instance::default();
+        let adapter =
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+                .ok()?;
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()?;
+        Some(Gpu { device, queue })
+    })
+    .as_ref()
 }
 
 /// Render the frame at 1:1 and read the pixels back.

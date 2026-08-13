@@ -59,6 +59,18 @@ just lint   # clippy -D warnings + fmt --check
 
 Run both before declaring work done; do not report success without them.
 
+Run tests through the `just` recipes, never bare `cargo test`: the recipes run
+under a deadline (`scripts/timed.sh`) so a deadlock exits 124 with a sentence
+saying so. A run that was killed or that you interrupted is not a run that
+passed, and must never be reported as one. If a suite does time out, find the
+lock before changing anything - `/proc/<pid>/task/*/wchan` names the stuck
+threads, and `--test-threads=1` tells a deadlock from a slow suite.
+
+A test that takes a process-wide resource - the GPU device, the MLT factory -
+builds it once and shares it. libtest gives every test its own thread, and
+asking a driver for a second device on another thread is how the GPU suite
+used to hang forever.
+
 Never loosen a tolerance or delete an assertion to make a test pass. Diagnose
 first - a failing test is usually right, and when it is wrong, correct its
 expectation and explain why.
