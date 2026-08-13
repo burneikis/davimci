@@ -16,7 +16,7 @@ fn normal_view_dump_is_stable() {
 -- NORMAL (V1) --
 viewport zoom=8 cols=50 rows=3 range=0..800 duration=500
 ruler 0!0 7!1 8.2 16.3 22!4 24.5 25!6 31!7
->0 V1 [3:0..120@0-7] [4:120..360@7-22] [5:400..500@25-31]
+>0 V1 [3:0..120@0-7 cut>] [4:120..360@7-22 cut<] [5:400..500@25-31] <gap 360..400@22-24>
  1 A1 [8:0..360@0-22]
  2 V2 [7:60..150@3-9]
 playhead frame=0 track=1 col=0
@@ -112,5 +112,54 @@ fn every_fixture_dumps_without_panicking_and_is_non_empty() {
         let dump = view.dump();
         assert!(dump.starts_with("-- "), "{name}: {dump}");
         assert!(dump.contains("playhead "), "{name}: {dump}");
+    }
+}
+
+#[test]
+fn abutting_clips_are_marked_and_a_hole_between_them_is_a_gap() {
+    let view = fixtures::normal();
+    let v1 = &view.tracks[0];
+    let marks: Vec<(bool, bool)> = v1
+        .clips
+        .iter()
+        .map(|c| (c.abuts_prev, c.abuts_next))
+        .collect();
+    // `a` 0..120 and `b` 120..360 share a cut; `c` starts at 400.
+    assert_eq!(marks, [(false, true), (true, false), (false, false)]);
+    let gaps: Vec<(u64, u64)> = v1
+        .gaps
+        .iter()
+        .map(|g| (g.start.get(), g.end.get()))
+        .collect();
+    assert_eq!(gaps, [(360, 400)]);
+    // A track whose clips run edge to edge has no gap, and a lone clip has
+    // no cut to draw.
+    assert!(view.tracks[1].gaps.is_empty());
+    assert_eq!(
+        (
+            view.tracks[1].clips[0].abuts_prev,
+            view.tracks[1].clips[0].abuts_next
+        ),
+        (false, false)
+    );
+}
+
+#[test]
+fn a_gap_survives_a_zoom_that_squeezes_it_below_a_column() {
+    let view = fixtures::zoomed_out();
+    let v1 = &view.tracks[0];
+    // Everything collapses onto column 0, and the gap collapses with it -
+    // but it is still described, so a frontend can decide what to draw.
+    assert_eq!(v1.gaps.len(), 1);
+    assert_eq!(v1.gaps[0].columns, (0, 0));
+}
+
+#[test]
+fn a_gap_scrolled_off_screen_is_not_emitted() {
+    let view = fixtures::scrolled();
+    for track in &view.tracks {
+        for gap in &track.gaps {
+            assert!(gap.end > view.visible_range.0 && gap.start < view.visible_range.1);
+        }
     }
 }

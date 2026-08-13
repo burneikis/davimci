@@ -282,6 +282,52 @@ fn set_centerfollow_reaches_the_viewport() {
     assert!(!app.center_follow());
 }
 
+/// `timeline.edges` and `timeline.gap` are view settings: they change how a
+/// cut is drawn, never what the timeline holds.
+#[test]
+fn set_timeline_edges_and_gap_reach_the_view_without_editing() {
+    let (mut app, mut editor) = editor();
+    assert_eq!(
+        app.timeline_style(),
+        davimci_app::TimelineStyle::default(),
+        "the default draws a seam"
+    );
+    let undos = app.session().undolist().len();
+    let before = app.session().timeline().dump();
+
+    app.event(
+        Event::Command("set timeline.edges inset".into()),
+        &mut editor,
+    );
+    app.event(Event::Command("set timeline.gap 3".into()), &mut editor);
+    assert_eq!(
+        app.timeline_style(),
+        davimci_app::TimelineStyle {
+            edges: davimci_app::EdgeStyle::Inset,
+            gap: 3,
+        }
+    );
+    assert_eq!(app.session().undolist().len(), undos);
+    assert_eq!(app.session().timeline().dump(), before);
+
+    // A rejected value is a user error and leaves the setting alone.
+    for bad in ["set timeline.edges sideways", "set timeline.gap 999"] {
+        app.event(Event::Command(bad.into()), &mut editor);
+        assert_eq!(
+            app.messages().current().map(|m| m.severity),
+            Some(davimci_app::Severity::Error),
+            "{bad}"
+        );
+    }
+    assert_eq!(
+        app.timeline_style(),
+        davimci_app::TimelineStyle {
+            edges: davimci_app::EdgeStyle::Inset,
+            gap: 3,
+        }
+    );
+}
+
 #[test]
 fn an_unknown_command_reports_a_sentence_and_keeps_editing() {
     let (mut app, mut editor) = editor();

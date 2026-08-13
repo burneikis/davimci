@@ -15,7 +15,9 @@
 
 use std::fmt::Write as _;
 
-use davimci_app::{LabelMetrics, PanelContent, PanelView, Surface, ViewState};
+use davimci_app::{
+    EdgeStyle, LabelMetrics, PanelContent, PanelView, Surface, TimelineStyle, ViewState,
+};
 
 use crate::paint::{Chrome, DrawList, Fill, PickerView, Rect, TextRole, status_text};
 
@@ -515,8 +517,16 @@ fn paint_lanes(d: &mut DrawList, layout: &Layout, view: &ViewState) {
         }
         d.text(header, TextRole::TrackName, name);
 
+        // Gaps first: a hole is lane background otherwise, and so is the
+        // space past the last clip, which is not the same thing at all.
+        if view.style.edges != EdgeStyle::Off {
+            for gap in &track.gaps {
+                d.rect(span_rect(layout, gap.columns, y, row_h), Fill::Gap);
+            }
+        }
+
         for clip in &track.clips {
-            paint_clip(d, layout, clip, y, row_h);
+            paint_clip(d, layout, clip, y, row_h, view.style);
         }
 
         // Waveform, drawn over the clips it belongs to: an envelope beside
@@ -527,7 +537,7 @@ fn paint_lanes(d: &mut DrawList, layout: &Layout, view: &ViewState) {
         // waveform would otherwise scribble over its own name.
         for clip in &track.clips {
             d.text(
-                clip_rect(layout, clip, y, row_h),
+                clip_rect(layout, clip, y, row_h, view.style),
                 TextRole::ClipLabel,
                 clip.label.clone(),
             );
@@ -535,8 +545,9 @@ fn paint_lanes(d: &mut DrawList, layout: &Layout, view: &ViewState) {
     }
 }
 
-fn clip_rect(layout: &Layout, clip: &davimci_app::ClipView, y: i32, row_h: u32) -> Rect {
-    let (first, last) = clip.columns;
+/// The lane rectangle an inclusive column range covers.
+fn span_rect(layout: &Layout, columns: (u32, u32), y: i32, row_h: u32) -> Rect {
+    let (first, last) = columns;
     Rect {
         x: layout.tracks.x.saturating_add(first as i32),
         y: y.saturating_add(1),
@@ -545,8 +556,42 @@ fn clip_rect(layout: &Layout, clip: &davimci_app::ClipView, y: i32, row_h: u32) 
     }
 }
 
-fn paint_clip(d: &mut DrawList, layout: &Layout, clip: &davimci_app::ClipView, y: i32, row_h: u32) {
-    let rect = clip_rect(layout, clip, y, row_h);
+/// Where a clip's body is painted.
+///
+/// `inset` pulls the body back only where the clip abuts a neighbour, so a
+/// lone clip is not drawn as though it had been cut, and never below a pixel
+/// of width, so a narrow clip stays visible.
+fn clip_rect(
+    layout: &Layout,
+    clip: &davimci_app::ClipView,
+    y: i32,
+    row_h: u32,
+    style: TimelineStyle,
+) -> Rect {
+    let rect = span_rect(layout, clip.columns, y, row_h);
+    if style.edges != EdgeStyle::Inset {
+        return rect;
+    }
+    let head = if clip.abuts_prev { style.gap } else { 0 };
+    let tail = if clip.abuts_next { style.gap } else { 0 };
+    let trim = head.saturating_add(tail).min(rect.width.saturating_sub(1));
+    let head = head.min(trim);
+    Rect {
+        x: rect.x.saturating_add(head as i32),
+        width: rect.width.saturating_sub(trim),
+        ..rect
+    }
+}
+
+fn paint_clip(
+    d: &mut DrawList,
+    layout: &Layout,
+    clip: &davimci_app::ClipView,
+    y: i32,
+    row_h: u32,
+    style: TimelineStyle,
+) {
+    let rect = clip_rect(layout, clip, y, row_h, style);
     let fill = if clip.offline {
         Fill::ClipOffline
     } else if clip.linked {
@@ -568,6 +613,17 @@ fn paint_clip(d: &mut DrawList, layout: &Layout, clip: &davimci_app::ClipView, y
         );
     }
     paint_filmstrip(d, layout, clip, rect);
+    // The seam goes over the later clip's first pixels rather than taking
+    // width from it, so `line` never shrinks a clip the way `inset` does.
+    if style.edges == EdgeStyle::Line && clip.abuts_prev {
+        d.rect(
+            Rect {
+                width: style.gap.max(1).min(rect.width),
+                ..rect
+            },
+            Fill::ClipEdge,
+        );
+    }
 }
 
 /// One picture per sample point, each of the media at *that* point, so a long

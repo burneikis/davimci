@@ -35,7 +35,7 @@ fn the_normal_view_snapshots() {
         drawn,
         concat!(
             "time     │▼──────┼┬───────┬─────┼─┬┼─────┼──────────────────\n",
-            ">V1      ││a██████b██████████████  █c█████                  \n",
+            ">V1      ││a█████▏b██████████████··█c█████                  \n",
             " A1      ││music█████████████████                           \n",
             " V2      ││  █over██                                        \n",
             "                                                            \n",
@@ -410,4 +410,69 @@ fn the_caret_sits_in_the_command_line_while_it_is_typed() {
     // The suggestion row appears above the mode line, so the caret does not
     // move off the last row.
     assert_eq!(davimci_tui::render::cursor(&view, 20), Some((2, 19)));
+}
+
+#[test]
+fn a_cut_is_drawn_as_a_seam_and_a_gap_as_dots() {
+    use davimci_app::{EdgeStyle, TimelineStyle};
+
+    let drawn = |style: TimelineStyle| -> String {
+        rows(&fixtures::styled(style), 60, 8)[1]
+            .chars()
+            .skip(usize::from(GUTTER))
+            .collect()
+    };
+
+    // `off` is the old drawing: the cut at column 7 and the hole at 22..24
+    // are both invisible against the clips around them.
+    let off = drawn(TimelineStyle {
+        edges: EdgeStyle::Off,
+        gap: 1,
+    });
+    assert!(
+        !off.contains('\u{258f}') && !off.contains('\u{00b7}'),
+        "{off}"
+    );
+
+    // `line` marks the cut without taking a column from either clip.
+    let seam = drawn(TimelineStyle::default());
+    assert_eq!(seam.matches('\u{258f}').count(), 1, "{seam}");
+    assert!(seam.contains('\u{00b7}'), "{seam}");
+    assert_eq!(seam.chars().count(), off.chars().count());
+
+    // `inset` gives the columns back to the lane instead.
+    let inset = drawn(TimelineStyle {
+        edges: EdgeStyle::Inset,
+        gap: 2,
+    });
+    assert!(!inset.contains('\u{258f}'), "{inset}");
+    assert!(
+        inset.matches('\u{2588}').count() < off.matches('\u{2588}').count(),
+        "inset drew no narrower than off: {inset}"
+    );
+}
+
+#[test]
+fn a_clip_one_column_wide_survives_every_edge_style() {
+    use davimci_app::{EdgeStyle, TimelineStyle};
+
+    for edges in [EdgeStyle::Off, EdgeStyle::Line, EdgeStyle::Inset] {
+        let view = fixtures::styled(TimelineStyle { edges, gap: 4 });
+        let drawn = rows(&view, 60, 8);
+        for track in &view.tracks {
+            for clip in &track.clips {
+                let lane: Vec<char> = drawn[track.index + 1].chars().collect();
+                let (first, last) = clip.columns;
+                let drawn_any = (first..=last).any(|column| {
+                    lane.get(usize::from(GUTTER) + column as usize)
+                        .is_some_and(|c| *c != ' ')
+                });
+                assert!(
+                    drawn_any,
+                    "{edges:?} erased clip {} at columns {first}..={last}",
+                    clip.label
+                );
+            }
+        }
+    }
 }

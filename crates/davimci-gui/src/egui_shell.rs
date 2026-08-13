@@ -43,6 +43,8 @@ pub fn fill_color(fill: Fill) -> Color32 {
         Fill::ClipSelected => Color32::from_rgb(120, 170, 230),
         Fill::ClipOffline => Color32::from_rgb(150, 60, 60),
         Fill::ClipGrouped => Color32::from_rgb(56, 88, 128),
+        Fill::ClipEdge => Color32::from_rgb(16, 20, 28),
+        Fill::Gap => Color32::from_rgb(46, 40, 40),
         Fill::Waveform => Color32::from_rgb(150, 200, 180),
         Fill::Selection => Color32::from_rgba_unmultiplied(120, 170, 230, 60),
         Fill::Playhead => Color32::from_rgb(240, 220, 90),

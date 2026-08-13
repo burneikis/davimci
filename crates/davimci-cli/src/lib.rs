@@ -56,7 +56,7 @@ pub use plugins::{
     provider_of_transition,
 };
 pub use proxy::Proxies;
-pub use setting::{Numbers, Setting};
+pub use setting::{EdgeStyle, Numbers, Setting};
 pub use transport::{Transport, TransportState};
 #[cfg(feature = "window")]
 pub use window::Window;

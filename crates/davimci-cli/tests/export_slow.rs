@@ -220,11 +220,19 @@ fn dominant_hz(path: &Path, stream: usize) -> f64 {
 
 #[test]
 fn a_preset_decides_the_container_and_codec_of_the_file() {
+    use davimci_backend::{AudioCodec, Container, Preset, VideoCodec};
+
     let _mlt = davimci_mlt::test_support::media_lock();
     let src = fixture("counter_720p.mkv");
     let (mut app, mut editor) = editor_with(&src);
     let out = std::env::temp_dir().join("davimci-slow-preset.mp4");
     let _ = std::fs::remove_file(&out);
+    // A catalogue of presets belongs to the bundled `presets` plugin, which
+    // this editor does not load, so the test defines what it asks for.
+    editor.exporter_mut().presets_mut().define(
+        Preset::new("mp4", Container::Mp4, VideoCodec::H264, AudioCodec::Aac)
+            .expect("h264 + aac in mp4 is a legal preset"),
+    );
 
     app.event(
         Event::Command(format!(":export {} --preset mp4", out.display())),

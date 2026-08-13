@@ -149,8 +149,12 @@ pub struct Editor {
     /// Mirrors the app's centring so `:set centerfollow?` and completion can
     /// read it back; the app remains the one that acts on it.
     center_follow: bool,
+    /// Mirrors the app's cut and gap drawing, for the same reason: the app
+    /// acts on it, the editor only has to read it back.
+    timeline_style: davimci_app::TimelineStyle,
     pending_visual_start: Option<davimci_keys::VisualStart>,
     pending_center_follow: Option<bool>,
+    pending_timeline_style: Option<davimci_app::TimelineStyle>,
     /// Whether `i` on a text track edits the cue under the playhead, taken by
     /// the app. Only the plugin that owns text tracks grants this, so the
     /// grammar never has to know a text workflow exists.
@@ -216,8 +220,10 @@ impl Editor {
             pending_keymap: None,
             visual_start: davimci_keys::VisualStart::default(),
             center_follow: false,
+            timeline_style: davimci_app::TimelineStyle::default(),
             pending_visual_start: None,
             pending_center_follow: None,
+            pending_timeline_style: None,
             pending_text_editing: None,
             quit: false,
         }
@@ -564,6 +570,9 @@ impl Editor {
                 self.pending_visual_start = Some(*start);
                 Some(Ok(start.describe().to_string()))
             }
+            ExCommand::Set(
+                setting @ (crate::setting::Setting::Edges(_) | crate::setting::Setting::Gap(_)),
+            ) => Some(Ok(self.restyle_timeline(setting))),
             // Where the view sits is the app's, not the editor's, so this is
             // only parked here for the app to take.
             ExCommand::Set(crate::setting::Setting::CenterFollow(on)) => {
@@ -579,6 +588,24 @@ impl Editor {
             ExCommand::CancelRender => Some(self.exporter.cancel(self.backend.as_mut())),
             _ => None,
         }
+    }
+
+    /// Apply a cut-and-gap setting and park it for the app, which owns the
+    /// view it changes.
+    fn restyle_timeline(&mut self, setting: &crate::setting::Setting) -> String {
+        let said = match setting {
+            crate::setting::Setting::Edges(edges) => {
+                self.timeline_style.edges = *edges;
+                format!("clip edges {}", edges.name())
+            }
+            crate::setting::Setting::Gap(gap) => {
+                self.timeline_style.gap = *gap;
+                format!("clip gap {gap} columns")
+            }
+            _ => return String::new(),
+        };
+        self.pending_timeline_style = Some(self.timeline_style);
+        said
     }
 
     /// The timeline an export ships, checked by the guard that must never
@@ -797,6 +824,7 @@ impl Editor {
             numbers: Some(self.numbers),
             visual_start: Some(self.visual_start),
             center_follow: Some(self.center_follow),
+            timeline_style: Some(self.timeline_style),
             fps: Some(tl.props.fps),
             resolution: Some(tl.props.resolution),
             clip: clip.map(|c| c.props),
@@ -1876,6 +1904,10 @@ impl Host for Editor {
 
     fn take_center_follow(&mut self) -> Option<bool> {
         self.pending_center_follow.take()
+    }
+
+    fn take_timeline_style(&mut self) -> Option<davimci_app::TimelineStyle> {
+        self.pending_timeline_style.take()
     }
 
     fn take_text_editing(&mut self) -> Option<bool> {

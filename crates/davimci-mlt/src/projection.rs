@@ -42,9 +42,10 @@ impl Resource {
             // The placeholder is deliberately not black: offline media must
             // be visible as a fault, not mistaken for a gap.
             Self::Offline { .. } => "#ff202080".into(),
-            // A text card is transparent: the glyphs are burned *onto* the
-            // picture, and an opaque card would replace it.
-            Self::Text(_) => "#00000000".into(),
+            // `qtext` reads its resource as a file to load the text from,
+            // so the text travels in the `text` property and the resource
+            // stays empty rather than naming a file that does not exist.
+            Self::Text(_) => String::new(),
             Self::Colour => "#ff000000".into(),
         }
     }

@@ -30,12 +30,27 @@ use crate::error::MltError;
 pub fn init() -> Result<(), MltError> {
     static REPO: OnceLock<bool> = OnceLock::new();
     let ok = *REPO.get_or_init(|| {
+        use_offscreen_qt_without_a_display();
         // SAFETY: called once, before any other MLT call, with a null
         // directory so MLT uses its configured module path.
         let repo = unsafe { sys::mlt_factory_init(ptr::null()) };
         !repo.is_null()
     });
     if ok { Ok(()) } else { Err(MltError::Init) }
+}
+
+/// MLT's Qt module refuses to build a service - `qtext` among them - when it
+/// finds no display, so a headless render would silently lose every title
+/// card. Rendering is not a windowed activity; without a display Qt is told
+/// to draw offscreen. An explicit `QT_QPA_PLATFORM` is left alone.
+fn use_offscreen_qt_without_a_display() {
+    let set = |k: &str| std::env::var_os(k).is_some_and(|v| !v.is_empty());
+    if set("QT_QPA_PLATFORM") || set("DISPLAY") || set("WAYLAND_DISPLAY") {
+        return;
+    }
+    // SAFETY: called once, from `init`'s `OnceLock`, before MLT loads any
+    // module and so before any thread can read the environment.
+    unsafe { std::env::set_var("QT_QPA_PLATFORM", "offscreen") };
 }
 
 fn cstr(s: &str) -> Result<CString, MltError> {

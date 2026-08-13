@@ -13,8 +13,8 @@
 use std::fmt::Write as _;
 
 use davimci_app::{
-    LabelMetrics, MediaPicker, Numbers, PanelContent, PanelRole, PanelView, PickerIntent,
-    SubtitleEdit, Surface, ViewState,
+    EdgeStyle, LabelMetrics, MediaPicker, Numbers, PanelContent, PanelRole, PanelView,
+    PickerIntent, SubtitleEdit, Surface, TimelineStyle, ViewState,
 };
 
 use crate::preview::Band;
@@ -390,8 +390,20 @@ fn lane(view: &ViewState, track: &davimci_app::TrackView, columns: u16) -> Line<
     // be told apart without one span per column in the common case.
     let mut cells: Vec<(char, Style)> = vec![(' ', Style::default()); width];
 
+    // A gap is drawn rather than left blank: an empty lane says "nothing
+    // here", which is also what the space past the last clip looks like.
+    if view.style.edges != EdgeStyle::Off {
+        for gap in &track.gaps {
+            for column in gap.columns.0..=gap.columns.1 {
+                if let Some(cell) = cells.get_mut(column as usize) {
+                    *cell = ('\u{00b7}', Style::default().fg(Color::DarkGray));
+                }
+            }
+        }
+    }
+
     for clip in &track.clips {
-        let (first, last) = clip.columns;
+        let (first, last) = body_columns(clip, view.style);
         let style = clip_style(track, clip);
         let body = if clip.offline { '\u{2591}' } else { '\u{2588}' };
         for column in first..=last {
@@ -411,6 +423,16 @@ fn lane(view: &ViewState, track: &davimci_app::TrackView, columns: u16) -> Line<
                 }
             }
         }
+        // A cut is the one join the eye cannot infer, so the seam is drawn
+        // over the later clip's first column rather than taking a column
+        // from it: a clip one column wide must not vanish to show its edge.
+        if view.style.edges == EdgeStyle::Line
+            && clip.abuts_prev
+            && let Some(cell) = cells.get_mut(clip.columns.0 as usize)
+        {
+            *cell = ('\u{258f}', style);
+        }
+
         // The label goes over the clip when it fits, which is what makes a
         // wide clip identifiable without a properties panel.
         let room = last.saturating_sub(first) as usize + 1;
@@ -468,6 +490,26 @@ fn lane(view: &ViewState, track: &davimci_app::TrackView, columns: u16) -> Line<
         spans.push(Span::styled(run, run_style));
     }
     Line::from(spans)
+}
+
+/// The columns a clip's body fills.
+///
+/// `inset` gives back up to `gap` cells at each abutting edge, but never the
+/// clip's last one: a narrow clip stays visible even where its separation
+/// cannot be.
+fn body_columns(clip: &davimci_app::ClipView, style: TimelineStyle) -> (u32, u32) {
+    let (first, last) = clip.columns;
+    if style.edges != EdgeStyle::Inset || style.gap == 0 {
+        return (first, last);
+    }
+    let want = |abuts: bool| if abuts { style.gap } else { 0 };
+    let (head, tail) = (want(clip.abuts_prev), want(clip.abuts_next));
+    let spare = last - first;
+    let trim = head.saturating_add(tail).min(spare);
+    // Split what is left over in the order the clip meets its neighbours, so
+    // a clip with room for one cell of separation spends it on its head.
+    let head = head.min(trim);
+    (first + head, last - (trim - head))
 }
 
 /// Grouping is a shade, not a colour: a clip's colour says whether it is
@@ -699,6 +741,8 @@ mod tests {
             selected_columns: None,
             offline,
             linked,
+            abuts_prev: false,
+            abuts_next: false,
             thumbnails: Vec::new(),
         }
     }
@@ -716,6 +760,7 @@ mod tests {
             silenced_by_solo: false,
             clips: Vec::new(),
             waveform: Vec::new(),
+            gaps: Vec::new(),
         }
     }
 

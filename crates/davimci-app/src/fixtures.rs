@@ -160,6 +160,18 @@ pub fn panel() -> ViewState {
     ViewState::build(&s, viewport(Zoom::new(8)), &JumpConfig::default(), &inputs)
 }
 
+/// The `NORMAL` view drawn with a chosen cut-and-gap style, so a frontend
+/// can be held to each of them.
+#[must_use]
+pub fn styled(style: crate::style::TimelineStyle) -> ViewState {
+    let s = session();
+    let inputs = ViewInputs {
+        style,
+        ..ViewInputs::default()
+    };
+    ViewState::build(&s, viewport(Zoom::new(8)), &JumpConfig::default(), &inputs)
+}
+
 /// Every golden view, with a stable name for snapshot files.
 #[must_use]
 pub fn all() -> Vec<(&'static str, ViewState)> {
@@ -170,5 +182,19 @@ pub fn all() -> Vec<(&'static str, ViewState)> {
         ("zoomed_out", zoomed_out()),
         ("waveform", waveform()),
         ("panel", panel()),
+        (
+            "edges_off",
+            styled(crate::style::TimelineStyle {
+                edges: crate::style::EdgeStyle::Off,
+                gap: 1,
+            }),
+        ),
+        (
+            "edges_inset",
+            styled(crate::style::TimelineStyle {
+                edges: crate::style::EdgeStyle::Inset,
+                gap: 2,
+            }),
+        ),
     ]
 }

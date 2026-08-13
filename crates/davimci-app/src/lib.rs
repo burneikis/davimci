@@ -23,6 +23,7 @@ pub mod picker;
 pub mod plugin;
 pub mod rawkey;
 pub mod ruler;
+pub mod style;
 pub mod subtitle;
 pub mod thumbnail;
 pub mod view;
@@ -51,10 +52,12 @@ pub use picker::{Entry, MediaPicker, PickerEvent, PickerIntent};
 pub use plugin::PluginEffects;
 pub use rawkey::{Modifiers, RawKey};
 pub use ruler::{Label, LabelMetrics, Numbers, labels};
+pub use style::{EdgeStyle, MAX_GAP, TimelineStyle};
 pub use subtitle::{SubtitleEdit, SubtitleEvent};
 pub use thumbnail::{Thumbnail, ThumbnailRequest, Thumbnails};
 pub use view::{
-    ClipView, CommandLineView, PlayheadView, SelectionView, Tick, TrackView, ViewInputs, ViewState,
+    ClipView, CommandLineView, GapView, PlayheadView, SelectionView, Tick, TrackView, ViewInputs,
+    ViewState,
 };
 pub use viewport::Viewport;
 pub use waveform::{Waveform, Waveforms};

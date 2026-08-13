@@ -868,17 +868,9 @@ impl Workspace {
                 self.exec(&EditCommand::Reconform { props })?;
                 Ok(ExOutcome::msg(format!("timeline conformed to {props}")))
             }
-            // Handled by the editor; unreachable through this path.
-            Setting::Preview(_) => Err(CliError::UnknownProperty("preview".into())),
-            Setting::Proxy(_) => Err(CliError::UnknownProperty("proxy".into())),
-            Setting::Waveform(_) => Err(CliError::UnknownProperty("waveform".into())),
-            Setting::Decode(_) => Err(CliError::UnknownProperty("decode".into())),
-            Setting::Encode(_) => Err(CliError::UnknownProperty("encode".into())),
-            Setting::PreviewHeight(_) => Err(CliError::UnknownProperty("previewheight".into())),
-            Setting::PreviewProtocol(_) => Err(CliError::UnknownProperty("previewprotocol".into())),
-            Setting::Numbers(_) => Err(CliError::UnknownProperty("numbers".into())),
-            Setting::VisualStart(_) => Err(CliError::UnknownProperty("visualstart".into())),
-            Setting::CenterFollow(_) => Err(CliError::UnknownProperty("centerfollow".into())),
+            // Every view setting is the editor's; reaching here means there
+            // is no editor to apply it to, so it is unknown to the workspace.
+            other => Err(CliError::UnknownProperty(view_property(other).into())),
         }
     }
 
@@ -1203,6 +1195,8 @@ fn describe_setting(setting: &crate::setting::Setting) -> String {
         Setting::PreviewProtocol(p) => format!("preview protocol {}", p.name()),
         Setting::Numbers(n) => n.describe().to_string(),
         Setting::VisualStart(v) => v.describe().to_string(),
+        Setting::Edges(edges) => format!("clip edges {}", edges.name()),
+        Setting::Gap(gap) => format!("clip gap {gap} columns"),
         Setting::CenterFollow(on) => {
             if *on {
                 "the view keeps the playhead centred".into()
@@ -1223,4 +1217,26 @@ fn is_project_file(path: &std::path::Path) -> bool {
         .ok()
         .and_then(|v| v.get("snapshot").cloned())
         .is_some()
+}
+
+/// The `:set` name of a view setting, for the error a workspace with no
+/// editor behind it has to produce.
+fn view_property(setting: &crate::setting::Setting) -> &'static str {
+    use crate::setting::Setting;
+    match setting {
+        Setting::Preview(_) => "preview",
+        Setting::Proxy(_) => "proxy",
+        Setting::Waveform(_) => "waveform",
+        Setting::Decode(_) => "decode",
+        Setting::Encode(_) => "encode",
+        Setting::PreviewHeight(_) => "previewheight",
+        Setting::PreviewProtocol(_) => "previewprotocol",
+        Setting::Numbers(_) => "numbers",
+        Setting::VisualStart(_) => "visualstart",
+        Setting::CenterFollow(_) => "centerfollow",
+        Setting::Edges(_) => "timeline.edges",
+        Setting::Gap(_) => "timeline.gap",
+        // The edits above are handled before this is ever reached.
+        _ => "set",
+    }
 }

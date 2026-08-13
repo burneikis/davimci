@@ -5,7 +5,8 @@
 //! backend or a window. Execution lives in `excmd`/`editor`, which are the
 //! only layers that own a session or a preview.
 
-pub use davimci_app::Numbers;
+pub use davimci_app::{EdgeStyle, Numbers};
+use davimci_app::{MAX_GAP, TimelineStyle};
 pub use davimci_backend::{DecodePolicy, EncodePolicy};
 use davimci_core::{ClipProps, Fps, Frame, Resolution, Transition};
 pub use davimci_keys::VisualStart;
@@ -88,6 +89,13 @@ pub enum Setting {
     /// state `zZ` toggles, so a config can state it without typing the key.
     /// Scrolling is view state, so it never enters the undo log.
     CenterFollow(bool),
+    /// `timeline.edges off|line|inset` - how the seam between two abutting
+    /// clips is drawn. A view setting: the cut is already in the timeline,
+    /// this only decides whether it is visible.
+    Edges(EdgeStyle),
+    /// `timeline.gap <columns>` - how far `timeline.edges inset` pulls a clip
+    /// back from an abutting neighbour.
+    Gap(u32),
 }
 
 /// What `:set previewheight` accepts.
@@ -170,6 +178,8 @@ impl Setting {
                 | Self::Numbers(_)
                 | Self::VisualStart(_)
                 | Self::CenterFollow(_)
+                | Self::Edges(_)
+                | Self::Gap(_)
         )
     }
 }
@@ -188,6 +198,8 @@ pub const PROPERTIES: &[&str] = &[
     "transition.type",
     "timeline.fps",
     "timeline.resolution",
+    "timeline.edges",
+    "timeline.gap",
     "preview",
     "decode",
     "encode",
@@ -212,6 +224,7 @@ pub fn values(prop: &str) -> Vec<String> {
         "previewheight" => &["auto"],
         "previewprotocol" => &["auto", "kitty", "sixel", "blocks"],
         "numbers" => Numbers::NAMES,
+        "timeline.edges" => EdgeStyle::NAMES,
         "visualstart" => VisualStart::NAMES,
         _ => &[],
     };
@@ -241,6 +254,8 @@ pub struct CurrentSettings {
     pub visual_start: Option<VisualStart>,
     /// Whether the view re-centres on the playhead after every move.
     pub center_follow: Option<bool>,
+    /// How the timeline draws cuts and gaps.
+    pub timeline_style: Option<TimelineStyle>,
     pub fps: Option<Fps>,
     pub resolution: Option<Resolution>,
     /// The clip the next `:set clip.*` would act on.
@@ -297,6 +312,8 @@ impl CurrentSettings {
             "centerfollow" => self
                 .center_follow
                 .map(|on| if on { "on" } else { "off" }.to_string()),
+            "timeline.edges" => self.timeline_style.map(|s| s.edges.name().to_string()),
+            "timeline.gap" => self.timeline_style.map(|s| s.gap.to_string()),
             _ => None,
         }
     }
@@ -430,6 +447,17 @@ pub fn parse(prop: &str, value: &str) -> Result<Setting, CliError> {
         "visualstart" => VisualStart::parse(value)
             .map(Setting::VisualStart)
             .ok_or_else(|| bad(prop, "frame or jump")),
+        "timeline.edges" => EdgeStyle::parse(value)
+            .map(Setting::Edges)
+            .ok_or_else(|| bad(prop, "off, line or inset")),
+        // The cap is what keeps a mistyped gap from erasing the clips it is
+        // meant to separate.
+        "timeline.gap" => value
+            .parse::<u32>()
+            .ok()
+            .filter(|g| *g <= MAX_GAP)
+            .map(Setting::Gap)
+            .ok_or_else(|| bad(prop, &format!("a number of columns from 0 to {MAX_GAP}"))),
         "centerfollow" => match value {
             "on" | "true" | "1" => Ok(Setting::CenterFollow(true)),
             "off" | "false" | "0" => Ok(Setting::CenterFollow(false)),

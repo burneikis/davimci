@@ -16,6 +16,7 @@ use crate::confirm::Confirm;
 use crate::job::Job;
 use crate::message::Message;
 use crate::panel::{PanelContent, PanelStore, PanelView};
+use crate::style::TimelineStyle;
 use crate::thumbnail::{Thumbnail, Thumbnails};
 use crate::viewport::Viewport;
 use crate::waveform::Waveforms;
@@ -53,6 +54,8 @@ pub struct ViewInputs<'a> {
     pub cell_rows: u32,
     /// The yes/no question on screen, when the host has raised one.
     pub confirm: Option<&'a Confirm>,
+    /// How cuts and gaps are drawn. One decision, read by every frontend.
+    pub style: TimelineStyle,
 }
 
 impl Default for ViewInputs<'_> {
@@ -74,6 +77,7 @@ impl Default for ViewInputs<'_> {
             cell_columns: 0,
             cell_rows: 0,
             confirm: None,
+            style: TimelineStyle::default(),
         }
     }
 }
@@ -122,6 +126,12 @@ pub struct ClipView {
     pub selected_columns: Option<(u32, u32)>,
     pub offline: bool,
     pub linked: bool,
+    /// The previous clip on this track ends exactly where this one starts, so
+    /// the join is a cut and needs drawing. A fact about the timeline, not
+    /// about the zoom: two clips that quantise onto one column still abut.
+    pub abuts_prev: bool,
+    /// The next clip starts exactly where this one ends.
+    pub abuts_next: bool,
     /// The clip's filmstrip: a picture per sample point, with the column it
     /// belongs at. Only the samples the host has decoded are here, so a
     /// strip fills in as it arrives and an undecoded clip is simply plain.
@@ -147,6 +157,24 @@ pub struct TrackView {
     /// source has been analysed. Empty means "nothing to draw" - either the
     /// lane carries no audio or its analysis has not landed yet.
     pub waveform: Vec<u8>,
+    /// The holes between this track's clips that are on screen. Drawn, not
+    /// merely left blank: an unpainted lane says "nothing here", which is
+    /// also what the space past the last clip looks like.
+    pub gaps: Vec<GapView>,
+}
+
+/// A hole between two clips on one track, as drawn.
+///
+/// Only interior holes are gaps. The space before the first clip and after
+/// the last is the track's own emptiness, and marking it would say a clip is
+/// missing where none was ever cut.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GapView {
+    pub start: Frame,
+    /// Exclusive.
+    pub end: Frame,
+    /// Inclusive column range, clamped to the viewport.
+    pub columns: (u32, u32),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -191,6 +219,9 @@ pub struct ViewState {
     /// frontend draws it and routes `y`/`n` to it; it decides neither what
     /// is asked nor what the answer means.
     pub confirm: Option<Confirm>,
+    /// How cuts and gaps are to be drawn, carried through so a frontend
+    /// reads the setting from the view rather than holding its own copy.
+    pub style: TimelineStyle,
 }
 
 impl ViewState {
@@ -244,36 +275,13 @@ impl ViewState {
                 locked: t.locked,
                 focused: t.id == playhead.track,
                 silenced_by_solo: any_solo && !t.solo,
-                clips: t
-                    .clips()
-                    .iter()
-                    .filter(|c| c.end() > from && c.start < to)
-                    .filter_map(|c| {
-                        column_span(&viewport, c.start, c.end()).map(|columns| ClipView {
-                            id: c.id,
-                            label: c.label.clone(),
-                            start: c.start,
-                            end: c.end(),
-                            columns,
-                            selected_columns: selected_columns(t.id, columns),
-                            offline: c.is_offline(),
-                            linked: c.group.is_some(),
-                            thumbnails: inputs.thumbnails.map_or_else(Vec::new, |store| {
-                                strip_samples(&viewport, c, inputs.thumbnail_columns)
-                                    .into_iter()
-                                    .filter_map(|(column, source)| {
-                                        store.get(c.id, source).map(|t| (column, t.clone()))
-                                    })
-                                    .collect()
-                            }),
-                        })
-                    })
-                    .collect(),
+                clips: track_clips(t, &viewport, inputs, &selected_columns),
                 waveform: inputs
                     .waveforms
                     .and_then(|w| w.get(t.id))
                     .map(|w| track_waveform(t, w, &viewport, tl.props.fps))
                     .unwrap_or_default(),
+                gaps: track_gaps(t, &viewport),
             })
             .collect();
 
@@ -300,6 +308,7 @@ impl ViewState {
             recording: inputs.recording,
             panels: place_panels(&viewport, inputs, playhead.frame),
             confirm: inputs.confirm.cloned(),
+            style: inputs.style,
         }
     }
 
@@ -334,32 +343,7 @@ impl ViewState {
         }
         s.push('\n');
         for t in &self.tracks {
-            let _ = write!(
-                s,
-                "{}{} {}{}{}{}",
-                if t.focused { ">" } else { " " },
-                t.index,
-                t.name,
-                if t.muted { " muted" } else { "" },
-                if t.solo { " solo" } else { "" },
-                if t.silenced_by_solo { " silenced" } else { "" },
-            );
-            for c in &t.clips {
-                let _ = write!(
-                    s,
-                    " [{}:{}..{}@{}-{}{}{}{}]",
-                    c.id.get(),
-                    c.start.get(),
-                    c.end.get(),
-                    c.columns.0,
-                    c.columns.1,
-                    c.selected_columns
-                        .map_or_else(String::new, |(a, b)| format!(" sel{a}-{b}")),
-                    if c.offline { " offline" } else { "" },
-                    if c.linked { " linked" } else { "" },
-                );
-            }
-            s.push('\n');
+            s.push_str(&dump_track(t));
         }
         let _ = writeln!(
             s,
@@ -404,6 +388,56 @@ impl ViewState {
         s.push_str(&dump_panels(&self.panels));
         s
     }
+}
+
+/// One lane as [`ViewState::dump`] prints it: the track's flags, its clips
+/// with the cuts between them, then the holes.
+fn dump_track(t: &TrackView) -> String {
+    use std::fmt::Write as _;
+    let mut s = String::new();
+    let _ = write!(
+        s,
+        "{}{} {}{}{}{}",
+        if t.focused { ">" } else { " " },
+        t.index,
+        t.name,
+        if t.muted { " muted" } else { "" },
+        if t.solo { " solo" } else { "" },
+        if t.silenced_by_solo { " silenced" } else { "" },
+    );
+    for c in &t.clips {
+        let _ = write!(
+            s,
+            " [{}:{}..{}@{}-{}{}{}{}{}]",
+            c.id.get(),
+            c.start.get(),
+            c.end.get(),
+            c.columns.0,
+            c.columns.1,
+            c.selected_columns
+                .map_or_else(String::new, |(a, b)| format!(" sel{a}-{b}")),
+            match (c.abuts_prev, c.abuts_next) {
+                (true, true) => " cut<>",
+                (true, false) => " cut<",
+                (false, true) => " cut>",
+                (false, false) => "",
+            },
+            if c.offline { " offline" } else { "" },
+            if c.linked { " linked" } else { "" },
+        );
+    }
+    for g in &t.gaps {
+        let _ = write!(
+            s,
+            " <gap {}..{}@{}-{}>",
+            g.start.get(),
+            g.end.get(),
+            g.columns.0,
+            g.columns.1
+        );
+    }
+    s.push('\n');
+    s
 }
 
 /// Place every open panel on the surface the frontend reported.
@@ -472,6 +506,70 @@ fn dump_panels(panels: &[PanelView]) -> String {
         }
     }
     s
+}
+
+/// One track's visible clips, in timeline order.
+fn track_clips(
+    track: &davimci_core::Track,
+    viewport: &Viewport,
+    inputs: &ViewInputs<'_>,
+    selected: &dyn Fn(TrackId, (u32, u32)) -> Option<(u32, u32)>,
+) -> Vec<ClipView> {
+    let (from, to) = viewport.visible_range();
+    let clips = track.clips();
+    clips
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| c.end() > from && c.start < to)
+        .filter_map(|(i, c)| {
+            column_span(viewport, c.start, c.end()).map(|columns| ClipView {
+                id: c.id,
+                label: c.label.clone(),
+                start: c.start,
+                end: c.end(),
+                columns,
+                selected_columns: selected(track.id, columns),
+                offline: c.is_offline(),
+                linked: c.group.is_some(),
+                abuts_prev: i
+                    .checked_sub(1)
+                    .and_then(|p| clips.get(p))
+                    .is_some_and(|p| p.end() == c.start),
+                abuts_next: clips.get(i + 1).is_some_and(|n| n.start == c.end()),
+                thumbnails: inputs.thumbnails.map_or_else(Vec::new, |store| {
+                    strip_samples(viewport, c, inputs.thumbnail_columns)
+                        .into_iter()
+                        .filter_map(|(column, source)| {
+                            store.get(c.id, source).map(|t| (column, t.clone()))
+                        })
+                        .collect()
+                }),
+            })
+        })
+        .collect()
+}
+
+/// The visible holes between a track's clips.
+///
+/// Adjacent clips produce nothing, and a hole is emitted once even when the
+/// zoom squeezes it below a column - `column_span` still answers for it, so a
+/// one-frame gap is drawn rather than silently swallowed.
+fn track_gaps(track: &davimci_core::Track, viewport: &Viewport) -> Vec<GapView> {
+    let mut out = Vec::new();
+    for pair in track.clips().windows(2) {
+        let (start, end) = (pair[0].end(), pair[1].start);
+        if start >= end {
+            continue;
+        }
+        if let Some(columns) = column_span(viewport, start, end) {
+            out.push(GapView {
+                start,
+                end,
+                columns,
+            });
+        }
+    }
+    out
 }
 
 /// One lane's envelope: peak level per visible column.

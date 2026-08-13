@@ -1065,17 +1065,23 @@ impl MltBackend {
     }
 
     fn build_producer(&self, entry: &ClipEntry) -> Result<Producer> {
-        let mut producer = match Producer::new(
+        // "Degrade locally": a source that will not open becomes a
+        // placeholder rather than an unopenable project. A title card that
+        // will not open degrades to nothing visible instead: an opaque
+        // placeholder would hide the picture it sits on.
+        let fallback = if matches!(entry.resource, Resource::Text(_)) {
+            "#00000000"
+        } else {
+            "#ff202080"
+        };
+        let mut producer = if let Ok(p) = Producer::new(
             &self.profile,
             entry.resource.service(),
             &entry.resource.resource(),
         ) {
-            Ok(p) => p,
-            // "Degrade locally": a source that will not open becomes a
-            // placeholder rather than an unopenable project.
-            Err(_) => {
-                Producer::new(&self.profile, "color", "#ff202080").map_err(BackendError::from)?
-            }
+            p
+        } else {
+            Producer::new(&self.profile, "color", fallback).map_err(BackendError::from)?
         };
         {
             let mut props = producer.properties();

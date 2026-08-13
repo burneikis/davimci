@@ -20,6 +20,7 @@ use crate::message::{Message, MessageQueue};
 use crate::modal::ModalKey;
 use crate::panel::{PanelId, PanelOp, PanelStore};
 use crate::plugin::PluginEffects;
+use crate::style::TimelineStyle;
 use crate::thumbnail::{Thumbnail, ThumbnailRequest, Thumbnails};
 use crate::view::{CommandLineView, ViewInputs, ViewState};
 use crate::viewport::Viewport;
@@ -98,6 +99,11 @@ pub trait Host {
     /// parks what it parsed and the app is what applies it - the same state
     /// `zZ` toggles.
     fn take_center_follow(&mut self) -> Option<bool> {
+        None
+    }
+
+    /// How the timeline is to draw cuts and gaps, taken once.
+    fn take_timeline_style(&mut self) -> Option<TimelineStyle> {
         None
     }
 
@@ -352,6 +358,9 @@ pub struct App {
     /// `zZ`: keep the playhead in the middle column instead of scrolling only
     /// when it reaches an edge.
     center_follow: bool,
+    /// How cuts and gaps are drawn. View state: it changes nothing about the
+    /// timeline, so it never reaches the undo log.
+    timeline_style: TimelineStyle,
     /// The subtitle clip a frontend is editing the text of, if any.
     editing_text: Option<ClipId>,
     /// The selection at the moment `:` was pressed, for the `:` line that
@@ -405,6 +414,7 @@ impl App {
             command_open: false,
             pending_pick: None,
             center_follow: false,
+            timeline_style: TimelineStyle::default(),
             editing_text: None,
             pending_selection: None,
             panels: PanelStore::default(),
@@ -553,6 +563,16 @@ impl App {
         }
     }
 
+    /// How the timeline draws cuts and gaps.
+    #[must_use]
+    pub fn timeline_style(&self) -> TimelineStyle {
+        self.timeline_style
+    }
+
+    pub fn set_timeline_style(&mut self, style: TimelineStyle) {
+        self.timeline_style = style;
+    }
+
     pub fn scroll_columns(&mut self, delta: i64) {
         let ph = self.session.timeline().playhead().frame;
         self.viewport
@@ -592,6 +612,7 @@ impl App {
             cell_rows: self.cell_rows,
             panels: (!self.panels.is_empty()).then_some(&self.panels),
             confirm: self.confirms.front(),
+            style: self.timeline_style,
         };
         ViewState::build(&self.session, self.viewport, &self.jump_cfg, &inputs)
     }
@@ -1068,6 +1089,9 @@ impl App {
         }
         if let Some(on) = host.take_center_follow() {
             self.set_center_follow(on);
+        }
+        if let Some(style) = host.take_timeline_style() {
+            self.set_timeline_style(style);
         }
     }
 

@@ -53,6 +53,12 @@ pub enum Fill {
     /// A clip in a link group: the clip colour, a shade darker, so grouping
     /// reads without taking the colour that says what the clip is.
     ClipGrouped,
+    /// The seam where two clips abut: darker than either, so a cut reads as
+    /// a cut and not as one long clip.
+    ClipEdge,
+    /// A hole between two clips, drawn so it cannot be mistaken for the
+    /// empty lane past the last clip.
+    Gap,
     Selection,
     /// One column of an audio lane's envelope.
     Waveform,

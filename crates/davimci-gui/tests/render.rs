@@ -33,9 +33,9 @@ fn the_normal_view_paints_a_stable_draw_list() {
     let list = paint_view(&view, &layout(800, 600), &Chrome::default());
     assert_eq!(
         summarise(&list),
-        "Background=2 Clip=5 ClipLabel=5 Cursor=1 Playhead=1 Ruler=1 Status=1 StatusLine=1 \
-TickMajor=5 TickMinor=3 TrackHeader=2 TrackHeaderFocused=1 TrackLane=2 TrackLaneFocused=1 \
-TrackName=3"
+        "Background=2 Clip=5 ClipEdge=1 ClipLabel=5 Cursor=1 Gap=1 Playhead=1 Ruler=1 Status=1 \
+StatusLine=1 TickMajor=5 TickMinor=3 TrackHeader=2 TrackHeaderFocused=1 TrackLane=2 \
+TrackLaneFocused=1 TrackName=3"
     );
 }
 
@@ -530,5 +530,69 @@ fn a_panel_span_has_room_for_its_glyphs_and_the_shells_inset() {
             "{text:?} is drawn in {rect:?}, which clips {} px of it",
             glyphs + davimci_gui::layout::TEXT_PADDING - rect.width
         );
+    }
+}
+
+#[test]
+fn a_cut_is_painted_as_a_seam_and_a_gap_as_its_own_fill() {
+    use davimci_app::{EdgeStyle, TimelineStyle};
+
+    let painted = |style: TimelineStyle| {
+        paint_view(
+            &fixtures::styled(style),
+            &layout(800, 600),
+            &Chrome::default(),
+        )
+    };
+
+    // `off` draws neither, which is what made a cut invisible.
+    let off = painted(TimelineStyle {
+        edges: EdgeStyle::Off,
+        gap: 1,
+    });
+    assert!(off.rects(Fill::ClipEdge).is_empty() && off.rects(Fill::Gap).is_empty());
+
+    // `line` marks the one cut in the fixture without narrowing either clip.
+    let line = painted(TimelineStyle::default());
+    assert_eq!(line.rects(Fill::ClipEdge).len(), 1);
+    assert_eq!(line.rects(Fill::Gap).len(), 1);
+    let widths = |list: &davimci_gui::paint::DrawList| -> Vec<u32> {
+        list.rects(Fill::Clip).iter().map(|r| r.width).collect()
+    };
+    assert_eq!(widths(&line), widths(&off));
+
+    // `inset` pulls the abutting clips apart instead, and only those.
+    let inset = painted(TimelineStyle {
+        edges: EdgeStyle::Inset,
+        gap: 4,
+    });
+    assert!(inset.rects(Fill::ClipEdge).is_empty());
+    let (before, after) = (widths(&off), widths(&inset));
+    assert!(
+        after.iter().zip(&before).any(|(a, b)| a < b),
+        "inset narrowed nothing: {after:?} against {before:?}"
+    );
+    assert!(
+        after.iter().zip(&before).all(|(a, b)| a <= b && *a >= 1),
+        "inset erased a clip: {after:?}"
+    );
+}
+
+#[test]
+fn a_clip_narrower_than_the_inset_keeps_a_pixel() {
+    use davimci_app::{EdgeStyle, TimelineStyle};
+
+    // Fully zoomed out every clip is a pixel or two wide, so the inset is
+    // wider than the clips it would separate.
+    let view = fixtures::zoomed_out();
+    let inset = TimelineStyle {
+        edges: EdgeStyle::Inset,
+        gap: 16,
+    };
+    let mut styled = view.clone();
+    styled.style = inset;
+    let list = paint_view(&styled, &layout(800, 600), &Chrome::default());
+    for rect in list.rects(Fill::Clip) {
+        assert!(rect.width >= 1, "the inset erased a clip: {rect:?}");
     }
 }
