@@ -26,11 +26,23 @@ if ! unshare -rm --map-root-user true 2>/dev/null; then
 fi
 
 runtime=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+case $runtime in
+  /run/user/*) ;;
+  *)
+    echo "refusing to cover XDG_RUNTIME_DIR=$runtime: not a /run/user path" >&2
+    exit 1
+    ;;
+esac
 
-exec unshare -rm --map-root-user bash -euc '
+# The mounts below are undone by the namespace ending with the command: there
+# is nothing to clean up and nothing to leak. `--propagation private` is what
+# makes that true rather than the util-linux default making it true - without
+# it, a shared host mount tree would carry the tmpfs back out.
+exec unshare -rm --map-root-user --propagation private bash -euc '
   runtime=$1
   shift
-  [ -d /dev/snd ] && mount -t tmpfs empty /dev/snd
-  [ -d "$runtime" ] && mount -t tmpfs empty "$runtime"
+  # A machine that already lacks one of these needs no covering for it.
+  if [ -d /dev/snd ]; then mount -t tmpfs empty /dev/snd; fi
+  if [ -d "$runtime" ]; then mount -t tmpfs empty "$runtime"; fi
   exec env -u PULSE_SERVER -u PIPEWIRE_RUNTIME_DIR "$@"
 ' -- "$runtime" "$@"
