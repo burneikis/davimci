@@ -21,6 +21,10 @@ pollster.workspace = true
 wgpu.workspace = true
 davimci-core = { workspace = true, features = ["testing"] }
 
+[[test]]
+name = "gpu"
+required-features = ["gpu", "slow-tests"]
+
 [features]
 # The planar YUV upload path. Off, the crate needs no GPU at all and the CPU
 # composition - the reference every parity test asserts - is all there is.

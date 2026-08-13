@@ -29,7 +29,7 @@ test-slow: fixtures
 # The planar upload path, which needs a GPU. Lavapipe counts; no adapter at
 # all skips rather than fails.
 test-gpu:
-    cargo test -p davimci-present --features gpu --test gpu
+    cargo test -p davimci-present --features gpu,slow-tests --test gpu
 
 # Everything, including sanitizers.
 test-all: test test-slow test-gpu sanitize

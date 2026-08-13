@@ -6,7 +6,11 @@
 //! skips - loudly - when there is none, because a machine with no GPU must
 //! not fail a suite it cannot run.
 
-#![cfg(feature = "gpu")]
+// `gpu` alone does not gate this: a workspace test run unifies features, and
+// `davimci-cli`'s default `window` turns `gpu` on for every crate, which would
+// drag adapter probing into the fast suite. `slow-tests` is asked for by name,
+// so only `just test-gpu` runs it.
+#![cfg(all(feature = "gpu", feature = "slow-tests"))]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use davimci_backend::PlanarFrame;
