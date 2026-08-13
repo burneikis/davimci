@@ -15,6 +15,9 @@ pub struct Modifiers {
     pub ctrl: bool,
     pub alt: bool,
     pub shift: bool,
+    /// Super. Reported by terminals speaking the kitty protocol, and never
+    /// the editor's - the window manager owns it, as it does in the GUI.
+    pub logo: bool,
 }
 
 /// A key press, as much as davimci cares about it.
@@ -40,6 +43,9 @@ pub enum TermKey {
 /// field instead of inventing a token.
 #[must_use]
 pub fn translate(key: &TermKey, mods: Modifiers) -> Option<Key> {
+    if mods.logo {
+        return None;
+    }
     match key {
         TermKey::Char(c) => {
             if mods.ctrl {
@@ -77,6 +83,7 @@ pub fn from_crossterm(event: &KeyEvent) -> Option<(TermKey, Modifiers)> {
         ctrl: event.modifiers.contains(KeyModifiers::CONTROL),
         alt: event.modifiers.contains(KeyModifiers::ALT),
         shift: event.modifiers.contains(KeyModifiers::SHIFT),
+        logo: event.modifiers.contains(KeyModifiers::SUPER),
     };
     let key = match event.code {
         KeyCode::Char(c) => TermKey::Char(c),
@@ -140,6 +147,15 @@ mod tests {
             .filter_map(|c| translate(&TermKey::Char(c), none()))
             .collect();
         assert_eq!(typed, Key::parse_str("3dw"));
+    }
+
+    #[test]
+    fn super_chorded_keys_belong_to_the_window_manager() {
+        let logo = Modifiers {
+            logo: true,
+            ..none()
+        };
+        assert_eq!(translate(&TermKey::Char('l'), logo), None);
     }
 
     #[test]

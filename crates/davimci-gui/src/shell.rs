@@ -195,8 +195,12 @@ impl Gui {
 
     fn handle_key(&mut self, raw: &RawKey, mods: Modifiers) {
         // A modal owns the keyboard while it is open, and which one owns it
-        // is the app's decision, not the shell's.
+        // is the app's decision, not the shell's. Chorded keys are never a
+        // modal's, so Ctrl-o still reaches the grammar from a picker.
         if self.modals.is_open()
+            && !mods.ctrl
+            && !mods.alt
+            && !mods.logo
             && let Some(modal) = modal_key(raw)
             && let Some(events) = self.modals.handle(modal)
         {
@@ -361,6 +365,23 @@ mod tests {
         // And gives it back afterwards.
         g.push(GuiEvent::Key(RawKey::Char('x'), Modifiers::default()));
         assert_eq!(g.poll(), vec![Event::Key(Key::Char('x'))]);
+    }
+
+    /// A chord is the grammar's, open modal or not - the same rule the
+    /// terminal follows.
+    #[test]
+    fn a_chord_reaches_the_grammar_through_an_open_modal() {
+        let mut g = gui();
+        g.open_picker(MediaPicker::new(
+            PickerIntent::Insert,
+            vec![Entry::file("/m/a.mkv")],
+        ));
+        g.push(GuiEvent::Key(RawKey::Char('o'), Modifiers::ctrl()));
+        assert_eq!(g.poll(), vec![Event::Key(Key::Ctrl('o'))]);
+        assert_eq!(
+            g.picker().map(|p| p.query().to_string()),
+            Some(String::new())
+        );
     }
 
     #[test]

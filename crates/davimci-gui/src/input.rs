@@ -64,6 +64,10 @@ pub fn translate(key: &RawKey, mods: Modifiers) -> Option<Key> {
                 Some(Key::Ctrl(c.to_ascii_lowercase()))
             } else if mods.alt {
                 None
+            } else if *c == ' ' {
+                // Some shells deliver the space bar as text; it names the
+                // same token the terminal's space does.
+                Some(Key::Named(Named::Space))
             } else {
                 Some(Key::Char(*c))
             }
@@ -106,6 +110,15 @@ mod tests {
             translate(&RawKey::Char('V'), shifted),
             Some(Key::Char('V')),
             "shift must not be applied twice"
+        );
+    }
+
+    #[test]
+    fn a_typed_space_is_the_transport_token() {
+        assert_eq!(
+            translate(&RawKey::Char(' '), none()),
+            Some(Key::Named(Named::Space)),
+            "a space must not depend on which key the shell reported"
         );
     }
 
