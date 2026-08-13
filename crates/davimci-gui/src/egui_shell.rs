@@ -20,10 +20,10 @@ use egui::{
     Vec2,
 };
 
-use crate::input::{Modifiers, RawKey};
 use crate::layout::TEXT_PADDING;
 use crate::paint::{DrawList, Fill, Paint, Rect, TextRole};
 use davimci_app::Severity;
+use davimci_app::rawkey::{Modifiers, RawKey};
 
 /// Colours for every [`Fill`]. One function, so a theme is one edit.
 #[must_use]

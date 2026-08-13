@@ -1,12 +1,13 @@
-//! Key translation: window events in, `davimci-keys`
-//! tokens out, and nothing else.
+//! The raw key alphabet every frontend translates into `davimci-keys`
+//! tokens: one model, so the GUI and the TUI bind the same keys and cannot
+//! drift apart.
 //!
-//! The raw key model here is deliberately not `winit`'s. It is the small
-//! subset davimci binds, so translation is testable with no window and the
-//! same table serves a `winit` shell, a test, and (with a different adapter)
-//! a terminal. A shell's job is to fill in [`RawKey`]; it may not decide what
-//! a key means.
+//! The model is deliberately neither `winit`'s nor crossterm's. It is the
+//! small subset davimci binds, so translation is testable with no window or
+//! terminal and one table serves every shell. A shell's job is to fill in
+//! [`RawKey`]; it may not decide what a key means.
 
+use crate::modal::ModalKey;
 use davimci_keys::{Key, Named};
 
 /// Modifier state at the moment of a key press.
@@ -15,6 +16,8 @@ pub struct Modifiers {
     pub ctrl: bool,
     pub alt: bool,
     pub shift: bool,
+    /// Super. The window manager owns it, never the editor - in a terminal
+    /// it is only ever reported under the kitty protocol.
     pub logo: bool,
 }
 
@@ -31,9 +34,9 @@ impl Modifiers {
 /// A physical key press, as much as davimci cares about it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RawKey {
-    /// A text-producing key, already shifted by the platform's keyboard
-    /// layout - `Shift`+`v` arrives as `'V'`, which is why `Modifiers::shift`
-    /// is ignored for character keys.
+    /// A text-producing key, already shifted by the platform - `Shift`+`v`
+    /// arrives as `'V'`, which is why `Modifiers::shift` is ignored for
+    /// character keys.
     Char(char),
     Escape,
     Enter,
@@ -43,6 +46,8 @@ pub enum RawKey {
     Right,
     Up,
     Down,
+    /// The space bar as a named key. Terminals send the character instead;
+    /// both name the same token.
     Space,
     /// Anything davimci does not bind.
     Other,
@@ -66,7 +71,7 @@ pub fn translate(key: &RawKey, mods: Modifiers) -> Option<Key> {
                 None
             } else if *c == ' ' {
                 // Some shells deliver the space bar as text; it names the
-                // same token the terminal's space does.
+                // same token `RawKey::Space` does.
                 Some(Key::Named(Named::Space))
             } else {
                 Some(Key::Char(*c))
@@ -89,6 +94,25 @@ pub fn translate(key: &RawKey, mods: Modifiers) -> Option<Key> {
 #[must_use]
 pub fn translate_all(keys: &[(RawKey, Modifiers)]) -> Vec<Key> {
     keys.iter().filter_map(|(k, m)| translate(k, *m)).collect()
+}
+
+/// One key press in the modal alphabet. `None` for keys no modal can use,
+/// which then fall through to the grammar.
+#[must_use]
+pub fn modal_key(raw: &RawKey) -> Option<ModalKey> {
+    Some(match raw {
+        RawKey::Char(c) => ModalKey::Char(*c),
+        RawKey::Space => ModalKey::Char(' '),
+        RawKey::Escape => ModalKey::Escape,
+        RawKey::Enter => ModalKey::Enter,
+        RawKey::Backspace => ModalKey::Backspace,
+        RawKey::Tab => ModalKey::Tab,
+        RawKey::Left => ModalKey::Left,
+        RawKey::Right => ModalKey::Right,
+        RawKey::Up => ModalKey::Up,
+        RawKey::Down => ModalKey::Down,
+        RawKey::Other => return None,
+    })
 }
 
 #[cfg(test)]
@@ -180,5 +204,12 @@ mod tests {
     fn arrow_keys_translate_to_the_one_frame_motions() {
         let typed = [(RawKey::Left, none()), (RawKey::Right, none())];
         assert_eq!(translate_all(&typed), Key::parse_str("<Left><Right>"));
+    }
+
+    #[test]
+    fn the_space_key_and_the_space_character_name_one_modal_key() {
+        assert_eq!(modal_key(&RawKey::Space), Some(ModalKey::Char(' ')));
+        assert_eq!(modal_key(&RawKey::Char(' ')), Some(ModalKey::Char(' ')));
+        assert_eq!(modal_key(&RawKey::Other), None);
     }
 }

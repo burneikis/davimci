@@ -13,12 +13,13 @@
 
 #[cfg(feature = "window")]
 pub mod egui_shell;
-pub mod input;
 pub mod layout;
 pub mod paint;
 pub mod shell;
 
-pub use input::{Modifiers, RawKey, translate};
+// The raw key alphabet is app state too: both frontends translate through
+// the same table in `davimci_app::rawkey`.
+pub use davimci_app::rawkey::{Modifiers, RawKey, translate};
 pub use layout::{Layout, Metrics, VideoHeight, paint as paint_view};
 pub use paint::{Chrome, DrawList, Fill, Paint, Rect, TextRole, VideoQuad};
 // The modals are app state, not GUI state: the TUI opens the same ones.

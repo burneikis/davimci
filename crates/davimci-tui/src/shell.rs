@@ -9,8 +9,8 @@
 //! the rows it produced, which is what lets every test here run with no tty.
 
 use davimci_app::{
-    AppError, Event, Frontend, MediaPicker, ModalKey, Modals, Numbers, PickerIntent, Response,
-    SubtitleEdit, Surface, ViewState,
+    AppError, Event, Frontend, MediaPicker, Modals, Numbers, PickerIntent, Response, SubtitleEdit,
+    Surface, ViewState,
 };
 use davimci_core::Resolution;
 use ratatui::prelude::Line;
@@ -18,6 +18,7 @@ use ratatui::prelude::Line;
 use crate::input::{Modifiers, TermKey, translate};
 use crate::preview::{Band, Cell, Encoder, Height, Layout, Protocol, natural_rows};
 use crate::render::{self, Overlay};
+use davimci_app::rawkey::modal_key;
 
 /// Something the terminal observed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -353,23 +354,6 @@ impl Frontend for Tui {
         self.cursor = render::cursor(view, self.height);
         Ok(())
     }
-}
-
-/// One terminal key press in the modal alphabet. `None` for keys no modal can
-/// use, which then fall through to the grammar.
-fn modal_key(key: &TermKey) -> Option<ModalKey> {
-    Some(match key {
-        TermKey::Char(c) => ModalKey::Char(*c),
-        TermKey::Escape => ModalKey::Escape,
-        TermKey::Enter => ModalKey::Enter,
-        TermKey::Backspace => ModalKey::Backspace,
-        TermKey::Tab => ModalKey::Tab,
-        TermKey::Left => ModalKey::Left,
-        TermKey::Right => ModalKey::Right,
-        TermKey::Up => ModalKey::Up,
-        TermKey::Down => ModalKey::Down,
-        TermKey::Other => return None,
-    })
 }
 
 #[cfg(test)]

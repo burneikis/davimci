@@ -18,11 +18,11 @@
 )]
 
 use davimci_app::{AppError, Event, Frontend, Response, Surface, ViewState};
-use davimci_app::{MediaPicker, ModalKey, Modals, PickerIntent, SubtitleEdit};
+use davimci_app::{MediaPicker, Modals, PickerIntent, SubtitleEdit};
 
-use crate::input::{Modifiers, RawKey, translate};
 use crate::layout::{Layout, Metrics, VideoHeight, paint};
 use crate::paint::{Chrome, DrawList, PickerRow, PickerView};
+use davimci_app::rawkey::{Modifiers, RawKey, modal_key, translate};
 
 /// Something the windowing layer observed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -290,24 +290,6 @@ fn picker_view(picker: &MediaPicker) -> PickerView {
             .collect(),
         selected: picker.selected(),
     }
-}
-
-/// One window key press in the modal alphabet. `None` for keys no modal can
-/// use, which then fall through to the grammar.
-fn modal_key(raw: &RawKey) -> Option<ModalKey> {
-    Some(match raw {
-        RawKey::Char(c) => ModalKey::Char(*c),
-        RawKey::Space => ModalKey::Char(' '),
-        RawKey::Escape => ModalKey::Escape,
-        RawKey::Enter => ModalKey::Enter,
-        RawKey::Backspace => ModalKey::Backspace,
-        RawKey::Tab => ModalKey::Tab,
-        RawKey::Left => ModalKey::Left,
-        RawKey::Right => ModalKey::Right,
-        RawKey::Up => ModalKey::Up,
-        RawKey::Down => ModalKey::Down,
-        RawKey::Other => return None,
-    })
 }
 
 #[cfg(test)]

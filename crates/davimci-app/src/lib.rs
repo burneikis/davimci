@@ -21,6 +21,7 @@ pub mod modal;
 pub mod panel;
 pub mod picker;
 pub mod plugin;
+pub mod rawkey;
 pub mod ruler;
 pub mod subtitle;
 pub mod thumbnail;
@@ -48,6 +49,7 @@ pub use panel::{
 };
 pub use picker::{Entry, MediaPicker, PickerEvent, PickerIntent};
 pub use plugin::PluginEffects;
+pub use rawkey::{Modifiers, RawKey};
 pub use ruler::{Label, LabelMetrics, Numbers, labels};
 pub use subtitle::{SubtitleEdit, SubtitleEvent};
 pub use thumbnail::{Thumbnail, ThumbnailRequest, Thumbnails};
