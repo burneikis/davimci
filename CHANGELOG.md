@@ -16,6 +16,15 @@ Guidelines:
 
 ## Unreleased
 
+### Fixed
+
+- Preview plays at the speed it was asked for on a machine with no audio
+  output. Without a sound card the audio consumer had nothing to wait for and
+  raced through the timeline, so a backwards shuttle showed one picture and
+  froze; wall time now keeps the clock when audio cannot.
+- Preview no longer fails outright when the preferred audio output exists but
+  cannot be started; the next one is tried instead.
+
 ## 0.1.0 - 2026-08-13
 
 First public release.

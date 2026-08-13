@@ -30,6 +30,12 @@ test:
 test-slow: fixtures
     ./scripts/timed.sh 1800 "slow suite" cargo test --workspace --features slow-tests -- --include-ignored
 
+# Preview pacing as a CI runner sees it: no sound card, so nothing but wall
+# time keeps the clock. A developer box hides these by having audio output.
+test-no-audio: fixtures
+    ./scripts/no-audio.sh ./scripts/timed.sh 600 "no-audio suite" \
+        cargo test -p davimci-mlt --features slow-tests --test media shuttle -- --include-ignored
+
 # The planar upload path, which needs a GPU. Lavapipe counts; no adapter at
 # all skips rather than fails.
 test-gpu:

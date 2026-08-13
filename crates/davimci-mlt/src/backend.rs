@@ -18,7 +18,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use davimci_backend::{
     AccelerationStatus, BackendError, DecodePolicy, PlanarFrame, PreviewScale, RenderBackend,
@@ -78,11 +78,71 @@ struct PreviewShared {
     image: bool,
 }
 
+/// Where the preview would have reached if nothing but the wall clock said.
+///
+/// The audio consumer is the master clock only while it is actually playing
+/// to a device: an audio consumer that cannot open one has nothing to block
+/// on and pulls frames as fast as they decode, which reports a timeline
+/// sweeping past in a fraction of the time it lasts. A machine with no sound
+/// card - a headless render box, a CI runner - would otherwise get a preview
+/// racing to the end of the timeline instead of playing it.
+#[derive(Debug)]
+struct WallClock {
+    origin: Frame,
+    started: Instant,
+    /// Frames of timeline per second of wall time, sign included.
+    per_second: f64,
+    end: Frame,
+    /// How far the consumer may be from wall time and still be believed.
+    slack: u64,
+}
+
+impl WallClock {
+    fn new(origin: Frame, rate: f64, fps: Fps, end: Frame) -> Self {
+        Self {
+            origin,
+            started: Instant::now(),
+            per_second: rate * fps.as_f64(),
+            end,
+            // A quarter second. Audio output that is genuinely driving the
+            // clock stays inside a buffer or two of wall time; a consumer
+            // with no device is a whole timeline away within one tick.
+            slack: u64::from(fps.num).div_ceil(u64::from(fps.den.max(1)) * 4) + 1,
+        }
+    }
+
+    fn tolerance(&self) -> u64 {
+        self.slack
+    }
+
+    /// The position wall time alone puts the preview at, clamped to the
+    /// timeline: past either end there is nothing left to play.
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "a frame position is small enough to be exact in f64, and the value is clamped to the timeline before it is cast back"
+    )]
+    fn position_after(&self, elapsed: Duration) -> Frame {
+        let travelled = elapsed.as_secs_f64() * self.per_second;
+        let at = (self.origin.get() as f64 + travelled).clamp(0.0, self.end.get() as f64);
+        Frame(at as u64)
+    }
+
+    fn position(&self) -> Frame {
+        self.position_after(self.started.elapsed())
+    }
+}
+
 /// A running preview: an audio consumer plus the listener stealing its video.
 #[derive(Debug)]
 struct Preview {
     consumer: Consumer,
     shared: Arc<PreviewShared>,
+    /// What the preview would read with no consumer at all, used to tell a
+    /// consumer playing to a device from one free-running because it has
+    /// none.
+    wall: WallClock,
     // Kept alive for as long as the consumer that fires it. `Drop` stops the
     // consumer first, so no callback can reach freed state.
     _event: EventHandle,
@@ -1526,50 +1586,78 @@ impl MltBackend {
         graph.root.set_speed(rate);
         let root = graph.root.clone_ref();
 
-        // Audio-only consumers, in preference order: MLT must never own a
-        // video window here. `sdl2_audio` leads because it is the only one
-        // that honours `scrub_audio`, and so the only one that can be heard
-        // while shuttling.
-        let mut consumer = ["sdl2_audio", "rtaudio", "null"]
-            .iter()
-            .find_map(|s| Consumer::new(&self.profile, s, None).ok())
-            .ok_or(BackendError::Unavailable {
-                reason: "no audio output is available for preview".into(),
-            })?;
-        {
-            let mut props = consumer.properties();
-            props.set_int("real_time", 1)?;
-            let _ = props.set("terminate_on_pause", "0");
-            // Without this the consumer queues audio only at exactly 1x, so
-            // every shuttle - fast, slow or backwards - would be silent. The
-            // consumer reads it once, when it starts, so it is set here
-            // rather than per rate change.
-            let _ = props.set_int("scrub_audio", 1);
-            if reverse {
-                // The consumer plays the sound and keeps the clock; the
-                // picture is decoded from the scrub graph instead. Read once
-                // at start, which is why a change of direction reopens the
-                // consumer rather than setting it live.
-                let _ = props.set_int("video_off", 1);
-            }
-        }
         let shared = Arc::new(PreviewShared {
             frames: Mutex::new(VecDeque::new()),
             width: res.width,
             height: res.height,
             image: !reverse,
         });
-        // SAFETY: the pointer is an `Arc` this struct keeps alive for exactly
-        // as long as the event handle, which is dropped before the consumer.
-        let event = unsafe {
-            consumer.listen_frame_show(Arc::as_ptr(&shared) as *mut c_void, Some(on_frame_show))
-        }?;
-        consumer.connect(&root)?;
-        consumer.start()?;
+        // Audio-only consumers, in preference order: MLT must never own a
+        // video window here. `sdl2_audio` leads because it is the only one
+        // that honours `scrub_audio`, and so the only one that can be heard
+        // while shuttling.
+        //
+        // A consumer that exists is not a consumer that plays: `sdl2_audio`
+        // builds on a machine with no sound card and only fails when it is
+        // started, so each candidate is carried all the way to `start` before
+        // the next one is tried. Picking on construction alone left a
+        // soundless machine with the one consumer that could not run.
+        //
+        // `null` fires no events at all, so it can only ever be the clock: it
+        // is a resort for a backwards pass, whose picture comes from the
+        // scrub graph, and never for a forwards one, whose picture is lifted
+        // out of the events this consumer would not fire.
+        let candidates: &[&str] = if reverse {
+            &["sdl2_audio", "rtaudio", "null"]
+        } else {
+            &["sdl2_audio", "rtaudio"]
+        };
+        let mut opened = None;
+        for name in candidates.iter().copied() {
+            let Ok(mut consumer) = Consumer::new(&self.profile, name, None) else {
+                continue;
+            };
+            {
+                let mut props = consumer.properties();
+                if props.set_int("real_time", 1).is_err() {
+                    continue;
+                }
+                let _ = props.set("terminate_on_pause", "0");
+                // Without this the consumer queues audio only at exactly 1x,
+                // so every shuttle - fast, slow or backwards - would be
+                // silent. The consumer reads it once, when it starts, so it
+                // is set here rather than per rate change.
+                let _ = props.set_int("scrub_audio", 1);
+                if reverse {
+                    // The consumer plays the sound and keeps the clock; the
+                    // picture is decoded from the scrub graph instead. Read
+                    // once at start, which is why a change of direction
+                    // reopens the consumer rather than setting it live.
+                    let _ = props.set_int("video_off", 1);
+                }
+            }
+            // SAFETY: the pointer is an `Arc` this struct keeps alive for
+            // exactly as long as the event handle, which is dropped before
+            // the consumer.
+            let listening = unsafe {
+                consumer.listen_frame_show(Arc::as_ptr(&shared) as *mut c_void, Some(on_frame_show))
+            };
+            let Ok(event) = listening else { continue };
+            if consumer.connect(&root).is_err() || consumer.start().is_err() {
+                continue;
+            }
+            opened = Some((consumer, event));
+            break;
+        }
+        let (consumer, event) = opened.ok_or(BackendError::Unavailable {
+            reason: "no audio output is available for preview".into(),
+        })?;
         let scrub = scrub_graph.map(|g| Scrub::spawn(g, &shared, res, self.backstep_run));
+        let end = Frame(frames(root.length().max(0)).saturating_sub(1));
         self.preview = Some(Preview {
             consumer,
             shared,
+            wall: WallClock::new(from, rate, self.props.fps, end),
             _event: event,
             scale,
             scrub,
@@ -1818,10 +1906,15 @@ impl RenderBackend for MltBackend {
         // Speed lives on the producer, not the consumer: the consumer keeps
         // pulling at wall-clock rate and the producer decides which frame
         // that is, which is what makes the audio clock stay the master.
+        let at = self.preview_position();
+        let fps = self.props.fps;
         let graph = self.require_graph()?;
         graph.root.set_speed(rate);
         if let Some(p) = self.preview.as_mut() {
             p.consumer.properties().set_int("refresh", 1)?;
+            // A new speed is a new clock: the wall clock measures from where
+            // the preview is now, not from where the last rate started it.
+            p.wall = WallClock::new(at, rate, fps, p.wall.end);
         }
         Ok(())
     }
@@ -1850,10 +1943,28 @@ impl RenderBackend for MltBackend {
         Ok(q.pop_front())
     }
 
+    /// Where the preview has played to.
+    ///
+    /// The audio consumer is the master clock, but only while it is playing
+    /// to a device. With no sound card it opens no output, blocks on nothing
+    /// and pulls frames as fast as they decode, reporting a whole timeline
+    /// gone by in the time a second of it should take. A consumer running
+    /// away from wall time is not a clock, so wall time answers instead and
+    /// the preview plays at the speed it was asked for.
     fn audio_clock_position(&self) -> Option<Frame> {
         let p = self.preview.as_ref()?;
         let pos = p.consumer.position();
-        (pos >= 0).then_some(Frame(frames(pos)))
+        if pos < 0 {
+            return None;
+        }
+        let heard = Frame(frames(pos));
+        let wall = p.wall.position();
+        let drift = heard.get().abs_diff(wall.get());
+        Some(if drift <= p.wall.tolerance() {
+            heard
+        } else {
+            wall
+        })
     }
 
     fn register_transition(&mut self, def: davimci_backend::TransitionDef) -> Result<()> {
@@ -2024,7 +2135,59 @@ impl RenderBackend for MltBackend {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::panic, clippy::expect_used)]
 mod tests {
-    use super::{MltBackend, blend_cost, qt_is_safe_here};
+    use std::time::Duration;
+
+    use davimci_core::{Fps, Frame};
+
+    use super::{MltBackend, WallClock, blend_cost, qt_is_safe_here};
+
+    fn after(secs: f64, origin: u64, rate: f64, end: u64) -> Frame {
+        WallClock::new(Frame(origin), rate, Fps::FPS_60, Frame(end))
+            .position_after(Duration::from_secs_f64(secs))
+    }
+
+    /// Regression: an audio consumer that cannot open a device blocks on
+    /// nothing and pulls frames as fast as they decode, so the preview clock
+    /// reported a whole timeline gone by in the time a second of it takes and
+    /// the backwards shuttle handed over one picture for two hundred frames
+    /// of sound. Wall time is what a preview with no audio is paced by.
+    #[test]
+    fn a_consumer_with_no_audio_device_does_not_get_to_keep_the_clock() {
+        let clock = WallClock::new(Frame(100), 1.0, Fps::FPS_60, Frame(240));
+        let wall = clock.position_after(Duration::from_secs(1));
+        assert_eq!(wall, Frame(160), "a second at 60fps is 60 frames");
+        // What a free-running consumer reports after that same second.
+        assert!(
+            240_u64.abs_diff(wall.get()) > clock.tolerance(),
+            "a consumer that swept the timeline should be disbelieved"
+        );
+        // What an audio device that is genuinely playing reports.
+        assert!(
+            158_u64.abs_diff(wall.get()) <= clock.tolerance(),
+            "a buffer of lag should still be believed"
+        );
+    }
+
+    #[test]
+    fn the_wall_clock_runs_backwards_and_stops_at_either_end() {
+        assert_eq!(after(1.0, 200, -1.0, 240), Frame(140));
+        assert_eq!(after(1.0, 200, -2.0, 240), Frame(80));
+        assert_eq!(
+            after(10.0, 200, -1.0, 240),
+            Frame(0),
+            "a backwards pass has nothing below frame zero"
+        );
+        assert_eq!(
+            after(10.0, 100, 1.0, 240),
+            Frame(240),
+            "a forwards pass stops at the last frame"
+        );
+        assert_eq!(
+            after(5.0, 100, 0.0, 240),
+            Frame(100),
+            "a paused preview stays where it is"
+        );
+    }
 
     /// Regression: one cold decode measured a cost of the whole timeline, so
     /// the backwards shuttle aimed at frame zero, published it, and had
