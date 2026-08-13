@@ -36,10 +36,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # frei0r-plugins is what makes `frei0r.cairoblend` - the first choice
+      # for the video blend - exist. Without it the blend falls through to
+      # `qtblend`, which builds the process QApplication on whatever thread
+      # renders, and Qt torn down off the main thread aborts the test binary
+      # with a corrupt heap after every test has passed.
       - name: Install libmlt + ffmpeg
         run: |
           sudo apt-get update
-          sudo apt-get install -y libmlt-dev libmlt++-dev libmlt-data ffmpeg fonts-dejavu-core xvfb
+          sudo apt-get install -y libmlt-dev libmlt++-dev libmlt-data ffmpeg fonts-dejavu-core xvfb frei0r-plugins
       - name: Generate fixtures
         run: ./scripts/gen-fixtures.sh
       # MLT versions before the QT_QPA_PLATFORM check refuse to build `qtext`

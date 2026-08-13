@@ -1068,12 +1068,11 @@ impl MltBackend {
     /// have no `qtext`, and a title card that silently degraded to a
     /// transparent card would export a picture with no text on it.
     ///
-    /// `qtext` is only offered on the main thread. It constructs the process
-    /// `QApplication`, and a Qt built off the main thread corrupts the heap
-    /// when the process tears it down - which aborted the test binary after
-    /// every test in it had passed.
+    /// `qtext` is demoted where Qt is unsafe to build (see [`qt_is_safe_here`])
+    /// but never dropped, since a build with no `pango` would otherwise export
+    /// a card with no text at all.
     fn text_services() -> &'static [&'static str] {
-        if std::thread::current().name() == Some("main") {
+        if qt_is_safe_here() {
             &["qtext", "pango"]
         } else {
             &["pango", "qtext"]
@@ -1332,10 +1331,25 @@ fn rational_fps(rate: f64) -> Option<Fps> {
 /// `composite` is in every MLT there has ever been. A build with none of
 /// them keeps the topmost track, which is the old behaviour rather than a
 /// broken graph.
+///
+/// The order is not thread-dependent, unlike the text producer's: `composite`
+/// ignores alpha, so a burned-in subtitle drawn through it is invisible, and
+/// a correct picture is worth building Qt for.
 fn video_blend(profile: &Profile) -> Option<Transition> {
     ["frei0r.cairoblend", "qtblend", "composite"]
         .iter()
         .find_map(|service| Transition::new(profile, service).ok())
+}
+
+/// Whether a Qt-backed MLT service may be built here.
+///
+/// The first one built constructs the process `QApplication`, and a Qt built
+/// off the main thread corrupts the heap when the process tears it down: it
+/// aborted the render test binary with `malloc_consolidate(): unaligned
+/// fastbin chunk` after every test in it had passed. Only the main thread is
+/// known safe; a test harness thread never is.
+fn qt_is_safe_here() -> bool {
+    std::thread::current().name() == Some("main")
 }
 
 /// Decode `start..=target` from `graph` in one pass.
@@ -1993,18 +2007,22 @@ impl RenderBackend for MltBackend {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::panic, clippy::expect_used)]
 mod tests {
-    use super::MltBackend;
+    use super::{MltBackend, qt_is_safe_here};
+
+    fn off_main<T: Send + 'static>(f: fn() -> T) -> T {
+        std::thread::spawn(f)
+            .join()
+            .expect("the probe thread should not panic")
+    }
 
     /// Regression: preferring `qtext` everywhere built the `QApplication` on
     /// a libtest worker, and tearing that down off the main thread aborted
     /// the process with a corrupt heap once the tests had all passed.
     #[test]
     fn a_worker_thread_is_offered_pango_before_qtext() {
-        let off_main = std::thread::spawn(|| MltBackend::text_services().to_vec())
-            .join()
-            .expect("the probe thread should not panic");
+        assert!(!off_main(qt_is_safe_here), "a worker thread claimed Qt");
         assert_eq!(
-            off_main.first(),
+            off_main(|| MltBackend::text_services().to_vec()).first(),
             Some(&"pango"),
             "a worker thread was offered the Qt text producer first"
         );
