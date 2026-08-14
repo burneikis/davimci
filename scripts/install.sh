@@ -39,7 +39,7 @@ die()  { printf '\033[31merror\033[0m %s\n' "$1" >&2; exit 1; }
 # libmlt is a hard runtime requirement of every build, prebuilt or not.
 check_runtime_deps() {
   local missing=()
-  ldconfig -p 2>/dev/null | grep -q 'libmlt' || missing+=("libmlt")
+  ldconfig -p 2>/dev/null | grep 'libmlt' >/dev/null || missing+=("libmlt")
   command -v ffmpeg >/dev/null 2>&1 || warn "ffmpeg not found - export presets that shell out will fail"
   if [ ${#missing[@]} -gt 0 ]; then
     die "missing: ${missing[*]}
