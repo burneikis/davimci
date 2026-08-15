@@ -1194,6 +1194,11 @@ impl MltBackend {
                 let _ = props.set("bgcolour", "#00000000");
             }
             if matches!(entry.resource, Resource::File(_)) {
+                // MLT's own default is one decoding thread, which leaves a
+                // 4K long-GOP source decoding on a single core while the
+                // rest of the machine idles. A property MLT refuses is a
+                // slower preview, never a failed edit.
+                let _ = props.set_int("threads", crate::parallel::decode_threads());
                 self.request_hardware_decode(&mut props);
             }
             if let Resource::Offline { path } = &entry.resource {
@@ -1619,7 +1624,12 @@ impl MltBackend {
             };
             {
                 let mut props = consumer.properties();
-                if props.set_int("real_time", 1).is_err() {
+                // A thread count as well as a frame-dropping switch; see
+                // `parallel` for why the count is what it is.
+                if props
+                    .set_int("real_time", crate::parallel::preview_real_time())
+                    .is_err()
+                {
                     continue;
                 }
                 let _ = props.set("terminate_on_pause", "0");

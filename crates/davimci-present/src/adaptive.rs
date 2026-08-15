@@ -6,10 +6,16 @@
 //! media: hand it [`PaceStats`] once per playback tick and it answers with
 //! the scale to switch to, or nothing.
 //!
-//! Two properties matter more than the exact thresholds. It must not
+//! Three properties matter more than the exact thresholds. It must not
 //! oscillate - taking a step back up costs a consumer restart, so it needs
-//! `CLEAN_WINDOWS` spotless windows in a row, not one - and it must never
-//! reduce a scale the *user* chose, only one it chose itself.
+//! `CLEAN_WINDOWS` spotless windows in a row, not one - it must never
+//! reduce a scale the *user* chose, only one it chose itself, and it must
+//! only act on lateness a smaller decode can cure. Frames dropped for being
+//! behind the clock mean the frontend ticked too rarely to take them one at
+//! a time, which is the frontend's cost - a sixel encode, a terminal write -
+//! and decoding smaller pictures does not make the loop come round any
+//! sooner. Starvation is the decode-bound signal, so starvation is what this
+//! reads.
 
 use davimci_backend::PreviewScale;
 
@@ -20,9 +26,9 @@ use crate::pacing::PaceStats;
 /// short enough that a genuinely overloaded preview recovers quickly.
 const WINDOW: u64 = 60;
 
-/// Drops per window that count as "not keeping up", as a percentage of the
-/// frames presented in the same window.
-const DROP_PERCENT: u64 = 20;
+/// Starved ticks per window that count as "not keeping up", as a percentage
+/// of the frames presented in the same window.
+const STARVE_PERCENT: u64 = 20;
 
 /// Clean windows in a row before resolution is given back.
 ///
@@ -108,21 +114,19 @@ impl AdaptiveScale {
         if self.ticks < WINDOW {
             return None;
         }
-        let dropped = stats
-            .dropped_late
-            .saturating_sub(self.baseline.dropped_late);
+        let starved = stats.starved.saturating_sub(self.baseline.starved);
         let presented = stats.presented.saturating_sub(self.baseline.presented);
         self.reset(stats);
 
-        // Only a window with no drops at all counts as clean: a window that
-        // is merely under the threshold is one already at its limit.
-        self.clean = if dropped == 0 {
+        // Only a window with no starvation at all counts as clean: a window
+        // that is merely under the threshold is one already at its limit.
+        self.clean = if starved == 0 {
             self.clean.saturating_add(1)
         } else {
             0
         };
 
-        let struggling = presented > 0 && dropped * 100 > presented * DROP_PERCENT;
+        let struggling = presented > 0 && starved * 100 > presented * STARVE_PERCENT;
         if struggling {
             let next = down(current);
             if next == current {
@@ -168,27 +172,28 @@ fn up(scale: PreviewScale) -> PreviewScale {
 mod tests {
     use super::*;
 
-    fn stats(presented: u64, dropped: u64) -> PaceStats {
+    fn stats(presented: u64, starved: u64) -> PaceStats {
         PaceStats {
             presented,
-            dropped_late: dropped,
+            dropped_late: 0,
             repeated: 0,
+            starved,
         }
     }
 
     /// Feed `windows` full windows whose every tick presents one frame and
-    /// drops `drop_per_tick`.
+    /// starves `starve_per_tick` times.
     fn run(
         policy: &mut AdaptiveScale,
         scale: &mut PreviewScale,
         acc: &mut PaceStats,
         windows: u64,
-        drop_per_tick: u64,
+        starve_per_tick: u64,
     ) -> Vec<ScaleChange> {
         let mut out = Vec::new();
         for _ in 0..windows * WINDOW {
             acc.presented += 1;
-            acc.dropped_late += drop_per_tick;
+            acc.starved += starve_per_tick;
             if let Some(change) = policy.observe(*acc, *scale) {
                 *scale = change.scale;
                 out.push(change);
@@ -292,14 +297,41 @@ mod tests {
     fn a_short_hitch_inside_a_window_is_not_a_reduction() {
         let mut policy = AdaptiveScale::new();
         let mut acc = stats(0, 0);
-        // One window, one hitch: 1 drop against 60 presented is under the
-        // threshold, so the picture keeps its resolution.
+        // One window, one hitch: 1 starved tick against 60 presented is
+        // under the threshold, so the picture keeps its resolution.
         for i in 0..WINDOW {
             acc.presented += 1;
             if i == 10 {
-                acc.dropped_late += 1;
+                acc.starved += 1;
             }
             assert!(policy.observe(acc, PreviewScale::Full).is_none());
         }
+    }
+
+    /// Regression: a TUI drawing sixel at 1080p60 came round its loop slower
+    /// than the source rate, so every tick took several frames off the queue
+    /// and dropped all but the newest. That is the frontend's cost, and the
+    /// policy answered it by decoding smaller pictures - which changed
+    /// nothing, so it stepped down again and stayed at quarter resolution
+    /// for the rest of the session.
+    #[test]
+    fn frames_dropped_by_a_slow_frontend_never_reduce_the_scale() {
+        let mut policy = AdaptiveScale::new();
+        let mut scale = PreviewScale::Full;
+        let mut acc = stats(0, 0);
+        for _ in 0..8 * WINDOW {
+            acc.presented += 1;
+            // One presented frame and two thrown away for being behind the
+            // clock: a loop running at a third of the source rate.
+            acc.dropped_late += 2;
+            if let Some(change) = policy.observe(acc, scale) {
+                scale = change.scale;
+            }
+        }
+        assert_eq!(
+            scale,
+            PreviewScale::Full,
+            "a frontend too slow to ask for frames cost the picture its resolution"
+        );
     }
 }

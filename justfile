@@ -91,3 +91,7 @@ run-tui *ARGS:
 
 bench:
     cargo bench --workspace
+
+# Preview parallelism against MLT's own defaults, on real media.
+bench-preview: fixtures
+    ./scripts/bench-preview.sh

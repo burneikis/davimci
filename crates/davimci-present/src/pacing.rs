@@ -70,9 +70,21 @@ pub enum Pace {
 pub struct PaceStats {
     pub presented: u64,
     /// Frames decoded but discarded for being behind the clock.
+    ///
+    /// This counts *frontend* lateness: frames only pile up behind the clock
+    /// when the loop ticked too rarely to take them one at a time. A slower
+    /// decode cannot cause it and a smaller decode cannot cure it.
     pub dropped_late: u64,
     /// Ticks where nothing was ready and the last frame was held.
     pub repeated: u64,
+    /// Ticks where the clock had moved past the picture and nothing had
+    /// arrived to replace it.
+    ///
+    /// This is the counter that means "the backend cannot make frames fast
+    /// enough", and the only one a smaller decode can improve. A repeat with
+    /// the clock standing still - the timeline running slower than the tick
+    /// rate - is not one of these.
+    pub starved: u64,
 }
 
 /// Holds the frame currently on screen and decides what replaces it.
@@ -234,16 +246,23 @@ impl Pacer {
             }
         }
 
-        match fresh {
-            Some(frame) => {
-                let at = frame.position;
-                self.stats.presented = self.stats.presented.saturating_add(1);
-                self.current = Some(frame);
-                self.epoch = self.epoch.wrapping_add(1);
-                Ok(Pace::Presented(at))
-            }
-            None => Ok(self.hold()),
+        if let Some(frame) = fresh {
+            let at = frame.position;
+            self.stats.presented = self.stats.presented.saturating_add(1);
+            self.current = Some(frame);
+            self.epoch = self.epoch.wrapping_add(1);
+            return Ok(Pace::Presented(at));
         }
+        // Nothing arrived while the clock ran past the picture: the decoder
+        // is behind, which is the only lateness a smaller decode can cure.
+        if self
+            .current
+            .as_ref()
+            .is_some_and(|f| self.direction.is_future(clock, f.position))
+        {
+            self.stats.starved = self.stats.starved.saturating_add(1);
+        }
+        Ok(self.hold())
     }
 
     fn hold(&mut self) -> Pace {
@@ -464,7 +483,8 @@ mod tests {
             PaceStats {
                 presented: 10,
                 dropped_late: 0,
-                repeated: 0
+                repeated: 0,
+                starved: 0
             }
         );
     }
@@ -478,6 +498,57 @@ mod tests {
         p.tick(Some(Frame(4)), &mut b).unwrap();
         assert_eq!(p.stats().dropped_late, 4);
         assert_eq!(p.current().unwrap().position, Frame(4));
+    }
+
+    /// The two kinds of lateness are counted apart, because only one of them
+    /// can be cured by decoding smaller pictures.
+    #[test]
+    fn a_slow_frontend_drops_frames_while_a_slow_decode_starves() {
+        let mut b = backend();
+        let mut p = Pacer::new();
+        // A loop that ticks once for every five frames the backend made:
+        // frames pile up and all but the newest are dropped. The decoder is
+        // keeping up perfectly, so nothing here is starvation.
+        p.tick(Some(Frame(4)), &mut b).unwrap();
+        assert!(p.stats().dropped_late > 0);
+        assert_eq!(
+            p.stats().starved,
+            0,
+            "a busy frontend was read as a slow decode"
+        );
+
+        // A backend with nothing left to give while the clock runs on: the
+        // picture falls behind and no frame arrives to replace it.
+        let mut b = backend();
+        b.preview_budget = Some(1);
+        let mut p = Pacer::new();
+        p.tick(Some(Frame(0)), &mut b).unwrap();
+        for i in 1..=3 {
+            assert_eq!(
+                p.tick(Some(Frame(i)), &mut b).unwrap(),
+                Pace::Repeated(Frame(0))
+            );
+        }
+        assert_eq!(p.stats().starved, 3);
+        assert_eq!(p.stats().dropped_late, 0);
+    }
+
+    /// A repeat with the clock standing still is the timeline running slower
+    /// than the tick rate, not a decoder that cannot keep up.
+    #[test]
+    fn a_repeat_with_a_clock_that_has_not_moved_is_not_starvation() {
+        let mut b = backend();
+        let mut p = Pacer::new();
+        p.tick(Some(Frame(0)), &mut b).unwrap();
+        // Frame 1 is pulled and held as pending; the clock has not reached it.
+        for _ in 0..5 {
+            assert_eq!(
+                p.tick(Some(Frame(0)), &mut b).unwrap(),
+                Pace::Repeated(Frame(0))
+            );
+        }
+        assert!(p.stats().repeated >= 5);
+        assert_eq!(p.stats().starved, 0);
     }
 
     /// Regression: frames arrive stamped with the position the clock has

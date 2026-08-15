@@ -501,6 +501,71 @@ fn decode_cost_per_frame_is_reported_for_both_paths() {
     );
 }
 
+/// Preview throughput at 1080p, printed rather than asserted for the same
+/// reason as the decode numbers above: a wall clock is a machine's answer.
+///
+/// `scripts/bench-preview.sh` runs this twice, once with MLT's own defaults
+/// forced through `DAVIMCI_DECODE_THREADS` and `DAVIMCI_REAL_TIME`, so the
+/// parallelism policy can be measured rather than believed.
+#[test]
+fn preview_throughput_is_reported() {
+    let _mlt = davimci_mlt::test_support::media_lock();
+    // 1080p keeps real time on any desktop, so it measures nothing; the
+    // bench script writes a 2160p clip beside it and this prefers it when it
+    // is there, which is the size the policy was changed for.
+    let (name, res) = if fixtures().join("counter_2160p60.mkv").exists() {
+        (
+            "counter_2160p60.mkv",
+            Resolution {
+                width: 3840,
+                height: 2160,
+            },
+        )
+    } else {
+        (
+            "counter_1080p60.mkv",
+            Resolution {
+                width: 1920,
+                height: 1080,
+            },
+        )
+    };
+    let tl = timeline_of(name, 600, res);
+    let mut b = MltBackend::new(tl.props).unwrap();
+    b.set_timeline(&tl).unwrap();
+    b.preview_start(Frame(0), PreviewScale::Full).unwrap();
+
+    let window = Duration::from_secs(5);
+    let start = Instant::now();
+    let mut shown = 0u32;
+    let mut last = None;
+    while start.elapsed() < window {
+        match b.next_preview_frame().unwrap() {
+            Some(f) => {
+                shown += 1;
+                last = Some(f.position);
+            }
+            None => std::thread::sleep(Duration::from_millis(2)),
+        }
+    }
+    let reached = last.map_or(0, Frame::get);
+    b.preview_stop().unwrap();
+
+    let fps = f64::from(shown) / window.as_secs_f64();
+    #[allow(clippy::cast_precision_loss)]
+    let kept = reached as f64 / (window.as_secs_f64() * 60.0);
+    println!(
+        "preview {}x{}@60: {fps:.1} frames/s shown, clock reached frame {reached} \
+         ({:.0}% of real time), threads={}, real_time={}",
+        res.width,
+        res.height,
+        kept * 100.0,
+        davimci_mlt::parallel::decode_threads(),
+        davimci_mlt::parallel::preview_real_time(),
+    );
+    assert!(shown > 0, "the preview showed no pictures at all");
+}
+
 #[test]
 fn probe_reports_the_stream_graph_of_a_multitrack_mkv() {
     let _mlt = davimci_mlt::test_support::media_lock();

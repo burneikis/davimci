@@ -11,7 +11,7 @@
 //! altogether for a session with no display, and `:set previewheight 0` keeps
 //! them while drawing nothing.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use davimci_app::{App, Event, Frontend, Host};
@@ -20,9 +20,28 @@ use davimci_tui::{Height, Protocol, Terminal, Tui};
 use crate::editor::Editor;
 use crate::setting::{PreviewHeight, PreviewProtocol};
 
-/// How long a quiet loop waits for input before ticking. Playback and shuttle
-/// advance off the clock, so the loop cannot simply block on the keyboard.
+/// How often the loop comes round. Playback and shuttle advance off the
+/// clock, so the loop cannot simply block on the keyboard.
+///
+/// It is a period rather than a delay, and the difference is the whole point:
+/// waiting `TICK` *and then* drawing means a loop that comes round every
+/// `TICK` plus a sixel encode plus a terminal write, which at 60fps is slower
+/// than the source and drops frames no smaller decode can win back.
 const TICK: Duration = Duration::from_millis(16);
+
+/// How long to wait for input so the next tick lands on `deadline`, and where
+/// the following one belongs.
+///
+/// A loop that fell behind does not try to make up the ticks it missed: the
+/// deadline is moved to the next whole period from now, so a slow terminal
+/// runs at a lower steady rate rather than spinning without ever waiting.
+fn pace(now: Instant, deadline: Instant, period: Duration) -> (Duration, Instant) {
+    if now < deadline {
+        (deadline - now, deadline + period)
+    } else {
+        (Duration::ZERO, now + period)
+    }
+}
 
 /// `:set previewprotocol`, with `auto` deferring to what startup detected.
 fn resolve(setting: PreviewProtocol, detected: Protocol) -> Protocol {
@@ -67,9 +86,12 @@ pub fn run(mut app: App, mut editor: Editor) -> Result<()> {
     tui.set_protocol(detected, cell);
     app.resize(tui.surface());
 
+    let mut deadline = Instant::now() + TICK;
     loop {
+        let (wait, next) = pace(Instant::now(), deadline, TICK);
+        deadline = next;
         for event in term
-            .poll(TICK)
+            .poll(wait)
             .context("the terminal stopped reporting events")?
         {
             tui.push(event);
@@ -131,4 +153,37 @@ pub fn run(mut app: App, mut editor: Editor) -> Result<()> {
     editor.shutdown();
     term.close();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression: the loop waited a whole tick *and then* did its work, so
+    /// its real period was a tick plus a sixel encode. At 60fps that is
+    /// slower than the source, and every tick took several frames off the
+    /// queue and threw all but one away.
+    #[test]
+    fn a_tick_is_a_deadline_rather_than_a_delay() {
+        let start = Instant::now();
+        let (wait, next) = pace(start, start + TICK, TICK);
+        assert_eq!(wait, TICK);
+        // Work took 10ms of the period; the next wait is what is left of it,
+        // not another whole tick.
+        let (wait, _) = pace(start + TICK + Duration::from_millis(10), next, TICK);
+        assert_eq!(wait, Duration::from_millis(6));
+    }
+
+    #[test]
+    fn a_loop_that_fell_behind_still_waits_for_input() {
+        let start = Instant::now();
+        let late = start + Duration::from_millis(100);
+        let (wait, next) = pace(late, start + TICK, TICK);
+        assert_eq!(wait, Duration::ZERO, "a missed deadline must not block");
+        assert_eq!(
+            next,
+            late + TICK,
+            "missed ticks are dropped rather than made up"
+        );
+    }
 }

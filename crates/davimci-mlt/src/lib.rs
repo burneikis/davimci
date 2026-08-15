@@ -13,7 +13,9 @@
 //!   `RenderBackend` implementation on top of it.
 //!
 //! `cache` sits beside them: decoded preview frames, kept so that stepping
-//! backwards does not re-seek and re-decode a GOP per frame.
+//! backwards does not re-seek and re-decode a GOP per frame, and `parallel`
+//! decides how many threads MLT is asked to decode and to play with.
+
 //!
 //! `libmlt` is linked dynamically and `melt`/`melted` are never vendored:
 //! davimci is GPL-3.0 over LGPL-2.1 MLT.
@@ -24,6 +26,7 @@ mod convert;
 pub mod error;
 pub mod ffi;
 pub mod hwaccel;
+pub mod parallel;
 pub mod patch;
 pub mod projection;
 #[cfg(feature = "slow-tests")]
