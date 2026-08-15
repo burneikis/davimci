@@ -152,13 +152,13 @@ impl Transport {
         Ok(())
     }
 
-    /// Restart a running preview at a different decode scale, from where
-    /// the clock has reached.
+    /// Change the decode scale of a running preview, from where the clock
+    /// has reached.
     ///
-    /// The scale reaches the decoder through `preview_start`, so changing it
-    /// mid-pass means reopening the pass. Only playback does this: a shuttle
-    /// is already resolution-reduced and a stopped transport has no pass to
-    /// reopen.
+    /// A backend that can retune a live pass does; the rest are reopened,
+    /// which costs a re-seek and a gap in the sound. Only playback does this
+    /// at all: a shuttle is already resolution-reduced and a stopped
+    /// transport has no pass to change.
     pub fn rescale(
         &mut self,
         backend: &mut dyn RenderBackend,
@@ -168,7 +168,12 @@ impl Transport {
         if self.state != TransportState::Playing {
             return Ok(());
         }
-        self.restart(backend, at, scale)
+        match backend.preview_rescale(scale) {
+            Ok(true) => Ok(()),
+            // A backend that cannot retune the pass, or failed trying, still
+            // has a pass to reopen: a rescale is never a stopped preview.
+            Ok(false) | Err(_) => self.restart(backend, at, scale),
+        }
     }
 
     #[must_use]
@@ -673,6 +678,10 @@ mod tests {
         /// Pulls to serve before the clock reports anything but zero, the way
         /// a real consumer reports its pre-roll position.
         warmup: u64,
+        /// Whether a live pass can be retuned, as MLT's forwards pass can.
+        live_rescale: bool,
+        /// Passes opened, so a rescale that restarted one is visible.
+        starts: u32,
     }
 
     impl RateBackend {
@@ -688,6 +697,8 @@ mod tests {
                 clock: 0,
                 stall: false,
                 warmup: 0,
+                live_rescale: false,
+                starts: 0,
             }
         }
     }
@@ -714,7 +725,11 @@ mod tests {
         }
         fn preview_start(&mut self, from: Frame, s: PreviewScale) -> davimci_backend::Result<()> {
             self.clock = i64::try_from(from.get()).unwrap_or(i64::MAX);
+            self.starts += 1;
             self.inner.preview_start(from, s)
+        }
+        fn preview_rescale(&mut self, _scale: PreviewScale) -> davimci_backend::Result<bool> {
+            Ok(self.live_rescale)
         }
         fn preview_stop(&mut self) -> davimci_backend::Result<()> {
             self.inner.preview_stop()
@@ -977,6 +992,36 @@ mod tests {
         t.shuttle(true, &mut b, &s, PreviewScale::Full).unwrap();
         assert!(t.interrupt(&mut b).unwrap());
         assert_eq!(t.state(), TransportState::Stopped);
+    }
+
+    /// Regression: every change of scale reopened the pass, which stops the
+    /// consumer, re-seeks and leaves the picture frozen for about a second -
+    /// so the adaptive policy's own remedy was more disruptive than the
+    /// stutter it answered.
+    #[test]
+    fn a_backend_that_can_retune_a_live_pass_is_never_reopened_to_rescale() {
+        let s = session();
+        let mut b = RateBackend::new();
+        b.live_rescale = true;
+        let mut t = Transport::new();
+        t.play_pause(&mut b, &s, PreviewScale::Full).unwrap();
+        let opened = b.starts;
+        t.rescale(&mut b, Frame(10), PreviewScale::Half).unwrap();
+        assert_eq!(
+            b.starts, opened,
+            "a live rescale reopened the pass and froze the picture"
+        );
+        assert!(t.is_playing(), "a rescale stopped playback");
+
+        // A backend that cannot retune one still gets its pass reopened:
+        // a rescale is never a preview left at the wrong scale.
+        let mut b = RateBackend::new();
+        let mut t = Transport::new();
+        t.play_pause(&mut b, &s, PreviewScale::Full).unwrap();
+        let opened = b.starts;
+        t.rescale(&mut b, Frame(10), PreviewScale::Half).unwrap();
+        assert_eq!(b.starts, opened + 1);
+        assert!(t.is_playing());
     }
 
     /// Interrupting commits where playback reached, so a

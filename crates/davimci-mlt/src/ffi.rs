@@ -178,6 +178,19 @@ impl Profile {
         // SAFETY: valid profile.
         unsafe { ((*self.raw).width, (*self.raw).height) }
     }
+
+    /// Resize the profile in place.
+    ///
+    /// MLT does this itself whenever a consumer's `width` or `height` is
+    /// set, so a preview that reduced its scale leaves the profile smaller;
+    /// this is how it is put back.
+    pub fn set_size(&mut self, width: u32, height: u32) {
+        // SAFETY: `raw` is a valid, uniquely owned profile.
+        unsafe {
+            (*self.raw).width = mlt_int(width);
+            (*self.raw).height = mlt_int(height);
+        }
+    }
 }
 
 impl Drop for Profile {

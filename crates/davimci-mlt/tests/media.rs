@@ -566,6 +566,90 @@ fn preview_throughput_is_reported() {
     assert!(shown > 0, "the preview showed no pictures at all");
 }
 
+/// Regression: the scale a pass opened at only shrank the size the frame
+/// listener asked for, which the consumer had already answered - so playback
+/// decoded, scaled and converted every frame at full resolution whatever the
+/// scale said, and reducing it cost a restart and bought nothing.
+#[test]
+fn a_pass_opened_at_half_scale_really_decodes_half_size_pictures() {
+    let _mlt = davimci_mlt::test_support::media_lock();
+    let res = Resolution {
+        width: 640,
+        height: 480,
+    };
+    let tl = timeline_of("scene_cut.mkv", 240, res);
+    let mut b = MltBackend::new(tl.props).unwrap();
+    b.set_timeline(&tl).unwrap();
+    b.preview_start(Frame(0), PreviewScale::Half).unwrap();
+
+    let want = PreviewScale::Half.apply(res);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut got = None;
+    while got.is_none() && Instant::now() < deadline {
+        match b.next_preview_frame().unwrap() {
+            Some(f) => got = Some((f.width, f.height)),
+            None => std::thread::sleep(Duration::from_millis(5)),
+        }
+    }
+    b.preview_stop().unwrap();
+    assert_eq!(got, Some((want.width, want.height)));
+
+    // The profile is borrowed by playback, not kept: a still pulled after
+    // the pass is the timeline's own size again.
+    let still = b.frame_at(Frame(0), PreviewScale::Full).unwrap();
+    assert_eq!((still.width, still.height), (res.width, res.height));
+}
+
+/// Regression: every change of decode scale reopened the preview, which
+/// stops the consumer and re-seeks - about a second of frozen picture and a
+/// gap in the sound, so the adaptive policy's remedy was worse than the
+/// stutter that triggered it. A forwards pass now retunes in place.
+#[test]
+fn a_rescale_changes_the_picture_size_without_stopping_the_pass() {
+    let _mlt = davimci_mlt::test_support::media_lock();
+    let res = Resolution {
+        width: 640,
+        height: 480,
+    };
+    let tl = timeline_of("scene_cut.mkv", 240, res);
+    let mut b = MltBackend::new(tl.props).unwrap();
+    b.set_timeline(&tl).unwrap();
+    b.preview_start(Frame(0), PreviewScale::Full).unwrap();
+
+    let mut widths = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while widths.len() < 2 && Instant::now() < deadline {
+        if let Some(f) = b.next_preview_frame().unwrap() {
+            widths.push(f.width);
+        } else {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+    assert_eq!(widths.first(), Some(&res.width));
+
+    assert!(
+        b.preview_rescale(PreviewScale::Half).unwrap(),
+        "a forwards pass refused to retune and would have been reopened"
+    );
+    assert!(b.is_previewing(), "the rescale stopped the pass");
+
+    let want = PreviewScale::Half.apply(res).width;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut got = None;
+    while got.is_none() && Instant::now() < deadline {
+        match b.next_preview_frame().unwrap() {
+            Some(f) if f.width == want => got = Some(f),
+            Some(_) => {}
+            None => std::thread::sleep(Duration::from_millis(5)),
+        }
+    }
+    b.preview_stop().unwrap();
+    assert!(
+        got.is_some(),
+        "the pass kept decoding at the old size after a rescale"
+    );
+}
+
 #[test]
 fn probe_reports_the_stream_graph_of_a_multitrack_mkv() {
     let _mlt = davimci_mlt::test_support::media_lock();

@@ -51,6 +51,9 @@ pub struct MockBackend {
     progress: RenderProgress,
     /// Every [`RenderBackend::seek`] target, in order.
     pub seeks: Vec<Frame>,
+    /// The scale of every still pulled, in order, so a test can see what
+    /// resolution the picture on screen was decoded at.
+    pub pulled_scales: Vec<PreviewScale>,
     /// How many times the timeline has been projected.
     pub projections: usize,
     pub last_job: Option<RenderJob>,
@@ -79,6 +82,7 @@ impl MockBackend {
             manual_render: false,
             progress: RenderProgress::idle(),
             seeks: Vec::new(),
+            pulled_scales: Vec::new(),
             projections: 0,
             last_job: None,
         }
@@ -145,6 +149,7 @@ impl RenderBackend for MockBackend {
 
     fn frame_at(&mut self, frame: Frame, scale: PreviewScale) -> Result<VideoFrame> {
         self.position = frame;
+        self.pulled_scales.push(scale);
         Ok(self.make_frame(frame, scale))
     }
 

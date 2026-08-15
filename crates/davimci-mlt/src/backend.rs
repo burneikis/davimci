@@ -15,7 +15,7 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::ffi::c_void;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -67,11 +67,16 @@ struct Nested {
 }
 
 /// Frames lifted from the preview consumer, plus the size to lift them at.
+///
+/// The size is atomic because the decode scale can change mid-pass and the
+/// listener runs on the consumer's thread: writing it there is what lets a
+/// rescale skip stopping and reopening the consumer, which cost a second of
+/// frozen picture and a gap in the sound.
 #[derive(Debug)]
 struct PreviewShared {
     frames: Mutex<VecDeque<VideoFrame>>,
-    width: u32,
-    height: u32,
+    width: AtomicU32,
+    height: AtomicU32,
     /// Whether the listener should image the frames it is shown. False for a
     /// backwards pass, where the picture comes from [`Preview::scrub`]
     /// instead and imaging here would decode every frame twice.
@@ -745,6 +750,19 @@ impl MltBackend {
             accel: Acceleration::default(),
             hardware_producers: std::cell::Cell::new(0),
         })
+    }
+
+    /// Put the profile back to the timeline's own resolution.
+    ///
+    /// Setting a consumer's `width` or `height` resizes the profile it was
+    /// built from, which is how a preview reduces its scale without being
+    /// reopened - and why the size has to be given back when the pass ends,
+    /// since stills, thumbnails and exports read the same profile.
+    fn restore_profile_resolution(&mut self) {
+        let res = self.props.resolution;
+        if self.profile.size() != (mlt_int(res.width), mlt_int(res.height)) {
+            self.profile.set_size(res.width, res.height);
+        }
     }
 
     /// How many producers the current session opened with a hardware
@@ -1522,8 +1540,8 @@ unsafe extern "C" fn on_frame_show(
         let position = unsafe { sys::mlt_frame_get_position(raw) };
         let mut buf: *mut u8 = std::ptr::null_mut();
         let mut fmt = sys::MLT_IMAGE_RGBA;
-        let mut w = mlt_int(shared.width);
-        let mut h = mlt_int(shared.height);
+        let mut w = mlt_int(shared.width.load(Ordering::Relaxed));
+        let mut h = mlt_int(shared.height.load(Ordering::Relaxed));
         // SAFETY: all out-parameters are initialised; MLT owns the buffer.
         let rc = unsafe {
             sys::mlt_frame_get_image(raw, &raw mut buf, &raw mut fmt, &raw mut w, &raw mut h, 0)
@@ -1593,8 +1611,8 @@ impl MltBackend {
 
         let shared = Arc::new(PreviewShared {
             frames: Mutex::new(VecDeque::new()),
-            width: res.width,
-            height: res.height,
+            width: AtomicU32::new(res.width),
+            height: AtomicU32::new(res.height),
             image: !reverse,
         });
         // Audio-only consumers, in preference order: MLT must never own a
@@ -1638,6 +1656,13 @@ impl MltBackend {
                 // silent. The consumer reads it once, when it starts, so it
                 // is set here rather than per rate change.
                 let _ = props.set_int("scrub_audio", 1);
+                // The scale the caller asked for, applied where it counts:
+                // MLT writes these into the profile, so the graph decodes
+                // and converts at the reduced size. Asking the frame
+                // listener for a smaller picture instead changes nothing -
+                // the consumer has already imaged the frame by then.
+                let _ = props.set_int("width", mlt_int(res.width));
+                let _ = props.set_int("height", mlt_int(res.height));
                 if reverse {
                     // The consumer plays the sound and keeps the clock; the
                     // picture is decoded from the scrub graph instead. Read
@@ -1878,10 +1903,46 @@ impl RenderBackend for MltBackend {
         match self.preview.take() {
             Some(mut p) => {
                 p.consumer.stop();
+                // A rescaled pass left the profile at its reduced size, and
+                // the profile is what every still, thumbnail and export is
+                // built from. Playback borrows it; it does not keep it.
+                self.restore_profile_resolution();
                 Ok(())
             }
             None => Err(BackendError::PreviewNotRunning),
         }
+    }
+
+    /// Retune a running forwards pass, rather than reopening it.
+    ///
+    /// The size the listener asks `mlt_frame_get_image` for decides nothing
+    /// during playback: the consumer has already imaged the frame at the
+    /// profile's size by the time the event fires, and the second request
+    /// gets that cached picture. What does decide it is the consumer's own
+    /// `width`/`height`, which MLT writes straight into the profile - so the
+    /// whole graph decodes, rescales and converts smaller, which is what a
+    /// reduced preview was supposed to buy.
+    ///
+    /// A backwards pass is refused: its picture comes from a scrub worker
+    /// built around a fixed size, and reopening is the honest way to change
+    /// that.
+    fn preview_rescale(&mut self, scale: PreviewScale) -> Result<bool> {
+        let res = scale.apply(self.props.resolution);
+        let Some(preview) = self.preview.as_mut() else {
+            return Err(BackendError::PreviewNotRunning);
+        };
+        if preview.scrub.is_some() {
+            return Ok(false);
+        }
+        {
+            let mut props = preview.consumer.properties();
+            props.set_int("width", mlt_int(res.width))?;
+            props.set_int("height", mlt_int(res.height))?;
+        }
+        preview.shared.width.store(res.width, Ordering::Relaxed);
+        preview.shared.height.store(res.height, Ordering::Relaxed);
+        preview.scale = scale;
+        Ok(true)
     }
 
     fn is_previewing(&self) -> bool {

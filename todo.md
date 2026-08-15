@@ -11,11 +11,9 @@
 - Preview playback at 2160p60 shows ~34 of 60 frames while the clock keeps
   96% of real time, and neither decode threads nor `real_time` move that
   number (`just bench-preview`). What is left is per-frame work on the
-  consumer thread: `PreviewScale` only shrinks the `mlt_frame_get_image`
-  request, so the profile, the graph and the rescale still run at full
-  resolution, and `on_frame_show` allocates and copies a fresh 33 MB RGBA
-  buffer per frame. A preview profile built at the scaled resolution, and a
-  pool of buffers instead of a `Vec` per frame, are the two fixes.
+  consumer thread: `on_frame_show` allocates and copies a fresh 33 MB RGBA
+  buffer per frame. A pool of buffers instead of a `Vec` per frame is the
+  fix. Rerun the bench now that a reduced scale really reduces the work.
 
 # Plugins Todo
 

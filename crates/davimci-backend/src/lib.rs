@@ -84,6 +84,18 @@ pub trait RenderBackend {
 
     fn preview_stop(&mut self) -> Result<()>;
 
+    /// Change the decode scale of a running pass in place, answering whether
+    /// it could be done.
+    ///
+    /// `false` means the caller has to reopen the pass instead. Reopening is
+    /// a stopped consumer, a re-seek and a gap in the sound - about a second
+    /// of frozen picture - so a backend that can retune a live pass says so
+    /// here and the resolution changes without playback noticing.
+    fn preview_rescale(&mut self, scale: PreviewScale) -> Result<bool> {
+        let _ = scale;
+        Ok(false)
+    }
+
     fn is_previewing(&self) -> bool;
 
     /// Whether this backend can play at a rate other than 1x.

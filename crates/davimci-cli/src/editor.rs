@@ -1285,6 +1285,7 @@ impl Editor {
             self.adaptive.release(self.scale)
         };
         let Some(change) = change else { return };
+        let was_playing = self.transport.is_playing();
         self.scale = change.scale;
         let at = session.timeline().playhead().frame;
         // A restart that fails leaves the pass running at the old scale,
@@ -1295,6 +1296,13 @@ impl Editor {
         {
             Ok(()) => self.notices.push(Message::info(change.message())),
             Err(e) => self.notices.push(Message::error(e)),
+        }
+        // A stopped transport has no pass to retune, so the still on screen
+        // is still the reduced one: it has to be pulled again at the scale
+        // just given back, or pausing leaves a soft picture up until the
+        // playhead next moves.
+        if !was_playing {
+            self.show_playhead(session);
         }
     }
 
@@ -2205,6 +2213,72 @@ fn finish_notice(state: JobState, message: String) -> Message {
 mod tests {
     use super::*;
     use davimci_app::Severity;
+    use davimci_backend::{MockBackend, PreviewScale};
+    use davimci_present::{Host as PresentHost, PaceStats, Presenter};
+
+    /// Regression: pausing gave the scale back to the user but left the
+    /// reduced still on screen, so a paused frame stayed soft until the
+    /// playhead next moved. Giving a scale back has to repaint at it.
+    #[test]
+    fn giving_a_scale_back_while_stopped_repaints_the_still() {
+        let timeline = davimci_core::testing::fixture(&[("V1", &[(0, 100, "a")])]);
+        let session = Session::new(timeline);
+        let mut ws = Workspace::new(std::env::temp_dir()).without_autosave();
+        ws.set_current_session(session.clone());
+        let mock = MockBackend::new(davimci_core::Resolution {
+            width: 64,
+            height: 32,
+        });
+        let presenter = Presenter::new(
+            PresentHost::Embedded,
+            davimci_core::Resolution {
+                width: 64,
+                height: 32,
+            },
+            davimci_core::Fps::FPS_60,
+        );
+        let mut editor = Editor::new(ws, Box::new(mock), presenter);
+        editor.prime(&session);
+
+        // Drive the policy down a step the way a starving preview would, so
+        // the scale about to be given back is one the policy really took.
+        let mut stats = PaceStats::default();
+        let mut stepped = None;
+        for _ in 0..600 {
+            stats.presented += 1;
+            stats.starved += 1;
+            if let Some(change) = editor.adaptive.observe(stats, editor.scale) {
+                editor.scale = change.scale;
+                stepped = Some(change.scale);
+                break;
+            }
+        }
+        assert_eq!(stepped, Some(PreviewScale::Half));
+
+        // What playback left on screen: a picture decoded at the reduced
+        // scale.
+        editor.show_playhead(&session);
+        assert_eq!(
+            editor.presenter().current().map(|f| f.width),
+            Some(960),
+            "the test did not start from a reduced picture"
+        );
+
+        editor.follow_frame_budget(&session);
+        assert_eq!(
+            editor.scale,
+            PreviewScale::Full,
+            "the scale was not given back"
+        );
+        let shown = editor.presenter().current().map(|f| (f.width, f.height));
+        // The mock conforms to the timeline's own resolution, so full scale
+        // is 1920x1080 and the half the policy took would be 960x540.
+        assert_eq!(
+            shown,
+            Some((1920, 1080)),
+            "the picture was left at the scale the policy had taken"
+        );
+    }
 
     /// Regression: the severity of an export's closing notice is derived from
     /// its `JobState`, not passed alongside it, so the two cannot disagree.
