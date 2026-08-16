@@ -16,8 +16,27 @@ Guidelines:
 
 ## Unreleased
 
+## 0.1.1 - 2026-08-16
+
+### Changed
+
+- Preview decodes on more than one thread on a multi-core machine, instead of
+  the single thread MLT defaults to. `DAVIMCI_DECODE_THREADS` and
+  `DAVIMCI_REAL_TIME` override the choice.
+- Automatic resolution reduction now answers only the stutter a smaller decode
+  can cure. Frames late because the frontend drew too slowly no longer soften
+  the picture for no gain.
+
 ### Fixed
 
+- Automatic resolution changes during playback no longer stop and re-seek the
+  preview, so the picture and sound run through the change instead of freezing
+  for about a second.
+- Pausing repaints at the restored resolution, so a paused frame is no longer
+  left soft until the playhead moves.
+- The TUI loop keeps its tick period instead of adding drawing time on top of
+  it, so a 60fps timeline is no longer played slower than the source with most
+  frames thrown away.
 - Preview plays at the speed it was asked for on a machine with no audio
   output. Without a sound card the audio consumer had nothing to wait for and
   raced through the timeline, so a backwards shuttle showed one picture and
